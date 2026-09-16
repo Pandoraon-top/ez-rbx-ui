@@ -62,7 +62,10 @@ function Host.attach(api, ctx)
       opts.AccentThemer = ctx.accentThemer
       local control = ctx.R[spec.mod].new(opts)
       if opts.Tooltip and ctx.R.Tooltip and control and control.Frame then
-        ctx.R.Tooltip.attach(control.Frame, opts.Tooltip, ctx.theme)
+        -- Button/Label/Image/ProgressBar/Separator/Card expose no .Maid, so without Host.own the
+        -- tip's hover connections (and a chip still on screen) outlive the destroyed control.
+        local tip = ctx.R.Tooltip.attach(control.Frame, opts.Tooltip, ctx.theme)
+        if tip and tip.Destroy then Host.own(control, tip.Destroy) end
       end
       if ctx.registerSearchable and control and control.Frame then
         -- opts.Text may be a function (reactive label); index a stable string only.

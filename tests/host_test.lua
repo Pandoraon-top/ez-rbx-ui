@@ -88,6 +88,19 @@ h.describe("Host.own", function()
     control.Destroy()
     h.expect(ran).toBe(1)
   end)
+  h.it("a control's tooltip is released when the control is destroyed (2.14)", function()
+    local R = h.loadLib(); local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local w = R.Window.new({ Title = "W", Parent = gui })
+    local tab = w:AddTab({ Name = "Home" })
+    local btn = tab:AddButton({ Text = "Hover", Tooltip = "hi" })   -- Button has no .Maid
+    local function tip() for _, c in ipairs(root:GetChildren()) do if c.Name == "Tooltip" then return c end end end
+    btn.Frame.MouseEnter:Fire()
+    h.expect(tip() ~= nil).toBeTruthy()
+    btn.Destroy()                                   -- Host.own ran the tooltip cleanup first
+    h.expect(tip()).toBeNil()                       -- a chip still on screen is taken with it
+    btn.Frame.MouseEnter:Fire()
+    h.expect(tip()).toBeNil()                       -- and the hover connection is gone
+  end)
   h.it("LockScrim recolours on SetMode and uses the scrim alpha token", function()
     local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
     local w = R.Window.new({ Title = "M", Parent = screen })

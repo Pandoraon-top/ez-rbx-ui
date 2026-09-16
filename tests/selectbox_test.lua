@@ -378,6 +378,13 @@ h.describe("selectbox", function()
     h.expect(opt:FindFirstChild("OptLabel").TextSize).toBe(R.Theme.Font.body.Size)
     h.expect(opt:FindFirstChild("Desc").TextSize).toBe(R.Theme.Font.muted.Size)
   end)
+  -- The caret now carries two tweens while opening (tint + the 2.11 rotation), so tint assertions
+  -- filter by goal instead of counting every tween aimed at the glyph.
+  local function tintTweens(img)
+    local out = {}
+    for _, tw in ipairs(h.mock.tweensFor(img)) do if tw.Goal.ImageColor3 ~= nil then out[#out + 1] = tw end end
+    return out
+  end
   h.it("caret rests at mutedForeground and lifts to foreground while open (survives a rebuild)", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset(); R.Overlay.get(gui)
     local sb = SelectBox.new({ Parent = Create("Frame", {}), Options = { "A", "B" }, Default = "A" })
@@ -386,12 +393,12 @@ h.describe("selectbox", function()
     h.mock.resetTweens()
     sb.Open()
     h.expect(caret.ImageColor3).toBe(R.Theme.Colors.foreground)
-    local tws = h.mock.tweensFor(caret) -- tinted through Icons.tint (a tween), not snapped
+    local tws = tintTweens(caret) -- tinted through Icons.tint (a tween), not snapped
     h.expect(#tws).toBe(1)
     h.expect(tws[1].Goal.ImageColor3).toBe(R.Theme.Colors.foreground)
     sb.SetOptions({ "C", "D" }) -- rebuilds the open dropdown without dropping the open state
     h.expect(caret.ImageColor3).toBe(R.Theme.Colors.foreground)
-    h.expect(#h.mock.tweensFor(caret)).toBe(1)
+    h.expect(#tintTweens(caret)).toBe(1)
     sb.Close()
     h.expect(caret.ImageColor3).toBe(R.Theme.Colors.mutedForeground)
   end)
@@ -425,8 +432,10 @@ h.describe("selectbox", function()
   h.it("themer closure re-derives caret and field stroke from the open flag", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset(); R.Overlay.get(gui)
     local reskin
+    -- `reskin or fn` keeps the CONTROL's closure: an open popover registers a second, temporary
+    -- one (2.11) and plain assignment would silently swap this test onto it.
     local sb = SelectBox.new({ Parent = Create("Frame", {}), Options = { "A", "B" }, Default = "A",
-      AccentReg = function(fn) reskin = fn; return function() end end })
+      AccentReg = function(fn) reskin = reskin or fn; return function() end end })
     local field = sb.Frame:FindFirstChild("Field")
     local caret, stroke = field:FindFirstChild("Caret"), field:FindFirstChildOfClass("UIStroke")
     sb.Open()
@@ -494,6 +503,276 @@ h.describe("selectbox", function()
       h.expect(#h.mock.tweensFor(stroke)).toBe(0)
       sb.Close()
       h.expect(stroke.Thickness).toBe(1)
+    end)
+  end)
+
+  -- ---- visual-polish phase 2 (2.11 popover motion/depth, 2.7 row hover, 2.8 dim, 2.22 UI scale) ----
+  -- Anchored at (50,100) in a 600x800 viewport: a 2-option list (2*28 + 8 = 64px) fits below, so
+  -- the dropdown lands at 100 + 38 + gap(4) = 142.
+  local function anchored(gui, extra)
+    local root = R.Overlay.get(gui); root.AbsoluteSize = h.roblox.Vector2.new(600, 800)
+    local o = { Parent = Create("Frame", {}), Options = { "A", "B" }, Default = "A" }
+    for k, v in pairs(extra or {}) do o[k] = v end
+    local sb = SelectBox.new(o)
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(50, 100)
+    sb.Frame.AbsoluteSize = h.roblox.Vector2.new(200, 38)
+    return sb, root
+  end
+  h.it("the dropdown grows out of the field and still lands on the computed position", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui)
+    h.mock.resetTweens()
+    sb.Open()
+    local dd = dropdownIn(gui)
+    local us = dd:FindFirstChildOfClass("UIScale")
+    h.expect(us ~= nil).toBeTruthy()
+    h.expect(us.Scale).toBe(1)               -- pops from Motion.exitScale and rests at 1
+    h.expect(dd.Position.Y.Offset).toBe(142) -- the slide ends on the computed spot
+    local slid = false
+    for _, tw in ipairs(h.mock.tweensFor(dd)) do if tw.Goal.Position ~= nil then slid = true end end
+    h.expect(slid).toBe(true)
+    sb.Close()
+  end)
+  h.it("Close drops the dropdown synchronously and destroys the detached frame on the way out", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui)
+    sb.Open()
+    local dd = dropdownIn(gui)
+    sb.Close()
+    h.expect(dropdownIn(gui)).toBe(nil) -- gone for the caller before the exit finishes
+    h.expect(dd.Parent).toBe(nil)       -- and destroyed in the completion
+    sb.Open()
+    h.expect(dropdownIn(gui) ~= nil).toBeTruthy() -- reopens cleanly after an animated close
+    sb.Close()
+  end)
+  h.it("the caret turns 0 -> 180 while the list is open and back on Close", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui)
+    local caret = sb.Frame:FindFirstChild("Field"):FindFirstChild("Caret")
+    h.expect(caret.Rotation or 0).toBe(0)
+    h.mock.resetTweens()
+    sb.Open()
+    h.expect(caret.Rotation).toBe(180)
+    local spun; for _, tw in ipairs(h.mock.tweensFor(caret)) do if tw.Goal.Rotation ~= nil then spun = tw end end
+    h.expect(spun ~= nil).toBeTruthy() -- rotated through a tween, not snapped
+    h.expect(spun.Goal.Rotation).toBe(180)
+    sb.Close()
+    h.expect(caret.Rotation).toBe(0)
+  end)
+  h.it("option rows answer hover on transparency only (the row colour stays the surface token)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui)
+    sb.Open()
+    local dd = dropdownIn(gui)
+    local optA, optB
+    for _, c in ipairs(listChildren(dd)) do
+      if c.Name == "Opt" and c:GetAttribute("OptValue") == "A" then optA = c end
+      if c.Name == "Opt" and c:GetAttribute("OptValue") == "B" then optB = c end
+    end
+    optB.MouseEnter:Fire()
+    h.expect(optB.BackgroundTransparency).toBe(R.Theme.Opacity.optionHover)
+    h.expect(optB.BackgroundColor3).toBe(R.Theme.Colors.surface) -- identity: no colour tween
+    h.expect(optB:FindFirstChild("Hover")).toBe(nil)             -- fill kind: no wash Frame per row
+    optB.MouseLeave:Fire()
+    h.expect(optB.BackgroundTransparency).toBe(1)
+    optA.MouseEnter:Fire(); optA.MouseLeave:Fire()
+    h.expect(optA.BackgroundTransparency).toBe(0) -- the selected row rests lit, not cleared
+    sb.Close()
+  end)
+  h.it("a multi pick re-binds the row hover so the row rests at its NEW selection", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Multi = true, Default = { "A" } })
+    sb.Open()
+    local optB; for _, c in ipairs(listChildren(dropdownIn(gui))) do
+      if c.Name == "Opt" and c:GetAttribute("OptValue") == "B" then optB = c end
+    end
+    optB.MouseButton1Click:Fire() -- selected in place (no rebuild)
+    h.expect(optB.BackgroundTransparency).toBe(0)
+    optB.MouseEnter:Fire(); optB.MouseLeave:Fire()
+    h.expect(optB.BackgroundTransparency).toBe(0)
+    optB.MouseButton1Click:Fire() -- deselected again
+    optB.MouseEnter:Fire(); optB.MouseLeave:Fire()
+    h.expect(optB.BackgroundTransparency).toBe(1)
+    sb.Close()
+  end)
+  h.it("the popover is frosted: the acrylic layers ride on the single floating hairline", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui)
+    sb.Open()
+    local dd = dropdownIn(gui)
+    h.expect(dd:FindFirstChild("AcrylicNoise") ~= nil).toBeTruthy()
+    h.expect(dd:FindFirstChild("AcrylicSheen") ~= nil).toBeTruthy()
+    h.expect(dd:FindFirstChild("AcrylicGlint") ~= nil).toBeTruthy() -- edge = true
+    local strokes = 0
+    for _, c in ipairs(dd:GetChildren()) do if c.ClassName == "UIStroke" then strokes = strokes + 1 end end
+    h.expect(strokes).toBe(1) -- decorate adopts the hairline instead of adding a second one
+    local stroke = dd:FindFirstChildOfClass("UIStroke")
+    h.expect(stroke.Transparency).toBe(R.Theme.Stroke.floating)
+    h.expect(stroke:FindFirstChildOfClass("UIGradient") ~= nil).toBeTruthy() -- rim on the stroke
+    h.expect(dd.BackgroundColor3).toBe(R.Theme.Colors.card)
+    h.expect(dd.BackgroundTransparency > 0).toBeTruthy()
+    h.expect(dd.BackgroundTransparency < R.Theme.Acrylic.frost).toBeTruthy() -- lighter than the shell
+    sb.Close()
+  end)
+  h.it("a theme that names Acrylic.popoverFrost owns the popover transparency", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Theme = R.Theme.new({ Acrylic = { popoverFrost = 0.2 } }) })
+    sb.Open()
+    h.expect(dropdownIn(gui).BackgroundTransparency).toBe(0.2)
+    sb.Close()
+  end)
+  h.it("the open dropdown gets a popover shadow sibling that dies with it", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb, root = anchored(gui, { Theme = R.Theme.new({ Effect = { shadowId = "rbxassetid://1" } }) })
+    sb.Open()
+    local sh; for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdownShadow" then sh = c end end
+    h.expect(sh ~= nil).toBeTruthy()
+    h.expect(sh.ZIndex).toBe(R.Overlay.Z.catcher) -- sibling UNDER the popover, never a child
+    h.expect(sh.Parent).toBe(root)
+    local dd, spread = dropdownIn(gui), R.Theme.Effect.popover.spread
+    h.expect(sh.Size.X.Offset).toBe(dd.Size.X.Offset + 2 * spread)
+    h.expect(sh.Size.Y.Offset).toBe(dd.Size.Y.Offset + 2 * spread)
+    h.expect(sh.Position.Y.Offset).toBe(142 + dd.Size.Y.Offset / 2 + R.Theme.Effect.popover.offsetY)
+    sb.Close()
+    h.expect(sh.Parent).toBe(nil)
+  end)
+  h.it("no shadow layer while Effect.shadowId is '' (today's default)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb, root = anchored(gui)
+    sb.Open()
+    local found = false
+    for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdownShadow" then found = true end end
+    h.expect(found).toBe(false) -- Effects.shadow returns nil: every call site stays nil-tolerant
+    sb.Close()
+    h.expect(dropdownIn(gui)).toBe(nil)
+  end)
+  -- 2.11: the OPEN popover registers a themer closure of its own, so a SetMode/SetAccent that
+  -- lands while it is up repaints it. Collects EVERY registration (the control's plus the
+  -- popover's temporary one) and replays them the way the window's themer does.
+  local function regCollector()
+    local c = { fns = {}, released = 0 }
+    function c.AccentReg(fn)
+      c.fns[#c.fns + 1] = fn
+      return function()
+        c.released = c.released + 1
+        for i, f in ipairs(c.fns) do if f == fn then table.remove(c.fns, i); break end end
+      end
+    end
+    function c.reskin(reason)
+      local snapshot = {}
+      for i, f in ipairs(c.fns) do snapshot[i] = f end
+      for _, f in ipairs(snapshot) do f(reason) end
+    end
+    return c
+  end
+  h.it("SetMode re-skins an OPEN dropdown: frost, hairline, search, dividers and rows (2.11)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local reg = regCollector()
+    local t = R.Theme.new({})
+    local sb = anchored(gui, { Theme = t, AccentReg = reg.AccentReg, Searchable = true,
+      Options = { "A", { Divider = true }, { Value = "B", Text = "Bee", Desc = "second", Icon = "check" } } })
+    h.expect(#reg.fns).toBe(1)                                 -- the control's own closure
+    sb.Open()
+    h.expect(#reg.fns).toBe(2)                                 -- ...plus the popover's, while open
+    local dd = dropdownIn(gui)
+    local list = dd:FindFirstChild("List")
+    local search = dd:FindFirstChild("Search")
+    local divider, row, labelled
+    for _, c in ipairs(list:GetChildren()) do
+      if c.Name == "Divider" then divider = c
+      elseif c.Name == "Opt" then row = row or c; if c:FindFirstChild("Desc") then labelled = c end end
+    end
+    h.expect(dd.BackgroundColor3).toBe(t.Colors.card)          -- born in the theme's palette...
+    R.Theme.applyMode(t, "light")                              -- applyMode writes the palette's
+    reg.reskin("mode")                                         -- own tables in, so identity holds
+    local light = R.Theme.PALETTES.light
+    h.expect(dd.BackgroundColor3).toBe(light.card)             -- ...repainted live
+    h.expect(dd:FindFirstChildOfClass("UIStroke").Color).toBe(light.border)
+    h.expect(dd.BackgroundTransparency).toBe(t.Acrylic.popoverFrost)
+    h.expect(list.ScrollBarImageColor3).toBe(light.border)
+    h.expect(search.BackgroundColor3).toBe(light.surface)
+    h.expect(search:FindFirstChild("Input").TextColor3).toBe(light.foreground)
+    h.expect(search:FindFirstChild("Input").PlaceholderColor3).toBe(light.mutedForeground)
+    h.expect(search:FindFirstChildOfClass("UIStroke").Color).toBe(light.border)
+    h.expect(divider.BackgroundColor3).toBe(light.border)
+    h.expect(row.BackgroundColor3).toBe(light.surface)
+    h.expect(labelled:FindFirstChild("OptLabel").TextColor3).toBe(light.foreground)
+    h.expect(labelled:FindFirstChild("Desc").TextColor3).toBe(light.mutedForeground)
+    sb.Close()
+    h.expect(reg.released).toBe(1)                             -- released the moment it folds
+    h.expect(#reg.fns).toBe(1)
+    reg.reskin("mode")                                         -- and never paints the dead frame
+  end)
+  h.it("SetMode re-applies the open dropdown shadow's per-mode alpha when an asset is set (2.11)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local reg = regCollector()
+    local t = R.Theme.new({ Effect = { shadowId = "rbxassetid://1" } })
+    local sb, root = anchored(gui, { Theme = t, AccentReg = reg.AccentReg })
+    sb.Open()
+    local sh; for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdownShadow" then sh = c end end
+    h.expect(sh ~= nil).toBeTruthy()
+    h.expect(sh.ImageTransparency).toBe(R.Theme.MODE_EFFECTS.dark.shadow)
+    R.Theme.applyMode(t, "light")
+    reg.reskin("mode")
+    h.expect(sh.ImageTransparency).toBe(R.Theme.MODE_EFFECTS.light.shadow)
+    sb.Close()
+  end)
+  h.it("the dropdown carries the overlay UI scale and flips on its SCALED height", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local root = R.Overlay.get(gui); root.AbsoluteSize = h.roblox.Vector2.new(600, 460)
+    local sb = SelectBox.new({ Parent = Create("Frame", {}), Options = { "A", "B", "C" }, Default = "A" })
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(50, 300)
+    sb.Frame.AbsoluteSize = h.roblox.Vector2.new(200, 38)
+    sb.Open()
+    h.expect(dropdownIn(gui).Position.Y.Offset).toBe(342) -- 3*28 + 8 = 92 still fits below
+    h.expect(dropdownIn(gui):FindFirstChildOfClass("UIScale").Scale).toBe(1)
+    sb.Close()
+    R.Overlay.setScale(1.3)
+    sb.Open()
+    local dd = dropdownIn(gui)
+    h.expect(dd:FindFirstChildOfClass("UIScale").Scale).toBe(1.3)
+    h.expect(dd.Position.Y.Offset < 300).toBeTruthy()         -- 92*1.3 overflows: opens upward
+    h.expect(root:FindFirstChildOfClass("UIScale")).toBe(nil) -- never on the overlay root
+    sb.Close()
+    R.Overlay.setScale(1)
+  end)
+  h.it("disabled dims the field and the value, blocks Open, and survives a re-skin", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local reskin
+    local sb = anchored(gui, { AccentReg = function(fn) reskin = reskin or fn; return function() end end })
+    local field = sb.Frame:FindFirstChild("Field")
+    local val = field:FindFirstChild("Value")
+    h.expect(field.BackgroundTransparency).toBe(0)
+    sb.SetDisabled(true)
+    h.expect(field.BackgroundTransparency).toBe(R.Theme.Opacity.disabled)
+    h.expect(val.TextTransparency).toBe(R.Theme.Opacity.disabled)
+    sb.Open()
+    h.expect(dropdownIn(gui)).toBe(nil) -- api.Open is guarded, not just the click handler
+    reskin()
+    h.expect(field.BackgroundTransparency).toBe(R.Theme.Opacity.disabled)
+    sb.SetDisabled(false)
+    h.expect(field.BackgroundTransparency).toBe(0)
+    h.expect(val.TextTransparency).toBe(0)
+    sb.Open()
+    h.expect(dropdownIn(gui) ~= nil).toBeTruthy()
+    sb.Close()
+  end)
+  h.it("reduced motion: the popover snaps in and out and the caret turns instantly", function()
+    h.withReducedMotion(R, function()
+      local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+      local sb = anchored(gui)
+      local caret = sb.Frame:FindFirstChild("Field"):FindFirstChild("Caret")
+      h.mock.resetTweens()
+      sb.Open()
+      local dd = dropdownIn(gui)
+      h.expect(dd.Position.Y.Offset).toBe(142)
+      h.expect(dd:FindFirstChildOfClass("UIScale").Scale).toBe(1)
+      h.expect(caret.Rotation).toBe(180)
+      h.expect(h.mock.tweenCount()).toBe(0)
+      sb.Close()
+      h.expect(dropdownIn(gui)).toBe(nil)
+      h.expect(dd.Parent).toBe(nil)
+      h.expect(caret.Rotation).toBe(0)
     end)
   end)
 end)

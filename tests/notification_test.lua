@@ -8,6 +8,14 @@ local function toastCount(gui)
   end
   return n
 end
+-- 2.13: the toast border is tinted Toast.typeTint toward its type colour, so the stroke is no
+-- longer the border token by identity -- compare the mixed value component-wise instead.
+local function expectEdge(stroke, theme, accent, border)
+  local want = theme.mix(border or theme.Colors.border, accent, theme.Toast.typeTint)
+  h.expect(stroke.Color.R).toBeCloseTo(want.R)
+  h.expect(stroke.Color.G).toBeCloseTo(want.G)
+  h.expect(stroke.Color.B).toBeCloseTo(want.B)
+end
 h.describe("notification", function()
   h.it("persistent toast mounts; dismiss removes it", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(gui)
@@ -232,7 +240,7 @@ h.describe("notification", function()
     local toast = firstToast(root)
     local stroke = toast:FindFirstChildOfClass("UIStroke")
     h.expect(stroke.Transparency).toBe(R.Theme.Stroke.floating)
-    h.expect(stroke.Color).toBe(R.Theme.Colors.border)
+    expectEdge(stroke, R.Theme, R.Theme.Colors.info)          -- untyped toast = info tint
     local title = toast:FindFirstChild("TitleRow"):FindFirstChild("Title")
     h.expect(title.TextSize).toBe(R.Theme.Font.label.Size)
     h.expect(title.Font).toBe(h.roblox.Enum.Font.BuilderSans)
@@ -262,7 +270,7 @@ h.describe("notification", function()
     reg.fire()
     local row = toast:FindFirstChild("TitleRow")
     h.expect(toast.BackgroundColor3).toBe(t.Colors.card)                              -- by identity
-    h.expect(toast:FindFirstChildOfClass("UIStroke").Color).toBe(t.Colors.border)
+    expectEdge(toast:FindFirstChildOfClass("UIStroke"), t, t.Colors.success)
     h.expect(row:FindFirstChild("Title").TextColor3).toBe(t.Colors.foreground)
     h.expect(toast:FindFirstChild("Message").TextColor3).toBe(t.Colors.mutedForeground)
     h.expect(row:FindFirstChild("Close").ImageColor3).toBe(t.Colors.primary)
@@ -384,7 +392,7 @@ h.describe("notification", function()
       for _, t in ipairs(c:GetChildren()) do if t.Name == "Toast" then
         n = n + 1
         h.expect(t.BackgroundColor3).toBe(light.card)
-        h.expect(t:FindFirstChildOfClass("UIStroke").Color).toBe(light.border)
+        expectEdge(t:FindFirstChildOfClass("UIStroke"), R.Theme, light.info, light.border)
         h.expect(t:FindFirstChild("TitleRow"):FindFirstChild("Title").TextColor3).toBe(light.foreground)
       end end end end
     h.expect(n).toBe(2)
@@ -406,6 +414,266 @@ h.describe("notification", function()
     h.expect(bar.Size.X.Scale).toBeCloseTo(0.5, 0.01)   -- one ticker: 0.5 remaining, not 0
     h.expect(R3.Notification.count()).toBe(1)
     R3.Notification.clearAll()
+  end)
+
+  -- ---- visual-polish phase 2 (2.13 toast motion/depth, 2.7 close+action hover, 2.22 UI scale) ----
+  local function toastCont(root)
+    for _, c in ipairs(root:GetChildren()) do if c.Name == "ToastContainer" then return c end end
+  end
+  local function toastsOf(cont)
+    local out = {}
+    for _, c in ipairs(cont:GetChildren()) do if c.Name == "Toast" then out[#out + 1] = c end end
+    return out   -- creation order == order[1..n] (oldest first)
+  end
+
+  h.it("entrance owns the pop: one Back/Out spring per axis, nothing fights it for the UIScale", function()
+    R.Notification.clearAll(); h.mock.resetTweens()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    R.Notification.show({ Title = "x", Duration = 0 })
+    local toast = firstToast(root)
+    local us = toast:FindFirstChildOfClass("UIScale")
+    local st = h.mock.tweensFor(us)
+    h.expect(#st).toBe(1)                                             -- relayout no longer adds a rival tween
+    h.expect(st[1].Info.EasingStyle).toBe(h.roblox.Enum.EasingStyle.Back)
+    h.expect(st[1].Goal.Scale).toBe(1)
+    local pt = h.mock.tweensFor(toast)
+    h.expect(pt[1].Info.EasingStyle).toBe(h.roblox.Enum.EasingStyle.Back)   -- position springs home
+    h.expect(pt[1].Goal.Position.X.Offset).toBe(0)
+    h.expect(toast.GroupTransparency).toBe(0)                         -- faded in by the second tween
+    R.Notification.clearAll()
+  end)
+
+  h.it("dismiss runs a real exit: shrink + fade + slide outward, then destroy", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local id = R.Notification.show({ Title = "x", Duration = 0 })
+    local toast = firstToast(root)
+    local us = toast:FindFirstChildOfClass("UIScale")
+    local restX = toast.Position.X.Offset
+    h.mock.resetTweens()
+    R.Notification.dismiss(id)
+    h.expect(R.Notification.count()).toBe(0)                          -- order slot freed synchronously
+    local st = h.mock.tweensFor(us)
+    h.expect(st[#st].Goal.Scale).toBe(R.Theme.Toast.exitScale)
+    local ft = h.mock.tweensFor(toast)
+    h.expect(#ft).toBe(1)                                             -- one tween for the card itself
+    h.expect(ft[1].Goal.GroupTransparency).toBe(1)
+    h.expect(ft[1].Goal.Position.X.Offset).toBe(restX + R.Theme.Toast.exitSlide)  -- bottom-right: outward = right
+    h.expect(ft[1].Info.EasingDirection).toBe(h.roblox.Enum.EasingDirection.In)
+    h.expect(firstToast(root)).toBeNil()                              -- destroyed once the fold-out finishes
+  end)
+
+  h.it("hover-expand staggers the rows, capped at Toast.staggerCap", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    for i = 1, 7 do R.Notification.show({ Title = "t" .. i, Duration = 0 }) end
+    local cont = toastCont(root)
+    local list = toastsOf(cont)
+    h.expect(#list).toBe(7)
+    h.mock.resetTweens()
+    cont.MouseEnter:Fire()
+    local M, TK = R.Theme.Motion, R.Theme.Toast
+    local function delayOf(t) return h.mock.tweensFor(t)[1].Info.DelayTime end
+    h.expect(delayOf(list[7])).toBe(0)                                -- front row opens immediately
+    h.expect(delayOf(list[6])).toBeCloseTo(M.stagger)
+    h.expect(delayOf(list[1])).toBeCloseTo(TK.staggerCap * M.stagger) -- i = 6, capped at 5 steps
+    cont.MouseLeave:Fire()
+    h.mock.resetTweens()
+    R.Notification.show({ Title = "collapsed", Duration = 0 })
+    h.expect(h.mock.tweensFor(firstToast(root))[1].Info.DelayTime).toBe(0)  -- collapsed stack never staggers
+    R.Notification.clearAll()
+  end)
+
+  h.it("an AbsoluteSize measurement never re-tweens a toast that has not moved (2.13)", function()
+    -- The engine fires AbsoluteSize as soon as it measures the AutomaticSize toast, and again on
+    -- every frame of the entrance (AbsoluteSize includes the UIScale). A measurement-driven pass
+    -- that re-issued the steady tweens would cancel the entrance's Back/Out overshoot and replace
+    -- it with a Quint from a partial value. The mock never auto-fires property signals, so this
+    -- has to set the property and fire it by hand.
+    R.Notification.clearAll(); h.mock.resetTweens()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    R.Notification.show({ Title = "x", Duration = 0 })
+    local toast = firstToast(root)
+    local us = toast:FindFirstChildOfClass("UIScale")
+    toast.AbsoluteSize = h.roblox.Vector2.new(360, 58)
+    toast:GetPropertyChangedSignal("AbsoluteSize"):Fire()
+    toast.AbsoluteSize = h.roblox.Vector2.new(360, 60)
+    toast:GetPropertyChangedSignal("AbsoluteSize"):Fire()
+    local st = h.mock.tweensFor(us)
+    h.expect(#st).toBe(1)                                             -- still ONLY the entrance...
+    h.expect(st[1].Info.EasingStyle).toBe(h.roblox.Enum.EasingStyle.Back)   -- ...overshoot intact
+    h.expect(#h.mock.tweensFor(toast)).toBe(2)                        -- entrance Position + fade only
+    R.Notification.clearAll()
+  end)
+
+  h.it("a measurement while the stack is expanded never re-arms the stagger (2.13)", function()
+    -- Rebuilt tweens used to carry delayTime up to staggerCap*stagger on EVERY measurement, so the
+    -- back rows restarted their wait and stalled instead of fanning out. Only the expand pass
+    -- itself may carry the delay.
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    for i = 1, 4 do R.Notification.show({ Title = "t" .. i, Duration = 0 }) end
+    local cont = toastCont(root)
+    local list = toastsOf(cont)
+    cont.MouseEnter:Fire()                                            -- expand: this one staggers
+    h.expect(h.mock.tweensFor(list[1])[#h.mock.tweensFor(list[1])].Info.DelayTime > 0).toBeTruthy()
+    h.mock.resetTweens()
+    -- a toast grows (AutomaticSize settles): the rows behind it genuinely move, at delay 0
+    list[4]:FindFirstChildOfClass("UIListLayout").AbsoluteContentSize = h.roblox.Vector2.new(360, 120)
+    list[4].AbsoluteSize = h.roblox.Vector2.new(360, 120)
+    list[4]:GetPropertyChangedSignal("AbsoluteSize"):Fire()
+    local back = h.mock.tweensFor(list[1])
+    h.expect(#back > 0).toBeTruthy()                                  -- it really did have to move
+    for _, tw in ipairs(back) do h.expect(tw.Info.DelayTime).toBe(0) end
+    cont.MouseLeave:Fire()
+    R.Notification.clearAll()
+  end)
+
+  h.it("success pops its glyph; error shakes the card and lands square at 0", function()
+    R.Notification.clearAll(); h.mock.resetTweens()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    R.Notification.show({ Title = "ok", Type = "success", Duration = 0 })
+    local icon = firstToast(root):FindFirstChild("TitleRow"):FindFirstChild("Icon")
+    local iconScale = icon:FindFirstChildOfClass("UIScale")
+    h.expect(iconScale ~= nil).toBeTruthy()          -- the pop scales a UIScale UNDER the glyph...
+    h.expect(#h.mock.tweensFor(icon)).toBe(0)        -- ...never the glyph (its Rotation is the spinner's)
+    h.expect(iconScale.Scale).toBe(1)
+    R.Notification.clearAll(); h.mock.resetTweens()
+    R.Notification.show({ Title = "bad", Type = "error", Duration = 0 })
+    local toast = firstToast(root)
+    local rots = {}
+    for _, tw in ipairs(h.mock.tweensFor(toast)) do
+      if tw.Goal.Rotation ~= nil then rots[#rots + 1] = tw.Goal.Rotation end
+    end
+    h.expect(#rots).toBe(3)
+    h.expect(rots[1]).toBe(-R.Theme.Motion.shake.amp)
+    h.expect(rots[2]).toBe(R.Theme.Motion.shake.amp)
+    h.expect(rots[3]).toBe(0)
+    h.expect(toast.Rotation).toBe(0)
+    R.Notification.clearAll()
+  end)
+
+  h.it("reduced motion: the error shake creates no tween and the card stays square", function()
+    h.withReducedMotion(R, function()
+      R.Notification.clearAll(); h.mock.resetTweens()
+      local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+      R.Notification.show({ Title = "bad", Type = "error", Duration = 0 })
+      local toast = firstToast(root)
+      h.expect(h.mock.tweenCount()).toBe(0)
+      h.expect(toast.GroupTransparency).toBe(0)      -- entrance applied instantly
+      h.expect(toast.Rotation).toBeNil()             -- never rotated at all
+      R.Notification.clearAll()
+      h.expect(toast.Parent).toBeNil()               -- exit is instant too
+    end)
+  end)
+
+  h.it("type tint: the border mixes toward the type colour and the glyph sits in a tinted badge", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local id = R.Notification.show({ Title = "e", Type = "error", Duration = 0 })
+    local toast = firstToast(root)
+    expectEdge(toast:FindFirstChildOfClass("UIStroke"), R.Theme, R.Theme.Colors.destructive)
+    local badge = toast:FindFirstChild("TitleRow"):FindFirstChild("IconBadge")
+    h.expect(badge.BackgroundColor3).toBe(R.Theme.Colors.destructive)
+    h.expect(badge.BackgroundTransparency).toBe(R.Theme.Toast.badgeAlpha)
+    h.expect(badge.ZIndex).toBe(0)                    -- renders under its sibling glyph
+    R.Notification.update(id, { Type = "success" })   -- a morph retints border + badge
+    expectEdge(toast:FindFirstChildOfClass("UIStroke"), R.Theme, R.Theme.Colors.success)
+    h.expect(badge.BackgroundColor3).toBe(R.Theme.Colors.success)
+    R.Notification.clearAll()
+  end)
+
+  h.it("Progress stays a direct child of the toast and the padding hugs it to the edge", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local id = R.Notification.show({ Title = "t", Type = "success", Duration = 1000 })
+    local toast = firstToast(root)
+    local bar = toast:FindFirstChild("Progress")
+    h.expect(bar.Parent).toBe(toast)                                 -- no track wrapper, no sibling row
+    h.expect(bar.Size.Y.Offset).toBe(R.Theme.Toast.barHeight)
+    local pad = toast:FindFirstChildOfClass("UIPadding")
+    h.expect(pad.PaddingTop.Offset).toBe(R.Theme.Toast.padY)
+    h.expect(pad.PaddingBottom.Offset).toBe(R.Theme.Toast.progressInset)
+    R.Notification.update(id, { Duration = 0 })                      -- bar gone -> padding restored
+    h.expect(toast:FindFirstChild("Progress")).toBeNil()
+    h.expect(pad.PaddingBottom.Offset).toBe(R.Theme.Toast.padY)
+    R.Notification.clearAll()
+  end)
+
+  h.it("Close and Action answer hover/press; the close glyph still dismisses", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    R.Notification.show({ Title = "t", Duration = 0, Action = { Text = "Undo" } })
+    local toast = firstToast(root)
+    local row = toast:FindFirstChild("TitleRow")
+    local hit = row:FindFirstChild("CloseHit")
+    h.expect(hit ~= nil).toBeTruthy()                                -- comfortable sibling target
+    h.expect(hit.Size.X.Offset).toBe(R.Theme.Sizes.iconButton)
+    local wash = hit:FindFirstChild("Hover")
+    h.expect(wash.BackgroundTransparency).toBe(1)
+    hit.MouseEnter:Fire()
+    h.expect(wash.BackgroundTransparency).toBe(R.Theme.Opacity.hoverWash)
+    local action = toast:FindFirstChild("Action")
+    local aw = action:FindFirstChild("Hover")
+    action.MouseEnter:Fire()
+    h.expect(aw.BackgroundTransparency).toBe(R.Theme.Opacity.hoverWash)
+    action.MouseButton1Down:Fire()
+    h.expect(aw.BackgroundTransparency).toBe(R.Theme.Opacity.pressWash)
+    row:FindFirstChild("Close").MouseButton1Click:Fire()              -- handler still bound to the glyph
+    h.expect(R.Notification.count()).toBe(0)
+  end)
+
+  h.it("the countdown Heartbeat stops with the last toast and reconnects on the next one", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(gui)
+    local base = h.mock.heartbeatHandlers()
+    local id = R.Notification.show({ Title = "t", Duration = 1000 })
+    h.expect(h.mock.heartbeatHandlers()).toBe(base + 1)
+    R.Notification.dismiss(id)
+    h.expect(h.mock.heartbeatHandlers()).toBe(base)                   -- released with the stack
+    R.Notification.show({ Title = "u", Duration = 1000 })
+    h.expect(h.mock.heartbeatHandlers()).toBe(base + 1)               -- reconnected lazily by show
+    R.Notification.clearAll()
+    h.expect(h.mock.heartbeatHandlers()).toBe(base)
+  end)
+
+  h.it("StackShadow: absent while shadowId is empty; a ZIndex 0 sibling once an asset is set", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    R.Notification.show({ Title = "a", Duration = 0 })
+    local cont = toastCont(root)
+    h.expect(cont:FindFirstChild("StackShadow")).toBeNil()            -- default theme: shadows off
+    R.Notification.clearAll()
+    local t = R.Theme.new({ Effect = { shadowId = "rbxassetid://1" } })
+    R.Notification.show({ Title = "b", Duration = 0, Theme = t })
+    local sh = cont:FindFirstChild("StackShadow")
+    h.expect(sh ~= nil).toBeTruthy()
+    h.expect(sh.Parent).toBe(cont)                                    -- sibling of the toasts...
+    h.expect(sh.ZIndex).toBe(0)                                       -- ...below their default ZIndex 1
+    h.expect(sh.Visible).toBe(false)                                  -- Absolute* unmeasured headless
+    local toast = firstToast(root)
+    cont.AbsolutePosition = h.roblox.Vector2.new(10, 20)
+    toast.AbsolutePosition = h.roblox.Vector2.new(110, 220)
+    toast.AbsoluteSize = h.roblox.Vector2.new(300, 60)
+    R.Notification.relayout()
+    h.expect(sh.Visible).toBe(true)
+    h.expect(sh.Size.X.Offset).toBe(300 + 2 * R.Theme.Effect.toast.spread)
+    h.expect(sh.Position.X.Offset).toBe(100 + 150)                    -- host centre in container space
+    R.Notification.clearAll()
+  end)
+
+  h.it("setScale scales the toast container, never the overlay root", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    R.Notification.setScale(1.3)
+    R.Notification.show({ Title = "x", Duration = 0 })
+    local cont = toastCont(root)
+    h.expect(cont:FindFirstChildOfClass("UIScale").Scale).toBe(1.3)
+    h.expect(root:FindFirstChildOfClass("UIScale")).toBeNil()         -- catcher must keep covering the screen
+    h.expect(cont.Size.X.Offset).toBe(R.Theme.Toast.width)            -- width stays logical px
+    R.Notification.setScale(1)                                        -- restore process-wide state
+    h.expect(cont:FindFirstChildOfClass("UIScale").Scale).toBe(1)
+    R.Notification.clearAll()
   end)
 end)
 h.run()

@@ -16,6 +16,18 @@ local function btnPalette(theme, variant)
   return theme.Colors.primary, theme.Colors.primaryForeground -- default
 end
 
+-- Inline glyph tints by ROLE, resolved through theme.Icon at paint time so SetMode/SetAccent
+-- re-tint by name: structural (muted) for the affordances, accent for the actions, success for
+-- the copy confirmation.
+local function roleColor(theme, role)
+  if role == "muted" then return theme.Colors[theme.Icon.structural] end
+  if role == "success" then return theme.Colors.success end
+  return theme.Colors[theme.Icon.accent]
+end
+
+-- Extra row height while an error line is shown (the Error label's own 16 + 2 gap).
+local ERROR_H = 18
+
 function TextBox.new(opts)
   opts = opts or {}
   local theme = opts.Theme or DefaultTheme
@@ -49,6 +61,10 @@ function TextBox.new(opts)
   local revealed = false
   local suppress = false
   local state = { focused = false, invalid = false }
+  -- SetEnabled/SetDisabled block USER input only (clicks, editing): apply()/Flag.bind restores
+  -- keep updating value and visuals while disabled (plan 2.8 contract a).
+  local enabled = true
+  local dimParts, dimRest = {}, {}     -- inline glyphs that dim while disabled + their rest alphas
   local themed = {}                    -- recolor closures, replayed on accent change
   local function reTheme() for _, fn in ipairs(themed) do fn() end end
   local api = {}                       -- returned control; buttons capture it for the ctl arg
@@ -118,7 +134,9 @@ function TextBox.new(opts)
   })
   Create.text(input, theme, "body")
   themed[#themed + 1] = function()
-    input.TextColor3 = theme.Colors.foreground; input.PlaceholderColor3 = theme.Colors.mutedForeground
+    -- re-derived from `enabled` too, so a SetMode while disabled does not repaint the value as live
+    input.TextColor3 = enabled and theme.Colors.foreground or theme.Colors.mutedForeground
+    input.PlaceholderColor3 = theme.Colors.mutedForeground
   end
 
   -- ---- value machinery ------------------------------------------------------
@@ -162,14 +180,35 @@ function TextBox.new(opts)
   end))
 
   -- ---- inline icon-button helper -------------------------------------------
+  -- An ImageButton renders its Image across its whole Size, so the button IS the glyph: there is
+  -- no room for a hover wash behind a 16px icon and no inner content to scale. Hover therefore
+  -- lifts the tint (structural -> structuralActive, the tab's grammar) and press dips the
+  -- button's own UIScale. Returns the button plus setGlyph(icon, role) so a transient swap
+  -- (copy -> check) has ONE source the themer closure re-derives from.
   local function mkIconButton(name, icon, colorRole, order, onClick)
-    local function color() return colorRole == "muted" and theme.Colors.mutedForeground or theme.Colors.primary end
+    local glyph, role = icon, colorRole
     local btn = Create("ImageButton", { Name = name, BackgroundTransparency = 1,
-      Size = UDim2.new(0, 16, 0, 16), LayoutOrder = order, Parent = box })
-    Icons.apply(btn, icon, color())
-    themed[#themed + 1] = function() Icons.apply(btn, icon, color()) end
-    if onClick then maid:Give(btn.MouseButton1Click:Connect(onClick)) end
-    return btn
+      Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = order, Parent = box })
+    Icons.apply(btn, glyph, roleColor(theme, role))
+    dimParts[#dimParts + 1] = btn
+    -- Only a structural glyph has somewhere to lift TO; an accent one already rests at the
+    -- brightest token, and the copy button owns its tint for the whole check window.
+    local hover
+    if colorRole == "muted" then
+      hover = Recipes.hover(btn, { theme = theme, kind = "text", icon = btn,
+        rest = theme.Icon.structural, hover = theme.Icon.structuralActive })
+      maid:Give(hover.disconnect)
+    end
+    maid:Give(Recipes.press(btn, btn, { theme = theme }).disconnect)
+    themed[#themed + 1] = function()
+      Icons.apply(btn, glyph, roleColor(theme, role))
+      if hover then hover.reskin() end   -- a pointer already over the button keeps its lifted tint
+    end
+    if onClick then maid:Give(btn.MouseButton1Click:Connect(function() if enabled then onClick() end end)) end
+    return btn, function(g, r)
+      glyph, role = g or glyph, r or role
+      Icons.apply(btn, glyph, roleColor(theme, role))
+    end
   end
 
   -- @addons (Tasks 2,3,6,7 insert addon builders + their option blocks here)
@@ -197,12 +236,22 @@ function TextBox.new(opts)
   local function mkTextButton(spec, order)
     local bg, fg, line = btnPalette(theme, spec.Variant or "default")
     local btn = Create("TextButton", { Name = "Button" .. order, AutoButtonColor = false,
-      BackgroundColor3 = bg, AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 0, 22),
+      BackgroundColor3 = bg, BackgroundTransparency = 0,
+      AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 0, theme.Sizes.chip),
       Text = spec.Text, TextColor3 = fg,
       LayoutOrder = order, Parent = box, Create.corner(theme.Radius.sm),
-      Create.padding({ left = 8, right = 8 }) })
+      Create.padding({ left = theme.Spacing.gap, right = theme.Spacing.gap }) })
     Create.text(btn, theme, "muted")
     if line then Create("UIStroke", { Color = line, Thickness = 1, Parent = btn }) end
+    -- shadcn's hover:bg-primary/90 in Roblox terms: the fill itself dips, because a wash Frame
+    -- child would render above the button's own Text. Rest is the 0 written above, so the recipe
+    -- captures the right value to return to.
+    maid:Give(Recipes.hover(btn, { theme = theme, host = btn, kind = "fill",
+      hoverAlpha = theme.Opacity.hoverFill, pressAlpha = theme.Opacity.pressFill }).disconnect)
+    -- No scale host: the button IS an item of the Box's horizontal UIListLayout, so a UIScale on
+    -- it changes its AbsoluteSize and reflows every sibling on each press. The fill dip above
+    -- carries the press on its own (the toast Action answers the same way).
+    maid:Give(Recipes.press(btn, nil, { theme = theme }).disconnect)
     themed[#themed + 1] = function()
       local b2, f2, l2 = btnPalette(theme, spec.Variant or "default")
       btn.BackgroundColor3 = b2; btn.TextColor3 = f2
@@ -219,18 +268,41 @@ function TextBox.new(opts)
       else
         local btn = mkTextButton(spec, order)
         btn.Name = "Button" .. i
-        if spec.Callback then maid:Give(btn.MouseButton1Click:Connect(function() spec.Callback(real, api) end)) end
+        if spec.Callback then
+          maid:Give(btn.MouseButton1Click:Connect(function() if enabled then spec.Callback(real, api) end end))
+        end
       end
     end
   end
   if opts.Clearable then
-    local clear = mkIconButton("Clear", "x", "muted", 29, function()
+    local clear
+    clear = mkIconButton("Clear", "x", "muted", 29, function()
       commit(""); if opts.Callback then opts.Callback(real, api) end
+      Animate.pop(clear, "fast")
       if input.CaptureFocus then input:CaptureFocus() end
     end)
     -- Text-changed fires on an engine thread (no GUI capability on strict executors); clear.Visible
     -- is a protected write -> marshal through Safe.mutate (inline when capable, e.g. the sync() below).
-    local function sync() Safe.mutate(function() clear.Visible = #real > 0 end) end
+    -- Visible still carries the empty case (a hidden flex item takes no width in the row); the
+    -- glyph fades either way, and the first sync lands instantly so a fresh build spends no tween.
+    local shown
+    local function sync()
+      local show = #real > 0
+      if shown == show then return end
+      local first = shown == nil
+      shown = show
+      Safe.mutate(function()
+        if first then
+          clear.Visible = show; clear.ImageTransparency = show and 0 or 1
+        elseif show then
+          clear.Visible = true
+          Animate.to(clear, "fast", { ImageTransparency = 0 })
+        else
+          Animate.toThen(clear, "fast", { ImageTransparency = 1 },
+            function() Safe.mutate(function() clear.Visible = false end) end)
+        end
+      end)
+    end
     sync()
     maid:Give(input:GetPropertyChangedSignal("Text"):Connect(sync))
   end
@@ -256,18 +328,33 @@ function TextBox.new(opts)
   if opts.Loading then setLoading(true) end
 
   if opts.Password then
-    local eye = mkIconButton("Eye", "eye", "muted", 28, nil)
-    maid:Give(eye.MouseButton1Click:Connect(function()
+    local eye, setEyeGlyph
+    eye, setEyeGlyph = mkIconButton("Eye", "eye", "muted", 28, function()
       revealed = not revealed
-      Icons.apply(eye, revealed and "eye-off" or "eye", theme.Colors.mutedForeground)
+      setEyeGlyph(revealed and "eye-off" or "eye")
+      Animate.pop(eye, "fast")   -- the reveal is a state change, so the glyph pops as it swaps
       render()
-    end))
+    end)
   end
 
   if opts.Copyable then
-    mkIconButton("Copy", "copy", "primary", 30, function()
+    -- Copy confirms in place: the glyph becomes a success 'check' for Motion.copyRevert seconds.
+    -- The revert runs on a task.delay thread (no GUI capability on strict executors) -> Safe.mutate.
+    -- A generation counter, not task.cancel (which throws on an already finished thread), makes a
+    -- second click simply own the window.
+    local setCopyGlyph
+    local copyGen = 0
+    local _, setter = mkIconButton("Copy", "copy", "primary", 30, function()
       if setclipboard then pcall(setclipboard, real) end
+      copyGen = copyGen + 1
+      local gen = copyGen
+      Safe.mutate(function() setCopyGlyph("check", "success") end)
+      task.delay(theme.Motion.copyRevert, function()
+        if gen ~= copyGen then return end
+        Safe.mutate(function() setCopyGlyph("copy", "primary") end)
+      end)
     end)
+    setCopyGlyph = setter
   end
 
   -- @states (Tasks 4,5 insert focus-ring / validation wiring here)
@@ -280,14 +367,26 @@ function TextBox.new(opts)
     return strokeColor()
   end, { theme = theme })
   maid:Give(focus.disconnect)
-  local function setDisabled(b)
+  -- Plan 2.8: the surface reads disabled (Box + every inline glyph at Opacity.disabled, input
+  -- non-editable) and user input is guarded, while SetLocked (the host's scrim) stays an
+  -- independent flag that neither sets nor clears this one. Recipes.disabled keeps each part's
+  -- rest, so re-enabling restores the value it had -- including a Clear glyph left faded out.
+  local function setEnabled(b)
     b = b and true or false
+    if enabled == b then return end
+    enabled = b
     Safe.mutate(function()
-      input.TextEditable = not b and not opts.Copyable
-      input.TextColor3 = b and theme.Colors.mutedForeground or theme.Colors.foreground
+      input.TextEditable = b and not opts.Copyable
+      input.TextColor3 = b and theme.Colors.foreground or theme.Colors.mutedForeground
+      local parts = { { box, "BackgroundTransparency", 0 } }
+      for _, inst in ipairs(dimParts) do
+        if not b then dimRest[inst] = inst.ImageTransparency or 0 end
+        parts[#parts + 1] = { inst, "ImageTransparency", dimRest[inst] or 0 }
+      end
+      Recipes.disabled(parts, not b, theme)
     end)
   end
-  if opts.Disabled then setDisabled(true) end
+  if opts.Disabled then setEnabled(false) end
 
   local message
   local function mkMessage()
@@ -301,20 +400,52 @@ function TextBox.new(opts)
     themed[#themed + 1] = function() message.TextColor3 = theme.Colors.destructive end
     return message
   end
+  -- Rejection shake: Motion.shake (amp / steps / step) alternating on the Box's OWN X offset,
+  -- Sine both ways, with a closing step back to the exact starting Position table so the field
+  -- can never drift off its grid. Motion off = no movement at all (an instant "end state" for a
+  -- pure back-and-forth is simply staying put). Re-entrancy is refused so a second SetInvalid
+  -- mid-shake cannot capture a displaced rest as the new home.
+  local shaking = false
+  local function shake()
+    if shaking or not Animate.isEnabled() then return end
+    local sh = theme.Motion.shake
+    local rest = box.Position
+    local steps = {}
+    for i = 1, sh.steps do
+      local dx = (i % 2 == 1) and sh.amp or -sh.amp
+      steps[i] = { box, sh.step,
+        { Position = UDim2.new(rest.X.Scale, rest.X.Offset + dx, rest.Y.Scale, rest.Y.Offset) },
+        Enum.EasingStyle.Sine, Animate.DIR.InOut }
+    end
+    steps[#steps + 1] = { box, sh.step, { Position = rest }, Enum.EasingStyle.Sine, Animate.DIR.Out }
+    shaking = true
+    Animate.chain(steps, function() shaking = false end)
+  end
   local function setInvalid(msg)
     state.invalid = true
     Safe.mutate(function()
-      local m = mkMessage(); m.Text = msg or ""; m.Visible = true
-      root.Size = UDim2.new(1, 0, 0, baseH + 18)
+      -- Visible + stroke land synchronously (callers read them straight after); only the fade,
+      -- the row height and the shake are animated.
+      local m = mkMessage(); m.Text = msg or ""
+      if not m.Visible then m.Visible = true; m.TextTransparency = 1 end
       stroke.Color = strokeColor()
+      Animate.to(root, "base", { Size = UDim2.new(1, 0, 0, baseH + ERROR_H) })
+      Animate.to(m, "base", { TextTransparency = 0 })
+      shake()
     end)
   end
   local function setValid()
     state.invalid = false
     Safe.mutate(function()
-      if message then message.Visible = false end
-      root.Size = UDim2.new(1, 0, 0, baseH)
       stroke.Color = strokeColor()
+      Animate.to(root, "base", { Size = UDim2.new(1, 0, 0, baseH) })
+      -- Visible flips inside Completed (an engine thread -> Safe.mutate). With motion off, and
+      -- under the synchronous test mock, that lands in the same call, so a reader right after
+      -- SetValid still sees false.
+      if message and message.Visible then
+        Animate.toThen(message, "fast", { TextTransparency = 1 },
+          function() Safe.mutate(function() message.Visible = false end) end)
+      end
     end)
   end
   local function runValidate()
@@ -335,7 +466,8 @@ function TextBox.new(opts)
   api.Focus = function() input:CaptureFocus() end
   api.Clear = function() commit("") end
   -- @api-extra (Tasks 4,5,6 add SetInvalid/SetValid/SetLoading/SetDisabled here)
-  api.SetDisabled = function(b) setDisabled(b) end
+  api.SetDisabled = function(b) setEnabled(not b) end
+  api.SetEnabled = function(b) setEnabled(b) end
   api.SetInvalid = function(msg) setInvalid(msg) end
   api.SetValid = function() setValid() end
   api.SetLoading = function(b) setLoading(b) end

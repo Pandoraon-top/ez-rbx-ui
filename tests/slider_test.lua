@@ -1,5 +1,23 @@
 local h = require("tests.helper")
-local R = h.loadLib(); local Slider, Create, Config = R.Slider, R.Create, R.Config
+local R = h.loadLib(); local Slider, Create, Config, Theme = R.Slider, R.Create, R.Config, R.Theme
+local UIT = h.roblox.Enum.UserInputType
+
+-- A theme with the 9-slice asset filled in; the default '' keeps the halo nil, so both paths run.
+local function themed() return Theme.new({ Effect = { shadowId = "rbxassetid://1" } }) end
+local function desktop()
+  local uis = h.roblox.game:GetService("UserInputService")
+  uis.TouchEnabled = false; uis.MouseEnabled = true    -- controlGlow 'auto' keeps glows off phones
+end
+local function at(x) return { UserInputType = UIT.MouseButton1, Position = h.roblox.Vector2.new(x, 0) } end
+local function moveTo(x) return { UserInputType = UIT.MouseMovement, Position = h.roblox.Vector2.new(x, 0) } end
+local function uis() return h.roblox.game:GetService("UserInputService") end
+local function goalOf(inst, key)
+  for i = #h.mock.tweens, 1, -1 do
+    local tw = h.mock.tweens[i]
+    if tw.Instance == inst and tw.Goal[key] ~= nil then return tw end
+  end
+end
+
 h.describe("slider", function()
   h.it("maps value to fill scale, clamps, snaps, persists", function()
     local cfg = Config.new({ FileName = "SL", AutoSave = false })
@@ -23,6 +41,161 @@ h.describe("slider", function()
     h.expect(s.Frame:FindFirstChild("Description").TextSize).toBe(R.Theme.Font.muted.Size)
     h.expect(s.Frame.Size.Y.Offset).toBe(62 + 2 * R.Theme.Spacing.inputY)
     h.expect(s.Frame:FindFirstChild("Track").Position.Y.Offset).toBe(-16)
+  end)
+
+  -- ---- 2.10 hit strip -------------------------------------------------------
+  h.it("builds its rest pose without a single tween (2.10)", function()
+    h.mock.resetTweens()
+    Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 10, Default = 5 })
+    h.expect(h.mock.tweenCount()).toBe(0)
+  end)
+  h.it("a finger-sized Hit strip takes over the grab, centred on the 6px rail (2.10)", function()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 0 })
+    local hit = s.Frame:FindFirstChild("Hit")
+    h.expect(hit ~= nil).toBeTruthy()
+    h.expect(hit.Size.Y.Offset).toBe(R.Theme.Sizes.sliderHit)
+    h.expect(hit.Size.X.Scale).toBe(1)
+    h.expect(hit.BackgroundTransparency).toBe(1)
+    h.expect(hit.Active).toBe(false)         -- must not swallow the content scroll it sits in
+    -- track spans y -16..-10 against the row's bottom edge; the strip is centred on -13
+    h.expect(hit.Position.Y.Offset).toBe(-13 - R.Theme.Sizes.sliderHit / 2)
+    -- AbsolutePosition/AbsoluteSize are nil headless -> fromX falls back to x0 = 0, w = 1
+    hit.InputBegan:Fire(at(1))
+    h.expect(s.GetValue()).toBe(100)
+    uis().InputEnded:Fire(at(1))
+  end)
+  h.it("the 6px rail no longer grabs on its own (2.10)", function()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 0 })
+    s.Frame:FindFirstChild("Track").InputBegan:Fire(at(1))
+    h.expect(s.GetValue()).toBe(0)
+  end)
+  h.it("the empty rail is a background groove with a stroke (2.10)", function()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 10 })
+    local track = s.Frame:FindFirstChild("Track")
+    h.expect(track.BackgroundColor3).toBe(R.Theme.Colors.background)
+    h.expect(track:FindFirstChildOfClass("UIStroke").Color).toBe(R.Theme.Colors.border)
+  end)
+
+  -- ---- 2.10 handle grow + halo ---------------------------------------------
+  h.it("the handle grows on hover and further while dragging, then springs back (2.10)", function()
+    desktop()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 10, Default = 0 })
+    local hit = s.Frame:FindFirstChild("Hit")
+    local us = s.Frame:FindFirstChild("Track"):FindFirstChild("Handle"):FindFirstChildOfClass("UIScale")
+    local handle = s.Frame:FindFirstChild("Track"):FindFirstChild("Handle")
+    -- centre-anchored, so the grow UIScale expands about the value point instead of the corner
+    h.expect(handle.AnchorPoint.X).toBe(0.5)
+    h.expect(handle.AnchorPoint.Y).toBe(0.5)
+    h.expect(us.Scale).toBe(1)
+    hit.MouseEnter:Fire()
+    h.expect(us.Scale).toBe(R.Theme.Motion.handleHover)
+    hit.InputBegan:Fire(at(0))
+    h.expect(us.Scale).toBe(R.Theme.Motion.handleGrow)
+    uis().InputEnded:Fire(at(0))
+    h.expect(us.Scale).toBe(R.Theme.Motion.handleHover)   -- pointer is still over the strip
+    hit.MouseLeave:Fire()
+    h.expect(us.Scale).toBe(1)
+  end)
+  h.it("has no halo while Effect.shadowId is '' (today's default) (2.10)", function()
+    desktop()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 10 })
+    h.expect(s.Frame:FindFirstChild("Track"):FindFirstChild("Halo")).toBeNil()
+  end)
+  h.it("the halo is a Track child at ZIndex 0 that follows the handle's X scale (2.10)", function()
+    desktop()
+    local th = themed()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 0, Theme = th })
+    local track = s.Frame:FindFirstChild("Track")
+    local halo, handle = track:FindFirstChild("Halo"), track:FindFirstChild("Handle")
+    h.expect(halo ~= nil).toBeTruthy()
+    h.expect(halo.ZIndex).toBe(0)
+    h.expect(halo.ImageColor3).toBe(th.Colors.primary)
+    h.expect(halo.Size.X.Offset).toBe(12 + 2 * th.Effect.control.spread)
+    h.expect(halo.ImageTransparency).toBe(1)
+    s.SetValue(100)
+    -- same coordinate space as the handle: no AbsolutePosition conversion anywhere
+    h.expect(halo.Position.X.Scale).toBe(handle.Position.X.Scale)
+    h.expect(halo.Position.X.Scale).toBe(1)
+    local hit = s.Frame:FindFirstChild("Hit")
+    hit.InputBegan:Fire(at(1))
+    h.expect(halo.ImageTransparency).toBe(Theme.fx(th).glow)
+    uis().InputEnded:Fire(at(1))
+    h.expect(halo.ImageTransparency).toBe(1)
+  end)
+
+  -- ---- 2.10 eased SetValue vs live drag ------------------------------------
+  h.it("programmatic SetValue eases with Quint over 'base' (2.10)", function()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 0 })
+    local handle = s.Frame:FindFirstChild("Track"):FindFirstChild("Handle")
+    h.mock.resetTweens()
+    s.SetValue(60)
+    local tw = goalOf(handle, "Position")
+    h.expect(tw ~= nil).toBeTruthy()
+    h.expect(tw.Info.EasingStyle).toBe(h.roblox.Enum.EasingStyle.Quint)
+    h.expect(tw.Info.Time).toBe(R.Theme.Motion.base)
+    h.expect(handle.Position.X.Scale).toBeCloseTo(0.6)
+  end)
+  h.it("an active drag writes straight through so the rail never lags the finger (2.10)", function()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 0 })
+    local track = s.Frame:FindFirstChild("Track")
+    local handle, fill = track:FindFirstChild("Handle"), track:FindFirstChild("Fill")
+    local hit = s.Frame:FindFirstChild("Hit")
+    hit.InputBegan:Fire(at(0))
+    h.mock.resetTweens()
+    uis().InputChanged:Fire(moveTo(1))
+    h.expect(#h.mock.tweensFor(handle)).toBe(0)
+    h.expect(#h.mock.tweensFor(fill)).toBe(0)
+    h.expect(handle.Position.X.Scale).toBe(1)
+    h.expect(s.GetValue()).toBe(100)
+    uis().InputEnded:Fire(at(1))
+  end)
+
+  -- ---- 2.8 disabled ---------------------------------------------------------
+  h.it("SetEnabled(false) dims and blocks the grab, but SetValue still applies (2.8)", function()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 20 })
+    local track = s.Frame:FindFirstChild("Track")
+    local hit = s.Frame:FindFirstChild("Hit")
+    s.SetEnabled(false)
+    local dim = R.Theme.Opacity.disabled
+    h.expect(track:FindFirstChild("Fill").BackgroundTransparency).toBe(dim)
+    h.expect(track:FindFirstChild("Handle").BackgroundTransparency).toBe(dim)
+    h.expect(s.Frame:FindFirstChild("Value").TextTransparency).toBe(dim)
+    hit.InputBegan:Fire(at(1))
+    h.expect(s.GetValue()).toBe(20)                       -- user input blocked
+    s.SetValue(70)                                        -- config/API path still applies
+    h.expect(s.GetValue()).toBe(70)
+    h.expect(track:FindFirstChild("Handle").Position.X.Scale).toBeCloseTo(0.7)
+    s.SetEnabled(true)
+    h.expect(track:FindFirstChild("Fill").BackgroundTransparency).toBe(0)
+  end)
+  h.it("SetEnabled(false) forces an in-flight drag to finish, keeping the last value (2.8)", function()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 0 })
+    local hit = s.Frame:FindFirstChild("Hit")
+    local us = s.Frame:FindFirstChild("Track"):FindFirstChild("Handle"):FindFirstChildOfClass("UIScale")
+    hit.InputBegan:Fire(at(0.5))
+    h.expect(us.Scale).toBe(R.Theme.Motion.handleGrow)
+    s.SetEnabled(false)
+    h.expect(us.Scale).toBe(1)                            -- the grab pose is released, not stuck
+    h.expect(s.GetValue()).toBe(50)                       -- the value it had is kept
+    uis().InputChanged:Fire(moveTo(1))                    -- a stray move no longer drags
+    h.expect(s.GetValue()).toBe(50)
+    uis().InputEnded:Fire(at(1))
+  end)
+  h.it("Disabled = true builds dimmed", function()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 10, Disabled = true })
+    h.expect(s.Frame:FindFirstChild("Track"):FindFirstChild("Fill").BackgroundTransparency)
+      .toBe(R.Theme.Opacity.disabled)
+  end)
+
+  h.it("reduced motion lands SetValue instantly with no tween (2.10)", function()
+    h.withReducedMotion(R, function()
+      local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 0 })
+      local handle = s.Frame:FindFirstChild("Track"):FindFirstChild("Handle")
+      h.mock.resetTweens()
+      s.SetValue(40)
+      h.expect(#h.mock.tweensFor(handle)).toBe(0)
+      h.expect(handle.Position.X.Scale).toBeCloseTo(0.4)
+    end)
   end)
 end)
 h.run()
