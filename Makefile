@@ -6,6 +6,12 @@ EXAMPLE_OUTPUT_FILE := ./output/example.lua
 RELEASE_DIR := ./release
 EXAMPLE_RELEASE := $(RELEASE_DIR)/example.lua
 STRESS_RELEASE := $(RELEASE_DIR)/stress.lua
+# dist/ is the ONE build output that is committed: a public raw URL is how a viewer loadstrings the
+# showcase without waiting for a release. Everything else stays in the ignored output/ and release/.
+DIST_DIR := ./dist
+SHOWCASE_INPUT := ./example/showcase.lua
+SHOWCASE_DIST := $(DIST_DIR)/showcase.lua
+SHOWCASE_RELEASE := $(RELEASE_DIR)/showcase.lua
 
 
 .PHONY: build
@@ -59,7 +65,16 @@ examples: build
 	@mkdir -p $(RELEASE_DIR)
 	@lua-bundler -e $(EXAMPLE_INPUT_FILE) -o $(EXAMPLE_RELEASE)
 	@lua-bundler -e ./example/stress.lua -o $(STRESS_RELEASE)
-	@lua -e "assert(loadfile('$(EXAMPLE_RELEASE)')); assert(loadfile('$(STRESS_RELEASE)')); print('example bundles ok')"
+	@lua-bundler -e $(SHOWCASE_INPUT) -o $(SHOWCASE_RELEASE)
+	@lua -e "assert(loadfile('$(EXAMPLE_RELEASE)')); assert(loadfile('$(STRESS_RELEASE)')); assert(loadfile('$(SHOWCASE_RELEASE)')); print('example bundles ok')"
+
+.PHONY: showcase
+showcase: build
+	@echo "Bundling the visual showcase to dist/ (committed so raw.githubusercontent can serve it)..."
+	@mkdir -p $(DIST_DIR)
+	@lua-bundler -e $(SHOWCASE_INPUT) -o $(SHOWCASE_DIST)
+	@lua -e "assert(loadfile('$(SHOWCASE_DIST)')); print('showcase bundle ok')"
+	@echo "Raw URL: https://raw.githubusercontent.com/Pandoraon-top/ez-rbx-ui/feat/visual-polish/$(SHOWCASE_DIST)"
 
 .PHONY: docs
 docs:
