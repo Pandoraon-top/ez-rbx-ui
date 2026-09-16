@@ -776,6 +776,210 @@ h.describe("selectbox", function()
       h.expect(caret.Rotation).toBe(0)
     end)
   end)
+
+  -- ---- visual-polish phase 3 (3.1 loading skeleton, 3.4 empty state, 3.7 scrollbar pill) ----
+  local function loadingBody(gui) return dropdownIn(gui):FindFirstChild("List"):FindFirstChild("Loading") end
+  local function sweeps(body)
+    local out = {}
+    for _, c in ipairs(body:GetChildren()) do
+      local g = c:FindFirstChildOfClass("UIGradient")
+      if g then out[#out + 1] = h.mock.tweensFor(g)[1] end
+    end
+    return out
+  end
+  h.it("the loading body is three shimmer skeleton lines of uneven width, not a text row (3.1)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Loading = true })
+    h.mock.resetTweens()
+    sb.Open()
+    local body = loadingBody(gui)
+    h.expect(body ~= nil).toBeTruthy()   -- the name every caller probes the loading state by
+    h.expect(body.ClassName).toBe("Frame")
+    local line = {}
+    for _, c in ipairs(body:GetChildren()) do if c.ClassName == "Frame" then line[c.Name] = c end end
+    h.expect(line.Line1.Size.X.Scale).toBe(0.6)
+    h.expect(line.Line2.Size.X.Scale).toBe(0.8)
+    h.expect(line.Line3.Size.X.Scale).toBe(0.45) -- ragged on purpose: text arriving, not a progress bar
+    h.expect(line.Line1.Position.Y.Offset).toBe(0)
+    h.expect(line.Line3.Position.Y.Offset > line.Line2.Position.Y.Offset).toBeTruthy()
+    h.expect(line.Line1.BackgroundColor3).toBe(R.Theme.Colors.surface)
+    h.expect(line.Line1.ZIndex > body.ZIndex).toBeTruthy()
+    local tws = sweeps(body)
+    h.expect(#tws).toBe(3)                       -- one endless sweep per line, no more
+    h.expect(tws[1].Info.RepeatCount).toBe(-1)
+    -- the popover is sized for what it shows: three lines + gaps, not one 28px text row
+    h.expect(dropdownIn(gui).Size.Y.Offset > 28 + 8).toBeTruthy()
+    sb.Close()
+  end)
+  h.it("options landing stop every shimmer loop and drop the skeleton body (3.1)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Loading = true })
+    sb.Open()
+    local body = loadingBody(gui)
+    local tws = sweeps(body)
+    h.expect(#tws).toBe(3)
+    sb.SetLoading(false)                         -- the open dropdown rebuilds around the real options
+    for _, tw in ipairs(tws) do h.expect(tw.cancelled).toBe(true) end
+    h.expect(body.Parent).toBeNil()              -- nothing survives the rebuild
+    local dd = dropdownIn(gui)
+    h.expect(dd:FindFirstChild("List"):FindFirstChild("Loading")).toBe(nil)
+    local n = 0; for _, o in ipairs(listChildren(dd)) do if o.Name == "Opt" then n = n + 1 end end
+    h.expect(n).toBe(2)
+    sb.Close()
+  end)
+  h.it("Close cancels the shimmer loops and takes the skeleton with it (3.1)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Loading = true })
+    sb.Open()
+    local body = loadingBody(gui)
+    local line, tws = body:FindFirstChild("Line1"), sweeps(body)
+    sb.Close()
+    h.expect(dropdownIn(gui)).toBe(nil)          -- teardown stays synchronous for the caller
+    for _, tw in ipairs(tws) do h.expect(tw.cancelled).toBe(true) end
+    h.expect(line.Parent).toBeNil()
+    h.expect(body.Parent).toBeNil()
+  end)
+  h.it("Destroy while loading and open leaves no shimmer loop running (3.1)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Loading = true })
+    sb.Open()
+    local tws = sweeps(loadingBody(gui))
+    sb.Destroy()
+    for _, tw in ipairs(tws) do h.expect(tw.cancelled).toBe(true) end
+  end)
+  h.it("reduced motion: the skeleton is a static block and Stop destroys it without a fade (3.1)", function()
+    h.withReducedMotion(R, function()
+      local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+      local sb = anchored(gui, { Loading = true })
+      h.mock.resetTweens()
+      sb.Open()
+      local body = loadingBody(gui)
+      h.expect(body ~= nil).toBeTruthy()
+      local line = body:FindFirstChild("Line1")
+      h.expect(line.BackgroundColor3).toBe(R.Theme.Colors.surface)
+      h.expect(h.mock.tweenCount()).toBe(0)      -- no sweep and no pop
+      sb.Close()
+      h.expect(h.mock.tweenCount()).toBe(0)      -- and no fade on the way out
+      h.expect(line.Parent).toBeNil()
+    end)
+  end)
+  h.it("a search that filters every option away shows the muted 'no results' block (3.4)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Options = { "Alpha", "Beta" }, Default = "Alpha", Searchable = true })
+    sb.Open()
+    local dd = dropdownIn(gui)
+    local list, empty = dd:FindFirstChild("List"), dd:FindFirstChild("Empty")
+    h.expect(empty ~= nil).toBeTruthy()
+    h.expect(empty.Parent).toBe(dd)                    -- on the popover ROOT...
+    h.expect(list:FindFirstChild("Empty")).toBe(nil)   -- ...never inside the laid-out List
+    h.expect(empty.ZIndex > list.ZIndex).toBeTruthy()
+    -- ...and over the LIST rect, never across the pinned search band above it: Recipes.empty is
+    -- born (1,0,1,0), so a centred icon/label stack would otherwise land on the search field.
+    h.expect(empty.Position.Y.Offset).toBe(list.Position.Y.Offset)
+    h.expect(empty.Size.Y.Offset).toBe(list.Size.Y.Offset)
+    h.expect(empty.Visible).toBe(false)                -- hidden while anything matches
+    sb.Filter("zzz")
+    h.expect(empty.Visible).toBe(true)
+    h.expect(empty:FindFirstChild("Text").Text).toBe("No results")
+    h.expect(empty:FindFirstChild("Text").TextColor3).toBe(R.Theme.Colors.mutedForeground)
+    sb.Filter("al")                                    -- a row matches again
+    h.expect(empty.Visible).toBe(false)
+    sb.Filter("")
+    h.expect(empty.Visible).toBe(false)
+    sb.Close()
+    h.expect(empty.Parent).toBeNil()                   -- dies with the popover, like every other child
+  end)
+  h.it("the search box drives the empty block through the live filter (3.4)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Options = { "Alpha", "Beta" }, Default = "Alpha", Searchable = true })
+    sb.Open()
+    local dd = dropdownIn(gui)
+    local input = dd:FindFirstChild("Search"):FindFirstChild("Input")
+    input.Text = "qqq"
+    input:GetPropertyChangedSignal("Text"):Fire()
+    h.expect(dd:FindFirstChild("Empty").Visible).toBe(true)
+    sb.Close()
+  end)
+  h.it("the empty-state glyph actually resolves in the atlas (3.4)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui)
+    sb.Open()
+    local icon = dropdownIn(gui):FindFirstChild("Empty"):FindFirstChild("Icon")
+    h.expect(icon ~= nil).toBeTruthy()
+    h.expect(R.Icons.get("search") ~= nil).toBeTruthy() -- 'search-x' is NOT in core/icons.lua
+    h.expect(icon.Image).toBe(R.Icons.get("search").Id) -- so the block never ships a nil glyph
+    h.expect(icon.ImageColor3).toBe(R.Theme.Colors.mutedForeground)
+    sb.Close()
+  end)
+  h.it("no empty block while the dropdown is loading; it appears once the options land (3.4)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Loading = true })
+    sb.Open()
+    h.expect(dropdownIn(gui):FindFirstChild("Empty")).toBe(nil) -- the skeleton already speaks
+    sb.SetLoading(false)
+    local dd = dropdownIn(gui)
+    h.expect(dd:FindFirstChild("Empty") ~= nil).toBeTruthy()
+    h.expect(dd:FindFirstChild("Empty").Visible).toBe(false)    -- two options match
+    sb.Close()
+  end)
+  h.it("a dropdown built with no options at all says so straight away (3.4)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui, { Options = {} })
+    sb.Open()
+    local dd = dropdownIn(gui)
+    h.expect(dd:FindFirstChild("Empty").Visible).toBe(true)
+    -- Visible alone is vacuous under the mock, which does not clip: with zero rows the popover
+    -- would be 8px tall and ClipsDescendants would cut the whole block away in Studio. It must be
+    -- sized for the block it shows -- icon + gap + one muted line, the 3.1 rule applied to 3.4.
+    local T = R.Theme
+    h.expect(dd.Size.Y.Offset >= T.Sizes.icon + T.Spacing.gap * 2 + T.Font.muted.Size).toBeTruthy()
+    sb.Close()
+  end)
+  h.it("the dropdown list wears the shared scrollbar pill (3.7)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local sb = anchored(gui)
+    sb.Open()
+    local list = dropdownIn(gui):FindFirstChild("List")
+    h.expect(list.ScrollBarThickness).toBe(R.Theme.Sizes.scrollbar)
+    h.expect(list.ScrollBarImageColor3).toBe(R.Theme.Colors.border)
+    h.expect(list.ScrollBarImageTransparency).toBe(R.Theme.Scrollbar.alpha)
+    sb.Close()
+  end)
+  h.it("SetMode repaints the skeleton blocks and the scrollbar of an OPEN dropdown (3.1/3.7)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local reg = regCollector()
+    local t = R.Theme.new({})
+    local sb = anchored(gui, { Theme = t, AccentReg = reg.AccentReg, Loading = true })
+    sb.Open()
+    local dd = dropdownIn(gui)
+    local list = dd:FindFirstChild("List")
+    local line = list:FindFirstChild("Loading"):FindFirstChild("Line1")
+    h.expect(line.BackgroundColor3).toBe(t.Colors.surface)
+    R.Theme.applyMode(t, "light")
+    reg.reskin("mode")
+    local light = R.Theme.PALETTES.light
+    h.expect(line.BackgroundColor3).toBe(light.surface)
+    h.expect(list.ScrollBarImageColor3).toBe(light.border)
+    h.expect(list.ScrollBarImageTransparency).toBe(t.Scrollbar.alpha)
+    sb.Close()
+  end)
+  h.it("SetMode repaints the empty block of an OPEN dropdown (3.4)", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local reg = regCollector()
+    local t = R.Theme.new({})
+    local sb = anchored(gui, { Theme = t, AccentReg = reg.AccentReg, Searchable = true })
+    sb.Open()
+    local empty = dropdownIn(gui):FindFirstChild("Empty")
+    sb.Filter("zzz")
+    h.expect(empty.Visible).toBe(true)
+    R.Theme.applyMode(t, "light")
+    reg.reskin("mode")
+    local light = R.Theme.PALETTES.light
+    h.expect(empty:FindFirstChild("Text").TextColor3).toBe(light.mutedForeground)
+    h.expect(empty:FindFirstChild("Icon").ImageColor3).toBe(light.mutedForeground)
+    h.expect(empty.Visible).toBe(true)   -- a re-skin replays state, it does not reset the filter
+    sb.Close()
+  end)
 end)
 
 h.run()

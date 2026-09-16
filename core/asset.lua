@@ -76,6 +76,7 @@ function Asset.resolvable(value)
       or value:match("^rbxthumb://") or value:match("^%d+$") then return true end
   if value:match("^https?://") then
     if cache[value] then return true end
+    if cache[value] == false then return false end   -- already tried and failed: do not promise it again
     return type(writefile) == "function" and type(isfile) == "function" and customAssetFn() ~= nil
   end
   return false
@@ -86,17 +87,27 @@ end
 -- id is ready -- so a title bar / FAB never stalls window construction on the network. `cb` is only
 -- ever called with a non-nil id. For URL fetches `cb` runs on a non-privileged thread, so any GUI
 -- write inside it must be marshalled through Safe.mutate by the caller.
-function Asset.imageAsync(value, cb)
-  if type(value) ~= "string" or value == "" then return end
+-- cb(id) on success. onFail() is optional and fires on EVERY path that will never call cb: an
+-- unusable value, a download that failed now, and a download that failed earlier and is cached as
+-- such. Without it a caller cannot tell "still fetching" from "never arriving", which is why the
+-- skeleton holders used to guess with a timer instead.
+function Asset.imageAsync(value, cb, onFail)
+  local function fail() if onFail then onFail() end end
+  if type(value) ~= "string" or value == "" then fail(); return end
   if value:match("^rbxassetid://") or value:match("^rbxasset://") or value:match("^rbxthumb://") then
     cb(value); return
   end
   if value:match("^%d+$") then cb("rbxassetid://" .. value); return end
   if value:match("^https?://") then
-    if cache[value] ~= nil then if cache[value] then cb(cache[value]) end; return end
+    if cache[value] ~= nil then
+      if cache[value] then cb(cache[value]) else fail() end
+      return
+    end
     local spawn = (type(task) == "table" and task.spawn) or function(fn) fn() end
-    spawn(function() local id = fetchUrl(value); if id then cb(id) end end)
+    spawn(function() local id = fetchUrl(value); if id then cb(id) else fail() end end)
+    return
   end
+  fail()   -- a string we cannot resolve at all (a bare filename, a data URI, ...)
 end
 
 return Asset

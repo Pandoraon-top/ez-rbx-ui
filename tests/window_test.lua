@@ -1680,6 +1680,290 @@ h.describe("window", function()
     h.expect(ov:FindFirstChildOfClass("UIScale")).toBe(nil)  -- the (1,0,1,0) catcher must stay full-screen
     R.Overlay.setScale(1)
   end)
+
+  -- ---- phase 3: FAB attention pulse (3.2) -----------------------------------------------------
+  local function findFabIn(R, screen)
+    for _, c in ipairs(R.Overlay.get(screen):GetChildren()) do if c.Name == "FloatingToggle" then return c end end
+  end
+  -- the ONE breathing tween on a ring (RepeatCount > 0); every other tween on it is a settle
+  local function pulseTweenFor(ring)
+    for _, tw in ipairs(h.mock.tweensFor(ring)) do if tw.Info.RepeatCount > 0 then return tw end end
+  end
+  h.it("the attention ring is opt-in: no Pulse, no Halo, nothing changes for an existing caller", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen,
+      FloatingToggle = { Type = "square", Image = "rbxassetid://7" } })
+    local fab = findFabIn(R, screen)
+    h.expect(fab:FindFirstChild("Halo")).toBe(nil)
+    w:Hide()                                       -- the FAB appears: still no ring, still no stroke
+    h.expect(fab.Visible).toBe(true)
+    h.expect(fab:FindFirstChild("Halo")).toBe(nil)
+    h.expect(fab:FindFirstChildOfClass("UIStroke")).toBe(nil)
+  end)
+  h.it("FloatingToggle.Pulse breathes an accent ring OUTSIDE the button for a fixed 5 cycles", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen,
+      FloatingToggle = { Type = "square", Image = "rbxassetid://7", Pulse = true } })
+    local fab = findFabIn(R, screen)
+    local halo = fab:FindFirstChild("Halo")
+    h.expect(halo ~= nil).toBeTruthy()
+    h.expect(halo.ClassName).toBe("Frame")
+    h.expect(halo.BackgroundTransparency).toBe(1)          -- a ring, never a wash over the face
+    h.expect(halo.AnchorPoint.X).toBe(0.5)                 -- grows about the button's centre
+    h.expect(halo.Size.X.Scale).toBe(1)
+    h.expect(halo.Size.X.Offset > 0).toBeTruthy()          -- ...and hangs OUTSIDE it on every side
+    -- the two pins this must not disturb: the FAB's first ImageLabel child and its own stroke
+    h.expect(fab:FindFirstChildOfClass("ImageLabel").Name).toBe("Img")
+    h.expect(fab:FindFirstChildOfClass("UIStroke")).toBe(nil)   -- the ring's stroke is on the Halo
+    local ring = halo:FindFirstChildOfClass("UIStroke")
+    h.expect(ring ~= nil).toBeTruthy()
+    h.expect(ring.Color.R8).toBe(R.Theme.Colors.primary.R8)
+    h.expect(ring.Thickness).toBe(R.Theme.Stroke.focusThickness)
+    h.expect(ring.Transparency).toBe(R.Theme.Stroke.pulse.high)   -- rests dim until it is asked to breathe
+    h.mock.resetTweens()
+    w:Hide()                                               -- the FAB pops in: the ring breathes
+    local pulse = pulseTweenFor(ring)
+    h.expect(pulse ~= nil).toBeTruthy()
+    h.expect(pulse.Info.RepeatCount).toBe(5)               -- finite: it rests instead of draining a battery
+    h.expect(pulse.Info.Reverses).toBe(true)               -- ping-pong, so it ENDS on its own rest alpha
+    h.expect(pulse.Goal.Transparency).toBe(R.Theme.Stroke.pulse.low)
+    fab.MouseEnter:Fire()
+    h.expect(pulse.cancelled).toBe(true)                   -- found it: stop asking
+    h.expect(ring.Transparency).toBe(R.Theme.Stroke.pulse.low)
+    fab.MouseLeave:Fire()
+    h.expect(ring.Transparency).toBe(R.Theme.Stroke.pulse.high)  -- settles back, never re-pulses
+    w:SetAccent("Emerald")
+    h.expect(ring.Color).toBe(R.Themer.accent("Emerald").Primary)  -- repainted in the fab closure
+  end)
+  h.it("the attention pulse stops when the window is shown, even with AutoHide off", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    h.mock.resetTweens()
+    local w = R.Window.new({ Title = "M", Parent = screen,
+      FloatingToggle = { Type = "circle", Pulse = true, AutoHide = false } })
+    local fab = findFabIn(R, screen)
+    local ring = fab:FindFirstChild("Halo"):FindFirstChildOfClass("UIStroke")
+    h.expect(fab.Visible).toBe(true)                       -- AutoHide off: it is up while the window is
+    local pulse = pulseTweenFor(ring)
+    h.expect(pulse ~= nil).toBeTruthy()
+    w:Show()
+    h.expect(pulse.cancelled).toBe(true)                   -- the window is here; nothing left to ask for
+    h.expect(fab.Visible).toBe(true)                       -- ...and the button itself stays put
+    h.expect(ring.Transparency).toBe(R.Theme.Stroke.pulse.high)
+  end)
+  h.it("Show() marshals the pulse stop instead of writing the protected FAB inline", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    h.mock.resetTweens()
+    local w = R.Window.new({ Title = "M", Parent = screen,
+      FloatingToggle = { Type = "circle", Pulse = true, AutoHide = false } })
+    local ring = findFabIn(R, screen):FindFirstChild("Halo"):FindFirstChildOfClass("UIStroke")
+    local pulse = pulseTweenFor(ring)
+    h.expect(pulse ~= nil).toBeTruthy()
+    R.Safe._setCapabilityCheck(function() return false end)
+    local ok, err = pcall(function()
+      w:Show()                                    -- the FAB hangs off the PROTECTED overlay root,
+      h.expect(pulse.cancelled).toBe(false)       -- so the stop must be deferred, never written here
+      h.mock.stepHeartbeat(0)
+      h.expect(pulse.cancelled).toBe(true)        -- ...and lands in a capability-bearing context
+      h.expect(ring.Transparency).toBe(R.Theme.Stroke.pulse.high)
+    end)
+    R.Safe._setCapabilityCheck(nil)
+    if not ok then error(err, 0) end
+  end)
+  h.it("reduced motion leaves the attention ring still: no loop tween at all", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    h.withReducedMotion(R, function()
+      local w = R.Window.new({ Title = "M", Parent = screen, FloatingToggle = { Type = "circle", Pulse = true } })
+      local ring = findFabIn(R, screen):FindFirstChild("Halo"):FindFirstChildOfClass("UIStroke")
+      h.mock.resetTweens()
+      w:Hide()
+      h.expect(#h.mock.tweensFor(ring)).toBe(0)
+      h.expect(ring.Transparency).toBe(R.Theme.Stroke.pulse.high)
+    end)
+  end)
+
+  -- ---- phase 3: entrance cascade (3.6) --------------------------------------------------------
+  h.it("the entrance cascades title + subtitle, then the content panel, on engine-side delays", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    h.mock.resetTweens()
+    local w = R.Window.new({ Title = "M", Subtitle = "a subtitle", Parent = screen })
+    local M = R.Theme.Motion
+    local bar = w.Main:FindFirstChild("TitleBar")
+    local title, sub = bar:FindFirstChild("Title"), bar:FindFirstChild("Subtitle")
+    local panel = w.Main:FindFirstChild("Body"):FindFirstChild("ContentPanel")
+    -- the cascade is the only thing here that tweens with a DelayTime (no task.delay chain)
+    local function delayed(inst)
+      for _, tw in ipairs(h.mock.tweensFor(inst)) do if tw.Info.DelayTime > 0 then return tw end end
+    end
+    local tTw, sTw, pTw = delayed(title), delayed(sub), delayed(panel)
+    h.expect(tTw ~= nil).toBeTruthy(); h.expect(sTw ~= nil).toBeTruthy(); h.expect(pTw ~= nil).toBeTruthy()
+    h.expect(tTw.Info.DelayTime).toBeCloseTo(M.stagger)        -- beat 1: the type
+    h.expect(sTw.Info.DelayTime).toBeCloseTo(M.stagger)
+    h.expect(pTw.Info.DelayTime).toBeCloseTo(2 * M.stagger)    -- beat 2: the panel, one stagger later
+    h.expect(tTw.Goal.TextTransparency).toBe(0)
+    h.expect(tTw.Goal.Position.X.Offset).toBe(title.Position.X.Offset)   -- lands on its REST position
+    h.expect(pTw.Goal.Position.Y.Offset).toBe(R.Theme.Spacing.gap)
+    h.expect(pTw.Goal.BackgroundTransparency < 1).toBeTruthy()
+    h.expect(panel.BackgroundTransparency).toBe(pTw.Goal.BackgroundTransparency)  -- settled, not left faded
+    h.expect(title.TextTransparency).toBe(0)
+    -- beat 4 (cascading the tab rows) was rejected: a tab row never gets a staggered entrance
+    h.mock.resetTweens()
+    local t = w:AddTab({ Name = "A" })
+    h.expect(delayed(t.Button)).toBe(nil)
+  end)
+  h.it("the entrance cascade is skipped on touch and under reduced motion", function()
+    local R = h.loadLib()
+    local uis = h.roblox.game:GetService("UserInputService"); uis.TouchEnabled = true; uis.MouseEnabled = false
+    local ok, err = pcall(function()
+      h.mock.resetTweens()
+      local w = R.Window.new({ Title = "M", Parent = h.roblox.Instance.new("ScreenGui") })
+      local title = w.Main:FindFirstChild("TitleBar"):FindFirstChild("Title")
+      h.expect(#h.mock.tweensFor(title)).toBe(0)
+      h.expect(title.TextTransparency ~= 1).toBeTruthy()   -- never parked invisible in the first place
+    end)
+    uis.TouchEnabled = false; uis.MouseEnabled = true      -- restore BEFORE rethrowing
+    if not ok then error(err, 0) end
+    h.withReducedMotion(R, function()
+      h.mock.resetTweens()
+      local w = R.Window.new({ Title = "M", Parent = h.roblox.Instance.new("ScreenGui") })
+      local title = w.Main:FindFirstChild("TitleBar"):FindFirstChild("Title")
+      h.expect(#h.mock.tweensFor(title)).toBe(0)
+      h.expect(title.TextTransparency ~= 1).toBeTruthy()
+    end)
+  end)
+
+  -- ---- phase 3: sidebar empty state (3.4) -----------------------------------------------------
+  h.it("a search that matches no tab shows a muted block in Body -- never inside the sidebar", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local body = w.Main:FindFirstChild("Body")
+    local sidebar = body:FindFirstChild("Sidebar")
+    local empty = body:FindFirstChild("Empty")
+    h.expect(empty ~= nil).toBeTruthy()
+    h.expect(empty.Parent).toBe(body)                        -- the sidebar owns a UIListLayout, which
+    h.expect(sidebar:FindFirstChild("Empty")).toBe(nil)      -- would lay this block out as a tab row
+    h.expect(empty.Visible).toBe(false)
+    h.expect(empty.Size.X.Offset).toBe(sidebar.Size.X.Offset)  -- over the rail, not over the panel
+    w:SearchTabs("zzzz")
+    h.expect(empty.Visible).toBe(false)                      -- a window with no tabs is not "no matches"
+    w:AddTab({ Name = "Alpha" }); w:AddTab({ Name = "Beta" })
+    w:SearchTabs("zzzz")
+    h.expect(empty.Visible).toBe(true)
+    h.expect(empty:FindFirstChild("Text").Text).toBe("No matches")
+    h.expect(empty:FindFirstChild("Text").TextColor3.R8).toBe(R.Theme.Colors.mutedForeground.R8)
+    h.expect(empty:FindFirstChild("Icon") ~= nil).toBeTruthy()
+    w:SearchTabs("al")
+    h.expect(empty.Visible).toBe(false)                      -- one match is enough to hide it again
+    w:SearchTabs("")
+    h.expect(empty.Visible).toBe(false)
+    -- the rail can be dragged wider; the block must not be left behind over the content panel
+    local uis = h.roblox.game:GetService("UserInputService")
+    local handle = body:FindFirstChild("SidebarHandle")
+    body.AbsolutePosition = h.roblox.Vector2.new(0, 0)
+    handle.InputBegan:Fire({ UserInputType = MB1, Position = h.roblox.Vector2.new(154, 50) })
+    uis.InputChanged:Fire({ UserInputType = MOVE, Position = h.roblox.Vector2.new(204, 50) })
+    uis.InputEnded:Fire({ UserInputType = MB1, Position = h.roblox.Vector2.new(204, 50) })
+    h.expect(empty.Size.X.Offset).toBe(sidebar.Size.X.Offset)
+    w:SetMode("light")
+    h.expect(empty:FindFirstChild("Text").TextColor3).toBe(R.Theme.PALETTES.light.mutedForeground)
+  end)
+
+  -- ---- phase 3: scrollbar pill (3.7) ----------------------------------------------------------
+  h.it("the sidebar and content scrollbars wear the same pill and re-tint with the mode", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local sidebar = w.Main:FindFirstChild("Body"):FindFirstChild("Sidebar")
+    for _, sf in ipairs({ sidebar, w.ContentScroll }) do
+      h.expect(sf.ScrollBarThickness).toBe(R.Theme.Sizes.scrollbar)   -- the sidebar rail was 3, alone
+      h.expect(sf.ScrollBarImageColor3.R8).toBe(R.Theme.Colors.border.R8)
+      h.expect(sf.ScrollBarImageTransparency).toBe(R.Theme.Scrollbar.alpha)
+    end
+    w:SetMode("light")
+    h.expect(sidebar.ScrollBarImageColor3).toBe(R.Theme.PALETTES.light.border)
+    h.expect(w.ContentScroll.ScrollBarImageColor3).toBe(R.Theme.PALETTES.light.border)
+  end)
+
+  -- ---- phase 3: title image skeleton (3.1) ----------------------------------------------------
+  h.it("a title logo still downloading holds a skeleton in its slot (Image '' -- NOT IsLoaded)", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    -- resolvable (the executor globals are there) but the download yields no content id: exactly
+    -- the window in which Image is still '' and IsLoaded, which is true for '', says "loaded".
+    h.roblox.getcustomasset = function() return nil end
+    -- queued timers: the wait arms a give-up deadline, and the default 'immediate' mode would
+    -- expire it during construction, before the block can be looked at
+    local ok, err = pcall(h.withQueuedTimers, function()
+      local w = R.Window.new({ Title = "M", Parent = screen, Image = "https://example.com/pending-logo.png" })
+      local bar = w.Main:FindFirstChild("TitleBar")
+      local img = bar:FindFirstChild("TitleImage")
+      h.expect(img ~= nil).toBeTruthy()
+      h.expect(img.Image).toBe("")                         -- nothing has arrived yet...
+      h.expect(img.IsLoaded ~= false).toBeTruthy()         -- ...and IsLoaded would call that loaded
+      local sk = bar:FindFirstChild("TitleImageSkeleton")
+      h.expect(sk ~= nil).toBeTruthy()                     -- so the gate is the id, not IsLoaded
+      local band = sk:FindFirstChildOfClass("UIGradient")
+      h.expect(band ~= nil).toBeTruthy()                   -- the swept band
+      h.expect(sk.Size.X.Offset).toBe(img.Size.X.Offset)   -- exactly the slot it stands in for
+      h.expect(sk.AnchorPoint.Y).toBe(0.5)
+      -- ...and this fetch is DEAD: Asset.imageAsync only reports success, so nothing will ever
+      -- call back and IsLoaded will never move. Something must still end it, or the ring of
+      -- shimmer runs in the title bar for the life of the window.
+      local sweep = h.mock.tweensFor(band)[1]
+      h.expect(sweep.Info.RepeatCount).toBe(-1)
+      h.expect(h.mock.timerCount()).toBe(1)
+      h.mock.advance(60)
+      h.expect(bar:FindFirstChild("TitleImageSkeleton")).toBe(nil)
+      h.expect(sweep.cancelled).toBe(true)
+      h.expect(img.Image).toBe("")                         -- falls back to the empty slot, as before 3.1
+    end)
+    h.roblox.getcustomasset = nil
+    if not ok then error(err, 0) end
+  end)
+  h.it("the title skeleton waits for the sprite to decode, then stops and destroys itself", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    h.mock.imagesLoaded = false      -- every image is born mid-decode (IsLoaded = false)
+    local ok, err = pcall(h.withQueuedTimers, function()   -- ...so the give-up deadline stays parked
+      local w = R.Window.new({ Title = "M", Parent = screen, Image = "rbxassetid://5" })
+      local bar = w.Main:FindFirstChild("TitleBar")
+      local img = bar:FindFirstChild("TitleImage")
+      h.expect(img.Image).toBe("rbxassetid://5")           -- the id resolved synchronously...
+      local sk = bar:FindFirstChild("TitleImageSkeleton")
+      h.expect(sk ~= nil).toBeTruthy()                     -- ...but the sprite has not decoded yet
+      img.IsLoaded = true
+      img:GetPropertyChangedSignal("IsLoaded"):Fire()      -- the engine says it is on screen
+      h.expect(bar:FindFirstChild("TitleImageSkeleton")).toBe(nil)
+      h.expect(sk._destroyed).toBeTruthy()
+    end)
+    h.mock.imagesLoaded = nil
+    if not ok then error(err, 0) end
+  end)
+  h.it("an instant id never blinks a skeleton, and reduced motion leaves a static block", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    h.mock.resetTweens()
+    local w = R.Window.new({ Title = "M", Parent = screen, Image = "rbxassetid://5" })
+    local bar = w.Main:FindFirstChild("TitleBar")
+    h.expect(bar:FindFirstChild("TitleImage").Image).toBe("rbxassetid://5")
+    h.expect(bar:FindFirstChild("TitleImageSkeleton")).toBe(nil)
+    -- ...and it was never built at all: a shimmer sweep is the only Offset tween in the library,
+    -- so a block that had been created and stopped again (a one-frame blink) would show up here
+    local swept = false
+    for _, tw in ipairs(h.mock.tweens) do if tw.Goal.Offset then swept = true end end
+    h.expect(swept).toBe(false)
+    h.mock.imagesLoaded = false
+    local ok, err = pcall(h.withQueuedTimers, function()   -- ...so the give-up deadline stays parked
+      h.withReducedMotion(R, function()
+        local w2 = R.Window.new({ Title = "M2", Parent = h.roblox.Instance.new("ScreenGui"), Image = "rbxassetid://6" })
+        local sk = w2.Main:FindFirstChild("TitleBar"):FindFirstChild("TitleImageSkeleton")
+        h.expect(sk ~= nil).toBeTruthy()
+        local band = sk:FindFirstChildOfClass("UIGradient")
+        h.expect(#h.mock.tweensFor(band)).toBe(0)          -- a still block: the sweep starts no tween
+        local img = w2.Main:FindFirstChild("TitleBar"):FindFirstChild("TitleImage")
+        img.IsLoaded = true
+        img:GetPropertyChangedSignal("IsLoaded"):Fire()
+        h.expect(sk._destroyed).toBeTruthy()               -- and Stop is instant, not a fade
+      end)
+    end)
+    h.mock.imagesLoaded = nil
+    if not ok then error(err, 0) end
+  end)
 end)
 
 h.run()

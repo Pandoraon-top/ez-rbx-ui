@@ -49,6 +49,70 @@ h.describe("table", function()
   end)
 end)
 
+-- Plan 3.4: an empty table reads as "nothing here yet", not as blank space. The block lives on a
+-- layout-free holder over the Body rect -- never inside Body, which lays its children out as rows.
+h.describe("table empty state", function()
+  local function area(t) return t.Frame:FindFirstChild("EmptyArea") end
+  local function block(t) local a = area(t); return a and a:FindFirstChild("Empty") end
+  local function rows(t)
+    local n = 0
+    for _, c in ipairs(t.Body:GetChildren()) do if c.Name == "Row" then n = n + 1 end end
+    return n
+  end
+
+  h.it("a table with no rows shows a muted 'No rows' block with the inbox icon", function()
+    local t = Tbl.new({ Parent = Create("Frame", {}), Columns = { "A" } })
+    local em = block(t)
+    h.expect(em ~= nil).toBeTruthy()
+    h.expect(em.Visible).toBe(true)
+    h.expect(em:FindFirstChild("Text").Text).toBe("No rows")
+    h.expect(em:FindFirstChild("Text").TextColor3).toBe(R.Theme.Colors.mutedForeground)
+    h.expect(em:FindFirstChild("Icon").Image).toBe(R.Icons.get("inbox").Id)
+  end)
+
+  h.it("the block sits over the Body rect on the root, never inside Body", function()
+    local t = Tbl.new({ Parent = Create("Frame", {}), Columns = { "A" } })
+    local a = area(t)
+    h.expect(t.Body:FindFirstChild("Empty")).toBeNil()
+    h.expect(t.Body:FindFirstChild("EmptyArea")).toBeNil()
+    h.expect(rows(t)).toBe(0)                            -- and it is never mistaken for a row
+    h.expect(a.Position.Y.Offset).toBe(t.Body.Position.Y.Offset)
+    h.expect(a.Size.Y.Offset).toBe(t.Body.Size.Y.Offset)
+    h.expect(a.Size.X.Scale).toBe(1)
+    h.expect(a.BackgroundTransparency).toBe(1)
+    -- siblings compare ZIndex: 2 draws above Body, which is left at the engine default (1)
+    h.expect(a.ZIndex).toBe(2)
+    h.expect(t.Body.ZIndex).toBeNil()
+  end)
+
+  h.it("a row hides the block and Clear brings it back", function()
+    local t = Tbl.new({ Parent = Create("Frame", {}), Columns = { "A" }, Rows = { { "1" } } })
+    h.expect(block(t).Visible).toBe(false)
+    t.Clear()
+    h.expect(block(t).Visible).toBe(true)
+    h.expect(rows(t)).toBe(0)
+    t.AddRow({ "2" })
+    h.expect(block(t).Visible).toBe(false)
+    t.SetData({})                                        -- SetData with nothing empties it again
+    h.expect(block(t).Visible).toBe(true)
+    t.SetData({ { "3" }, { "4" } })
+    h.expect(block(t).Visible).toBe(false)
+    h.expect(rows(t)).toBe(2)
+  end)
+
+  h.it("the reskin closure re-reads the muted tokens for the block", function()
+    local fns = {}
+    local reg = function(fn) fns[#fns + 1] = fn; return function() end end
+    local theme = R.Theme.new()
+    local t = Tbl.new({ Parent = Create("Frame", {}), Columns = { "A" }, Theme = theme, AccentReg = reg })
+    local text = block(t):FindFirstChild("Text")
+    text.TextColor3 = h.roblox.Color3.fromRGB(1, 2, 3)
+    R.Theme.applyMode(theme, "light")
+    for _, fn in ipairs(fns) do fn("mode") end
+    h.expect(text.TextColor3).toBe(theme.Colors.mutedForeground)
+  end)
+end)
+
 -- Plan 2.7 (table half): rows answer hover with the FILL kind -- the row's own transparency,
 -- never a wash Frame (the Row is a horizontal UIListLayout, a Frame would become a column) and
 -- never BackgroundColor3 (theme_test pins the first row's colour by identity).

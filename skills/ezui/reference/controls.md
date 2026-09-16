@@ -334,6 +334,13 @@ local pb = tab:AddProgressBar({ Default = 0.2 })
 pb.Set(0.8)   -- animate fill to 80%
 ```
 
+`Indeterminate = true` (or `SetIndeterminate(true)`) sweeps a short fill across the track for work
+whose length is unknown. Any `Set(n)` cancels the sweep and returns to a measured bar; with motion
+off it rests as a static partial fill.
+
+**Returns:** `{ Get() -> number, Set(p: number), SetIndeterminate(b), Destroy() }`
+
+
 ## AddResizable
 `host:AddResizable(opts)` — a split-pane container with a draggable grip; each pane is a full control host.
 

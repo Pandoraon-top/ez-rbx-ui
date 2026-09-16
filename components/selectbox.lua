@@ -15,6 +15,21 @@ end
 local POPOVER_FROST = 0.04
 local CARET_OPEN = 180 -- chevron-down reads as chevron-up while the list is open
 
+-- 3.1 loading skeleton geometry. Uneven widths on purpose: three equal bars read as a progress
+-- meter, three ragged ones read as text that has not arrived yet. Kept module-local because
+-- theme.Sizes has no skeleton line group yet (reported as a deviation).
+local SKELETON_ROWS = { 0.6, 0.8, 0.45 }
+local SKELETON_H, SKELETON_GAP = 10, 8
+local LOADING_H = #SKELETON_ROWS * SKELETON_H + (#SKELETON_ROWS - 1) * SKELETON_GAP
+-- 3.4 dropdown empty state. `search-x` is NOT in core/icons.lua (the atlas builder skips names
+-- missing upstream), so the block uses the glyph that actually resolves.
+local EMPTY_ICON, EMPTY_TEXT = "search", "No results"
+-- ...and the height it needs: one Sizes.icon glyph, a Spacing.gap and one muted line, with a
+-- second gap of air so it is not flush against the popover edge. The popover must be at least
+-- this tall or ClipsDescendants does not trim the message, it removes it — the same hazard
+-- LOADING_H answers for the shimmer.
+local function emptyH(t) return t.Sizes.icon + t.Spacing.gap * 2 + t.Font.muted.Size end
+
 local function frostAlpha(theme)
   local a = theme.Acrylic and theme.Acrylic.popoverFrost
   return type(a) == "number" and a or POPOVER_FROST
@@ -85,6 +100,8 @@ function SelectBox.new(opts)
   local searchFocus -- focus ring of the dropdown search; torn down with the dropdown
   local ddUnreg -- 2.11: themer registration the OPEN popover holds; released in teardown
   local optButtons = {} -- { { btn, text (live search), sel, hover (row hover handle) }, ... }
+  local skeletons = {}  -- 3.1: Effects.skeleton handles of the OPEN loading body; Stop()ped in teardown
+  local emptyState      -- 3.4: Recipes.empty block on the OPEN dropdown root; dies with it
   local buildDropdown, rebuild, computePos, refresh
   local onChanged = opts.Callback
 
@@ -346,15 +363,30 @@ function SelectBox.new(opts)
     end
   end
 
+  -- 3.4: the "no results" block answers on row VISIBILITY, not on the option count — a query that
+  -- hides every row is exactly what it exists for, and the first row coming back into view hides
+  -- it again on the same pass. nil while the dropdown is closed or still loading.
+  local function syncEmpty()
+    if not emptyState then return end
+    -- `~= false`, not truthiness: a row that no filter has touched yet has never been written to,
+    -- and Visible defaults to true (nil under the mock) — only an explicit false means filtered out.
+    for _, e in ipairs(optButtons) do
+      if e.btn.Visible ~= false then emptyState.SetVisible(false); return end
+    end
+    emptyState.SetVisible(true)
+  end
+
   function api.Filter(query)
     query = (query or ""):lower()
     for _, e in ipairs(optButtons) do
       e.btn.Visible = (query == "" or e.text:lower():find(query, 1, true) ~= nil)
     end
+    syncEmpty()
   end
 
   function buildDropdown()
     optButtons = {}
+    skeletons = {}
     local searchable = false
     if not loading then
       if opts.Searchable ~= nil then searchable = opts.Searchable == true
@@ -362,7 +394,12 @@ function SelectBox.new(opts)
     end
     local sz = btn.AbsoluteSize or { X = 140, Y = 38 }
     local width = math.max(140, sz.X or 140)
-    local ddH = math.min((loading and 28 or (#options * 28)) + (searchable and 44 or 8), 240)
+    -- 3.1: the loading body is three skeleton lines tall, not one text row — the popover must be
+    -- sized for what it actually shows or the shimmer would be clipped by ClipsDescendants.
+    -- 3.4: the same floor for the empty block, which the rows cannot pay for — with no options at
+    -- all the body would be 0px and the "no results" message would never reach the screen.
+    local bodyH = loading and LOADING_H or math.max(#options * 28, emptyH(theme))
+    local ddH = math.min(bodyH + (searchable and 44 or 8), 240)
     -- The window's UI scale reaches overlay children through Overlay.scale() (2.22): the UIScale
     -- goes on the popover's own root (never the overlay root, whose catcher must stay full-screen).
     local scale = Overlay.scale()
@@ -430,17 +467,26 @@ function SelectBox.new(opts)
       Position = UDim2.new(0, 4, 0, listTop),
       Size = UDim2.new(1, -8, 1, -(listTop + 4)),
       ClipsDescendants = true, ZIndex = 1001,
-      ScrollBarThickness = 4, ScrollBarImageColor3 = theme.Colors.border,
       AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(0, 0, 0, 0),
       Parent = dropdown,
       Create.listLayout({ Padding = 2 }),
     })
+    Recipes.scrollbar(list, theme) -- 3.7: same pill (thickness, border tint, Scrollbar.alpha) as the table
 
     if loading then
-      loadingRow = Create("TextLabel", { Name = "Loading", BackgroundTransparency = 1, Text = "Loading…", ZIndex = 1002,
-        TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Center,
-        Size = UDim2.new(1, 0, 0, 26), LayoutOrder = 1, Parent = list })
-      Create.text(loadingRow, theme, "body")
+      -- 3.1: an async LoadOptions reads as content arriving, not as a dead end — three shimmer
+      -- lines where the labels will land. The container keeps the name the old text row had
+      -- ('Loading'), so every caller that probes the loading state by name still finds it. The
+      -- lines are positioned, not laid out: the container carries no UIListLayout of its own.
+      loadingRow = Create("Frame", { Name = "Loading", BackgroundTransparency = 1, Active = false,
+        Size = UDim2.new(1, 0, 0, LOADING_H), ZIndex = 1002, LayoutOrder = 1, Parent = list })
+      for i, w in ipairs(SKELETON_ROWS) do
+        skeletons[i] = Effects.skeleton(loadingRow, theme, {
+          name = "Line" .. i, zIndex = 1003, radius = theme.Radius.xs,
+          size = UDim2.new(w, 0, 0, SKELETON_H),
+          position = UDim2.new(0, 0, 0, (i - 1) * (SKELETON_H + SKELETON_GAP)),
+        })
+      end
     else
     for i, raw in ipairs(options) do
       local e = normOpt(raw)
@@ -481,6 +527,16 @@ function SelectBox.new(opts)
           text = tostring(e.value) .. " " .. tostring(e.label or "") .. " " .. tostring(e.desc or "") }
       end
     end
+    -- 3.4: parented to the dropdown ROOT, never to the List — the List owns a UIListLayout, so an
+    -- Empty child there would be laid out as one more option row. ZIndex above the rows (1002) so
+    -- it reads over the (now hidden) list instead of under it.
+    emptyState = Recipes.empty(dropdown, { theme = theme, text = EMPTY_TEXT, icon = EMPTY_ICON, zIndex = 1003 })
+    -- Recipes.empty hardcodes (1,0,1,0) and carries no position, so on a searchable popover the
+    -- centred icon/label stack would sit ON the pinned search field. Pin it over the LIST rect
+    -- after the fact — the same placement window.lua gives its sidebar block.
+    emptyState.Frame.Position = UDim2.new(0, 4, 0, listTop)
+    emptyState.Frame.Size = UDim2.new(1, -8, 1, -(listTop + 4))
+    syncEmpty()
     end
     -- close the dropdown when the control scrolls — otherwise the screen-space popover
     -- would either detach from the control or float outside the window once the control
@@ -498,7 +554,7 @@ function SelectBox.new(opts)
       Acrylic.reskin(ddFrame, theme, { transparency = frostAlpha(theme), edge = true,
         radius = theme.Radius.md, strokeAlpha = theme.Stroke.floating })   -- fill + hairline + rim + frost
       Effects.reskin(ddShadow, theme, "shadow")        -- nil-tolerant: Effect.shadowId is '' by default
-      list.ScrollBarImageColor3 = theme.Colors.border
+      Recipes.scrollbar(list, theme)                   -- 3.7: idempotent, so a re-skin just re-tints
       if searchBox then
         searchBox.BackgroundColor3 = theme.Colors.surface
         searchInput.TextColor3 = theme.Colors.foreground
@@ -507,7 +563,11 @@ function SelectBox.new(opts)
         searchStroke.Transparency = searchFocused and theme.Stroke.control or searchRest()
       end
       for _, d in ipairs(dividers) do d.BackgroundColor3 = theme.Colors.border end
-      if loadingRow then loadingRow.TextColor3 = theme.Colors.mutedForeground end
+      -- 3.1 skeleton blocks follow the surface token; the shimmer band keeps the mode it was born
+      -- with (core/effects.lua has no 'skeleton' kind for Effects.reskin — reported as a deviation),
+      -- which is invisible in practice: the band is a 1.1s sweep over a placeholder.
+      for _, sk in ipairs(skeletons) do sk.Frame.BackgroundColor3 = theme.Colors.surface end
+      if emptyState then emptyState.reskin() end       -- 3.4 muted icon + label
       retintRows()                                     -- rows: fill, check, lead, label, description
     end) or nil
     setOpen(true)
@@ -531,7 +591,11 @@ function SelectBox.new(opts)
   -- the exit entirely — animating a frame that is being replaced would show two popovers.
   local function teardown(instant)
     local dd, sh = dropdown, shadow
-    dropdown, shadow = nil, nil
+    -- 3.1/3.4: both belong to THIS popover. Snapshotting them here (and clearing the fields before
+    -- anything can yield) means the themer closure and a second Close see an empty set, never the
+    -- frames that are on their way out.
+    local sks = skeletons
+    dropdown, shadow, skeletons, emptyState = nil, nil, {}, nil
     if posConn then posConn:Disconnect(); posConn = nil end
     -- Released here, BEFORE the `not dd` early return and before any exit motion, so a re-skin
     -- landing mid-fold can never paint the frame that is being destroyed.
@@ -540,9 +604,13 @@ function SelectBox.new(opts)
     for _, e in ipairs(optButtons) do if e.hover then e.hover.disconnect() end end
     optButtons = {}
     Overlay.untrackPopover(api.Close)
-    if not dd then return end
+    local function stopSkeletons() for _, sk in ipairs(sks) do sk.Stop() end end
+    if not dd then stopSkeletons(); return end
     local function drop() dd:Destroy(); if sh then sh:Destroy() end end
-    if instant then drop() else popShut(dd, theme, ddScale, drop) end
+    -- The shimmer loops must not outlive the popover. On a rebuild the frame is dropped FIRST, so
+    -- Stop() finds an orphan and destroys at once instead of spending a fade on a dead branch; on a
+    -- real close the fade runs alongside the fold.
+    if instant then drop(); stopSkeletons() else stopSkeletons(); popShut(dd, theme, ddScale, drop) end
   end
   function rebuild()
     if dropdown then teardown(true) end

@@ -17,6 +17,10 @@ local Window = EzUI:CreateWindow({
     Transparency = 0.12,
     ToggleKey = Enum.KeyCode.RightControl,
     FloatingToggle = { Type = "simple", AutoHide = true },
+
+`FloatingToggle.Pulse = true` breathes an accent ring around the button for a few cycles and
+then rests, to draw the eye to it once. Off by default; cancelled on hover and when the window
+is shown again.
     Config = { Enabled = true, FileName = "MyHub", AutoSave = true, AutoLoad = true },
 })
 ```
