@@ -639,10 +639,17 @@ h.describe("notification", function()
 
   h.it("StackShadow: absent while shadowId is empty; a ZIndex 0 sibling once an asset is set", function()
     R.Notification.clearAll()
+    -- The toast container is module state and its StackShadow outlives a clearAll, so an earlier
+    -- test's shadow would still be attached. Init() drops the container (and the ticker) so this
+    -- case really builds a fresh one under the new overlay root.
+    R.Notification.Init(R)
+    -- Overlay.get returns the EXISTING root while it is still alive, so without a reset the new
+    -- container would be a second one under the old root and toastCont would find the stale one.
+    R.Overlay.reset()
     local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
-    R.Notification.show({ Title = "a", Duration = 0 })
+    R.Notification.show({ Title = "a", Duration = 0, Theme = R.Theme.new({ Effect = { shadowId = "" } }) })
     local cont = toastCont(root)
-    h.expect(cont:FindFirstChild("StackShadow")).toBeNil()            -- default theme: shadows off
+    h.expect(cont:FindFirstChild("StackShadow")).toBeNil()            -- no asset configured: skipped
     R.Notification.clearAll()
     local t = R.Theme.new({ Effect = { shadowId = "rbxassetid://1" } })
     R.Notification.show({ Title = "b", Duration = 0, Theme = t })

@@ -140,9 +140,10 @@ h.describe("colorpicker", function()
     h.expect(pv.BackgroundTransparency < R.Theme.Acrylic.frost).toBeTruthy()
     cp.Close()
   end)
-  h.it("the open popover gets a shadow sibling that dies with it (none while shadowId is '')", function()
+  h.it("the open popover gets a shadow sibling that dies with it (none without a shadow asset)", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
-    local plain, root = anchored(gui)
+    -- state the no-asset path explicitly: the default theme now ships an uploaded sprite
+    local plain, root = anchored(gui, nil, { Theme = R.Theme.new({ Effect = { shadowId = "" } }) })
     plain.Open()
     local found = false
     for _, c in ipairs(root:GetChildren()) do if c.Name == "ColorPopoverShadow" then found = true end end

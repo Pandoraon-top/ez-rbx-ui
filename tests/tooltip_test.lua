@@ -144,10 +144,13 @@ h.describe("tooltip", function()
     handle.Destroy()                                           -- and tearing it down is safe
   end)
 
-  h.it("TooltipShadow: none while shadowId is empty; a sibling one layer below the chip otherwise", function()
+  h.it("TooltipShadow: none without a shadow asset; a sibling one layer below the chip otherwise", function()
     local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
     local plain = h.roblox.Instance.new("TextButton")
-    R.Tooltip.attach(plain, "Hi")
+    -- state the no-asset path: the default theme now ships an uploaded sprite. A bare assertion
+    -- failing here would also skip the MouseLeave below and strand the chip in the shared overlay
+    -- root, which every later test in this file reads.
+    R.Tooltip.attach(plain, "Hi", R.Theme.new({ Effect = { shadowId = "" } }))
     plain.MouseEnter:Fire()
     h.expect(root:FindFirstChild("TooltipShadow")).toBeNil()
     plain.MouseLeave:Fire()

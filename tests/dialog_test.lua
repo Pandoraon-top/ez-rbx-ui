@@ -358,9 +358,9 @@ h.describe("dialog", function()
 
   h.it("DialogShadow: none while shadowId is empty; otherwise a modal-layer sibling that follows the card", function()
     local R = h.loadLib(); local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(gui)
-    R.Dialog.open({ Title = "T", Buttons = { { Text = "OK" } } })
+    R.Dialog.open({ Title = "T", Theme = R.Theme.new({ Effect = { shadowId = "" } }), Buttons = { { Text = "OK" } } })
     local _, dim = dialogCard(R, gui)
-    h.expect(dim:FindFirstChild("DialogShadow")).toBeNil()         -- default theme: shadows off
+    h.expect(dim:FindFirstChild("DialogShadow")).toBeNil()         -- no asset configured: layer skipped
     local R2 = h.loadLib(); local gui2 = h.roblox.Instance.new("ScreenGui"); R2.Overlay.get(gui2)
     local t = R2.Theme.new({ Effect = { shadowId = "rbxassetid://1" } })
     R2.Dialog.open({ Title = "T", Theme = t, Buttons = { { Text = "OK" } } })

@@ -35,15 +35,17 @@ h.describe("window", function()
   end)
   h.it("FAB is the reopen button: hidden when shown, appears on hide, no shadow, tap restores", function()
     local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
-    local w = R.Window.new({ Title = "M", Parent = screen, FloatingToggle = true })
+    local w = R.Window.new({ Title = "M", Parent = screen, FloatingToggle = true,
+      Theme = R.Theme.new({ Effect = { shadowId = "" } }) })   -- no asset: the depth layers are skipped
     local function findFab() for _, c in ipairs(R.Overlay.get(screen):GetChildren()) do if c.Name == "FloatingToggle" then return c end end end
     local fab = findFab()
     h.expect(fab ~= nil).toBeTruthy()
     h.expect(fab.Visible).toBe(false)
     h.expect(fab:GetAttribute("FabType")).toBe("simple")
     h.expect(fab:FindFirstChild("Chevron") ~= nil).toBeTruthy()
-    -- default theme carries no Effect.shadowId, so the FAB shadow layer is never built. The name
-    -- has to be the one the code actually uses ("FabShadow"): a stale name passes no matter what.
+    -- This window was built with the shadow-off theme below, so the FAB shadow layer is never
+    -- built. The name has to be the one the code actually uses ("FabShadow"): a stale name would
+    -- pass no matter what the code does.
     local shadow; for _, c in ipairs(R.Overlay.get(screen):GetChildren()) do if c.Name == "FabShadow" then shadow = c end end
     h.expect(shadow).toBe(nil)
     w:Hide()
@@ -1098,9 +1100,10 @@ h.describe("window", function()
     for k, v in pairs(extra or {}) do o[k] = v end
     return R.Window.new(o)
   end
-  h.it("no shadow layer while Effect.shadowId is empty: every call site tolerates nil", function()
+  h.it("no shadow layer when no shadow asset is configured: every call site tolerates nil", function()
     local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
-    local w = R.Window.new({ Title = "M", Parent = screen })
+    -- explicit: the default theme now ships an uploaded sprite, so shadows are ON by default
+    local w = R.Window.new({ Title = "M", Parent = screen, Theme = R.Theme.new({ Effect = { shadowId = "" } }) })
     h.expect(w.Gui:FindFirstChild("WindowShadow")).toBe(nil)
     w:SetTransparency(0.4); w:SetUIScale(1.2); w:SetMode("light"); w:AdaptToViewport()
     dragBarTo(w, 160, 40, h.roblox.Vector2.new(100, 10))

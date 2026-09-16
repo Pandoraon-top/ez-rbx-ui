@@ -45,9 +45,11 @@ local DEFAULT = {
     shake = { amp = 3, steps = 4, step = 0.04 },
     cascade = { x = 6, y = 8 },
   },
-  -- shadowId '' = shadows off until the 9-slice asset is verified in Studio; controlGlow 'auto' = off on mobile
+  -- shadowId = the uploaded assets/shadow-9slice.png; set it to '' to switch every depth layer
+  -- off (Effects.shadow/glow then return nil and each call site skips the layer).
+  -- slice must match that sprite: 499 square with a 49px falloff border. controlGlow 'auto' = off on mobile
   Effect = {
-    shadowId = "", slice = { x0 = 49, y0 = 49, x1 = 450, y1 = 450 },
+    shadowId = "rbxassetid://91077512535886", slice = { x0 = 49, y0 = 49, x1 = 450, y1 = 450 },
     window = { spread = 28, offsetY = 6 }, dialog = { spread = 32, offsetY = 10 }, popover = { spread = 18, offsetY = 4 },
     toast = { spread = 16, offsetY = 4 }, tooltip = { spread = 10, offsetY = 2 }, control = { spread = 6, offsetY = 0 },
     lift = { spreadDelta = 8, alphaDelta = -0.12 }, controlGlow = "auto",

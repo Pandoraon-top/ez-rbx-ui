@@ -18,18 +18,24 @@ from `Theme.Effect.slice`, so the two can never drift:
 | SliceCenter | `(49, 49, 450, 450)` — equals `Theme.Effect.slice` |
 | Centre alpha | 140/255, black; the per-mode value in `Theme.MODE_EFFECTS` composites on top |
 
-### Using it
+### Status
 
-1. Upload the PNG to Roblox (Creator Dashboard, or right-click Import in Studio) and copy the
-   resulting asset id.
+Uploaded and wired: `Theme.Effect.shadowId` is `rbxassetid://91077512535886`. The upload must stay
+public (Creator Dashboard > Settings > Advanced > Asset Privacy off), because the library is
+loaded into other people's experiences and a Restricted image renders nowhere but your own.
+
+### Replacing it
+
+1. Upload the PNG through Creator Dashboard > Development items > Images, or Studio's Asset
+   Manager, and copy the asset id. Do not upload it as a Decal: that asset type yields an id that
+   does not render through `Image`.
 2. Set it in `core/theme.lua`, in the `Effect` group:
    ```lua
    shadowId = "rbxassetid://<your id>",
    ```
-3. Check it in Studio in both dark and light mode before committing the id. While `shadowId` is
-   an empty string `Effects.shadow` and `Effects.glow` return `nil` and every call site skips the
-   layer, so the library renders correctly with no shadows at all — that is the safe default, and
-   a wrong id would instead paint a stray image under every surface.
+3. Check it in Studio in both dark and light mode. Moderation has to approve a new image first, so
+   expect a window where the id simply resolves to nothing.
 
-Moderation has to approve an uploaded image before it renders, so expect a short delay where the
-id resolves to nothing.
+Setting `shadowId` to `""` switches every depth layer off: `Effects.shadow` and `Effects.glow`
+return `nil` and each call site skips its layer, which is the behaviour the tests pin for a
+project that supplies no asset.

@@ -125,9 +125,10 @@ h.describe("toggle", function()
   end)
 
   -- ---- 2.9 accent glow ------------------------------------------------------
-  h.it("has no glow while Effect.shadowId is '' (today's default) (2.9)", function()
+  h.it("has no glow when no shadow asset is configured (2.9)", function()
     desktop()
-    local t = Toggle.new({ Parent = Create("Frame", {}), Text = "x", Default = true })
+    local t = Toggle.new({ Parent = Create("Frame", {}), Text = "x", Default = true,
+      Theme = Theme.new({ Effect = { shadowId = "" } }) })
     h.expect(t.Frame:FindFirstChild("TrackGlow")).toBeNil()
   end)
   h.it("parents the glow BESIDE the track (never inside it), below it, and fades it with the value (2.9)", function()

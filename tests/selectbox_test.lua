@@ -636,9 +636,10 @@ h.describe("selectbox", function()
     sb.Close()
     h.expect(sh.Parent).toBe(nil)
   end)
-  h.it("no shadow layer while Effect.shadowId is '' (today's default)", function()
+  h.it("no shadow layer when no shadow asset is configured", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
-    local sb, root = anchored(gui)
+    -- explicit: the default theme now carries an uploaded sprite, so shadows are ON by default
+    local sb, root = anchored(gui, { Theme = R.Theme.new({ Effect = { shadowId = "" } }) })
     sb.Open()
     local found = false
     for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdownShadow" then found = true end end
