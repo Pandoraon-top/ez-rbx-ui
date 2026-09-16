@@ -221,12 +221,16 @@ end
 
 -- Grab feedback (drag/resize): spread grows by 2*lift.spreadDelta and the alpha shifts by
 -- lift.alphaDelta while `on`; back to rest on release. Motion.fast either way.
-function Effects.lift(shadow, theme, on)
+-- `alpha` overrides the computed transparency for an owner that folds more than the mode into it
+-- (the window adds its own Transparency). It must ride THIS tween: a second tween on the same
+-- instance cancels this one outright, and the shadow would keep the alpha but never finish
+-- growing -- it stayed oversized for the rest of the session.
+function Effects.lift(shadow, theme, on, alpha)
   if not shadow then return nil end
   need(theme, "lift")
   local m = metaOf(shadow)
   m.lifted = on and true or false
-  local goal = { ImageTransparency = shadowAlpha(theme, m.lifted) }
+  local goal = { ImageTransparency = type(alpha) == "number" and alpha or shadowAlpha(theme, m.lifted) }
   local rest = restOf(shadow, m)
   if rest then
     local g = growth(theme, m)

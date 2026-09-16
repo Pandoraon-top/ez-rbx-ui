@@ -41,7 +41,7 @@ local DEFAULT = {
     enter = 0.28, exit = 0.14, hover = 0.12, press = 0.08, release = 0.22, stagger = 0.035,
     enterScale = 0.94, exitScale = 0.96, pressScale = 0.97, hoverScale = 1.06, popFrom = 0.9,
     knobStretch = 1.2, handleGrow = 1.3, handleHover = 1.15, spin = 0.8, snap = 0.3, hideDrift = 12,
-    popSlide = 6, dialogRise = 12, dialogDrop = 8, bumpPx = 2,
+    popSlide = 6, dialogRise = 12, dialogDrop = 8, bumpPx = 2, copyRevert = 1.2, pulse = 0.4,
     shake = { amp = 3, steps = 4, step = 0.04 },
     cascade = { x = 6, y = 8 },
   },
@@ -57,18 +57,23 @@ local DEFAULT = {
   Stroke = {
     window = 0.3, floating = 0, control = 0, divider = 0.4, focusThickness = 2,
     panel = { dark = 0.6, light = 0 }, search = { dark = 0.8, light = 0.5 },
+    -- track = progress/slider rail hairline; knob = rim that keeps a white knob readable on a
+    -- white track; pulse = the alphas a listening keybind chip breathes between.
+    track = 0.5, knob = 0.7, pulse = { low = 0.2, high = 0.7 },
   },
   Opacity = {
     hoverWash = 0.94, pressWash = 0.9, hoverFill = 0.12, pressFill = 0.2, ghostHover = 0.4, ghostPress = 0.25,
     tabHover = 0.92, tabPress = 0.88, optionHover = 0.6, rowHover = 0.94, disabled = 0.5, scrim = 0.45,
     dialogScrim = { dark = 0.5, light = 0.6 }, glowHover = 0.7,
+    flash = 0.35,   -- lift a progress fill starts from when it completes, fading back to opaque
   },
   -- frost = default host transparency behind the sheen; glintFade = fade band at each end of the top glint line
-  Acrylic = { noiseId = "rbxassetid://9968344105", tileSize = 128, strokeAlpha = 0.3, highlightBand = 0.45, frost = 0.12, glintFade = 0.25 },
+  -- popoverFrost = a popover is frosted one step LIGHTER than the shell: content behind it must stay readable
+  Acrylic = { noiseId = "rbxassetid://9968344105", tileSize = 128, strokeAlpha = 0.3, highlightBand = 0.45, frost = 0.12, glintFade = 0.25, popoverFrost = 0.04 },
   Scrollbar = { imageId = "", alpha = 0.35 },
   Sizes = {
     icon = 16, iconSm = 14, iconButton = 26, touchHit = 44, scrollbar = 4, progress = 8, sliderHit = 24, chip = 22,
-    knob = 20, tagMeasureFudge = 1.08, dragKeep = 40,
+    knob = 20, tagMeasureFudge = 1.08, dragKeep = 40, dragThreshold = 6,
     titleBar = 40, titleBarTall = 56, -- window.lua TITLE_H / TITLE_H_TALL (title image or subtitle)
     resizeGrip = 12, resizeGripInset = 4, splitGap = 12,
     indicator = { w = 3, h = 18, stretch = 26, radius = 2, haloW = 9, haloH = 26, haloAlpha = 0.85 },
