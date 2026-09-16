@@ -1,6 +1,8 @@
 -- Deps injected via Init(R) (none needed). A per-window registry of accent
 -- re-appliers. Accent-using components register a closure that recolors their
--- accent parts reading theme.Colors live; Window:SetAccent fires them all.
+-- accent parts reading theme.Colors live; Window:SetAccent/SetMode fire them all with a
+-- reason ('accent' | 'mode') so closures with mode-only work (acrylic grain, light
+-- hairlines) can branch on it. Legacy closures simply ignore the extra argument.
 local Themer = {}
 function Themer.Init(_) end
 
@@ -31,11 +33,13 @@ function Themer.new()
     fns[fn] = true
     return function() fns[fn] = nil end
   end
-  function self.reskin()
-    for fn in pairs(fns) do pcall(fn) end
+  -- pcall isolates a broken closure so one component cannot leave the rest of the window
+  -- half-reskinned; reason is nil for callers that predate it.
+  function self.reskin(reason)
+    for fn in pairs(fns) do pcall(fn, reason) end
   end
   function self.setAccent(primary, foreground)
-    self.reskin() -- closures read theme.Colors live; caller mutated it before calling
+    self.reskin("accent") -- closures read theme.Colors live; caller mutated it before calling
   end
   return self
 end

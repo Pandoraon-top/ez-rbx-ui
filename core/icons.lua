@@ -273,6 +273,10 @@ local DATA = {
 
 local Icons = { data = DATA }
 
+-- Everything below this line is hand-written: scripts/build-icons.mjs splits the file on the
+-- first occurrence of the `local Icons = {...}` assignment above and regenerates only what
+-- precedes it. Never repeat that exact assignment text below (the split would truncate here).
+
 -- Name aliases: this lucide port predates upstream renames. Keep shadcn-current
 -- names working (e.g. "house" → "home"). Lives below the generator's marker so
 -- `make icons` regeneration preserves it.
@@ -280,8 +284,15 @@ local ALIAS = {
   house = "home",
 }
 
+-- Deps injected via Init(R): Animate only. Init must never call other modules (pairs()
+-- order is undefined), and Icons must never require them (bundler constraint).
+local Animate
+function Icons.Init(R) Animate = R.Animate end
+
+local function lookup(name) return DATA[name] or DATA[ALIAS[name] or ""] end
+
 function Icons.get(name)
-  local e = DATA[name] or DATA[ALIAS[name] or ""]
+  local e = lookup(name)
   if not e then return nil end
   return {
     Id = "rbxassetid://" .. e.id,
@@ -290,17 +301,39 @@ function Icons.get(name)
   }
 end
 
+-- Component-wise compare: Vector2 is a value type in Roblox but a fresh table in the mock,
+-- so `==` against a new Vector2 would defeat the fast path headless. nil (never set) ≠ rect.
+local function sameRect(v, x, y) return v ~= nil and v.X == x and v.Y == y end
+
+-- Synchronous: writes land immediately (callers rely on it inside themer closures and tests).
+-- Fast path: state/hover code re-applies the same glyph just to change its colour; when Image
+-- and both rects already match, only ImageColor3 is written so Roblox never re-resolves the
+-- asset (a rewrite can flash the sprite for a frame).
 function Icons.apply(imageLabel, name, color3)
-  local a = Icons.get(name)
-  if not a then
+  local e = lookup(name)
+  if not e then
     if warn then warn("[EzUI] unknown icon: " .. tostring(name)) end
     return false
   end
-  imageLabel.Image = a.Id
-  imageLabel.ImageRectSize = a.ImageRectSize
-  imageLabel.ImageRectOffset = a.ImageRectOffset
+  local id = "rbxassetid://" .. e.id
+  if imageLabel.Image ~= id
+    or not sameRect(imageLabel.ImageRectSize, e.w, e.h)
+    or not sameRect(imageLabel.ImageRectOffset, e.x, e.y) then
+    imageLabel.Image = id
+    imageLabel.ImageRectSize = Vector2.new(e.w, e.h)
+    imageLabel.ImageRectOffset = Vector2.new(e.x, e.y)
+  end
   if color3 then imageLabel.ImageColor3 = color3 end
   return true
+end
+
+-- Tween ImageColor3 (caret collapsed→expanded, grip rest→hover). `duration` is a Motion token
+-- or seconds, default 'fast'. Without Animate (module used bare, before Init) the colour is
+-- written directly so callers get the same end state either way. Returns the tween (or nil).
+function Icons.tint(imageLabel, color3, duration)
+  if not imageLabel or not color3 then return nil end
+  if not Animate then imageLabel.ImageColor3 = color3; return nil end
+  return Animate.to(imageLabel, duration or "fast", { ImageColor3 = color3 })
 end
 
 return Icons

@@ -85,4 +85,43 @@ h.describe("device reactivity", function()
   end)
 end)
 
+h.describe("device capabilities", function()
+  h.it("SupportsHover is true with a mouse and false without one", function()
+    local D, uis = ctx()
+    h.expect(D.SupportsHover()).toBe(true)
+    uis.MouseEnabled = false
+    h.expect(D.SupportsHover()).toBe(false)
+  end)
+  h.it("SupportsHover is false (and never throws) when UserInputService is missing", function()
+    local D = ctx()
+    h.mock.hidden = { UserInputService = true }
+    local ok, v = pcall(D.SupportsHover)
+    h.mock.hidden = nil
+    h.expect(ok).toBe(true); h.expect(v).toBe(false)
+  end)
+  h.it("PrefersReducedMotion is false by default and follows GuiService.ReducedMotionEnabled", function()
+    local D = ctx()
+    local gui = h.roblox.game:GetService("GuiService")
+    h.expect(D.PrefersReducedMotion()).toBe(false)
+    gui.ReducedMotionEnabled = true
+    local v = D.PrefersReducedMotion()
+    gui.ReducedMotionEnabled = false
+    h.expect(v).toBe(true)
+  end)
+  h.it("PrefersReducedMotion is false when the flag is absent (older client)", function()
+    local D = ctx()
+    local gui = h.roblox.game:GetService("GuiService")
+    gui.ReducedMotionEnabled = nil
+    local v = D.PrefersReducedMotion()
+    gui.ReducedMotionEnabled = false
+    h.expect(v).toBe(false)
+  end)
+  h.it("PrefersReducedMotion is false (and never throws) when GuiService is missing", function()
+    local D = ctx()
+    h.mock.hidden = { GuiService = true }
+    local ok, v = pcall(D.PrefersReducedMotion)
+    h.mock.hidden = nil
+    h.expect(ok).toBe(true); h.expect(v).toBe(false)
+  end)
+end)
 h.run()
