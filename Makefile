@@ -70,10 +70,14 @@ examples: build
 
 .PHONY: showcase
 showcase: build
-	@echo "Bundling the visual showcase to dist/ (committed so raw.githubusercontent can serve it)..."
+	@echo "Bundling the library + visual showcase to dist/ (committed so raw.githubusercontent can serve them)..."
 	@mkdir -p $(DIST_DIR)
+	@# NOT --release: that flag strips statements in a way that leaves Window's injected
+	@# DefaultTheme nil at runtime (reproducible as far back as bf1ba76, i.e. it predates the
+	@# polish work). The release job's loadfile check only parses, so it cannot catch this.
+	@lua-bundler -e $(INPUT_FILE) -o $(DIST_DIR)/ez-rbx-ui.lua --obfuscate 1
 	@lua-bundler -e $(SHOWCASE_INPUT) -o $(SHOWCASE_DIST)
-	@lua -e "assert(loadfile('$(SHOWCASE_DIST)')); print('showcase bundle ok')"
+	@lua -e "assert(loadfile('$(DIST_DIR)/ez-rbx-ui.lua')); assert(loadfile('$(SHOWCASE_DIST)')); print('dist bundles ok')"
 	@echo "Raw URL: https://raw.githubusercontent.com/Pandoraon-top/ez-rbx-ui/feat/visual-polish/$(SHOWCASE_DIST)"
 
 .PHONY: docs
