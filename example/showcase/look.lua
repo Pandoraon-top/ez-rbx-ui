@@ -15,6 +15,29 @@ return function(window)
     "plus a 1px white glint tucked inside the top radius. The whole window rests on a soft " ..
     "9-slice drop shadow, which is what separates it from the game behind it.")
 
+  tab:AddSection("The sidebar")
+  tab:AddParagraph(
+    "Three things live in the strip on the left. The field at the top filters BOTH halves of it: " ..
+    "a tab survives if its own name matches, and it also survives if any control inside it " ..
+    "matches, while every control row that does NOT match is hidden — so searching thins the page " ..
+    "you are standing on as well as the tab list. The overline headers (THE SHELL, THE CONTENTS) " ..
+    "come from grouping the tabs, and one disappears once every tab under it has been filtered " ..
+    "away. The seam between the sidebar and this panel is draggable: rest the pointer on it and a " ..
+    "grip pill fades up out of the hairline, then pull — the panel reflows as you go. And the 3px " ..
+    "pill marking the active tab does not merely move: it stretches tall as it leaves, springs " ..
+    "across on a duration scaled to the distance, and settles back to its rest height on arrival.")
+  -- SearchTabs is the exact entry point the field uses, so a button proves the filter with no
+  -- typing. The query is a word from this button's OWN caption on purpose: the index stores the
+  -- text a control was BUILT with (components/host.lua, registerSearchable), so this row survives
+  -- its own filter and can be clicked again to clear it.
+  local searchBtn, filtered = nil, false
+  searchBtn = tab:AddButton({ Text = "Filter the sidebar for \"toggle\"", Icon = "search", Variant = "secondary",
+    Callback = function()
+      filtered = not filtered
+      window:SearchTabs(filtered and "toggle" or "")
+      searchBtn.SetText(filtered and "Clear the filter" or "Filter the sidebar for \"toggle\"")
+    end })
+
   tab:AddSection("Repaint the shell live")
   -- Mode and accent are separate axes on purpose: a NAMED accent survives a mode switch, while
   -- "Adaptive" follows the mode. Flip both to see that.
@@ -81,4 +104,27 @@ return function(window)
     "the window in place rather than drifting. Read that confirm dialog with suspicion: it " ..
     "offers to reopen the window with the toggle key or the floating button, and it cannot — " ..
     "Close destroys the GUI and every handler with it. Use minimize while you are still touring.")
+
+  tab:AddSection("The floating toggle")
+  tab:AddParagraph(
+    "The button that brings the window back has three shapes. Simple is a chevron tab that docks " ..
+    "flush to the screen edge with a few pixels peeking out; circle is a round accent button and " ..
+    "square a rounded surface tile — those two wear the same brand glyph as the title bar, tinted " ..
+    "to the foreground token so the logo follows dark and light instead of shipping twice. The " ..
+    "button auto-hides, so switching type changes nothing you can see while the window is up: " ..
+    "press RightControl (or minimize) FIRST, then drag it. Only the simple tab magnets — drop it " ..
+    "anywhere and it slides to whichever side of the screen its centre was nearest, docking with " ..
+    "a few pixels peeking out and its chevron spun round to face outward; rest a pointer on it " ..
+    "and it leans a little further out. Circle and square are free-floating and stay where you " ..
+    "drop them.")
+  local fabLabel = tab:AddLabel("Floating toggle: simple")
+  -- SetFloatingToggle merges over the current options (components/window.lua), so changing Type
+  -- keeps the Image/Adaptive/AutoHide set in example/showcase.lua. Rebuilding is idempotent.
+  local function setFab(kind)
+    window:SetFloatingToggle({ Type = kind })
+    fabLabel.SetText("Floating toggle: " .. window:GetFloatingToggleType())
+  end
+  tab:AddButton({ Text = "Simple — chevron tab", Variant = "outline", Callback = function() setFab("simple") end })
+  tab:AddButton({ Text = "Circle — accent button", Variant = "outline", Callback = function() setFab("circle") end })
+  tab:AddButton({ Text = "Square — logo tile", Variant = "outline", Callback = function() setFab("square") end })
 end

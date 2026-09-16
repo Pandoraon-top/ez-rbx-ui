@@ -4,6 +4,481 @@
 
 local EmbeddedModules = {}
 
+-- Module: showcase/motion
+EmbeddedModules["showcase/motion"] = function()
+    -- Tab 2 — the controls whose MOVEMENT changed. Each block is a paragraph that names the thing to
+    -- watch, then the one control that does it. The last section turns all of it off.
+    return function(window)
+      local tab = window:AddTab({ Name = "Motion", Icon = "activity" })
+
+      tab:AddSection("Toggle")
+      tab:AddParagraph(
+        "Hold the switch down before you release it: the knob stretches toward where it is going " ..
+        "(20px wide to 24px) and snaps back on release. The travel itself is a spring with a 1px " ..
+        "overshoot, not a linear slide. When it lands ON, the grey track hairline dissolves so the " ..
+        "accent pill is clean, and an accent glow fades in behind the track. The OFF track is its " ..
+        "own tone now — it used to be the same colour as the row, which made it invisible.")
+      local demoToggle = tab:AddToggle({
+        Text = "Knob spring + accent glow",
+        Description = "Press and hold, then release.",
+        Default = true,
+      })
+
+      tab:AddSection("Slider")
+      tab:AddParagraph(
+        "The grab strip is 24px tall now, not 6 — you no longer have to hit the rail exactly. Hover " ..
+        "the handle and it grows to 1.15; start dragging and it goes to 1.3 with an accent halo " ..
+        "behind it, then springs back when you let go. The empty part of the rail has a hairline so " ..
+        "it reads as a groove rather than a gap.")
+      local demoSlider = tab:AddSlider({
+        Text = "Handle grow + halo",
+        Min = 0, Max = 100, Default = 40,
+        Description = "Hover the handle, then drag it.",
+      })
+      -- SetValue is eased (Quint over `base`) rather than a jump, which is the same path a config
+      -- restore takes. Two buttons make that visible without a drag.
+      tab:AddButton({ Text = "Glide the slider to 10", Variant = "outline",
+        Callback = function() demoSlider.SetValue(10) end })
+      tab:AddButton({ Text = "Glide the slider to 90", Variant = "outline",
+        Callback = function() demoSlider.SetValue(90) end })
+
+      tab:AddSection("Progress")
+      tab:AddParagraph(
+        "The fill flows to its new value with a distance-aware duration — a nudge lands quickly, a " ..
+        "long sweep takes its time. Step this to 100% and watch the completion flash: the fill " ..
+        "lifts to 35% transparent the instant it arrives and fades back to solid.")
+      local bar = tab:AddProgressBar({ Default = 0 })
+      local stepBtn
+      stepBtn = tab:AddButton({ Text = "Step +25%", Icon = "chevron-right", Callback = function()
+        local v = bar.Get()
+        -- wraps back to empty once full, so the button is safe to hammer and the flash is repeatable
+        bar.Set(v >= 1 and 0 or math.min(1, v + 0.25))
+        stepBtn.SetText(bar.Get() >= 1 and "Reset to 0%" or "Step +25%")
+      end })
+
+      tab:AddSection("Text field")
+      tab:AddParagraph(
+        "Click into the box. Its hairline tweens from 1px border to 2px in the ring colour rather " ..
+        "than snapping, and clicking away tweens it back. The box itself sits at the window-glass " ..
+        "tone — a step BELOW the row it lives in — which is the inset the Look tab talks about. " ..
+        "Type something and the clear button fades in at the right edge. It also judges you on the " ..
+        "way out: put a SPACE in the name and click away. The box shakes on its own X offset and " ..
+        "lands back on the exact pixel it started from, the hairline turns destructive red, and an " ..
+        "error line fades in underneath while the row grows for it. Remove the space, click away, " ..
+        "and all three reverse.")
+      tab:AddTextBox({
+        Text = "Nickname",
+        Placeholder = "click here",
+        Description = "The ring is its own neutral token, so it does not follow the accent.",
+        Clearable = true,
+        MaxLength = 24,
+        -- Validate runs on focus-loss and returns (ok, message). An empty field stays valid on
+        -- purpose: an untouched box should not nag, so only a typed-in space is ever rejected.
+        Validate = function(text)
+          if text == "" or not text:find("%s") then return true end
+          return false, "No spaces — that is the rule this field rejects."
+        end,
+      })
+      tab:AddParagraph(
+        "The field below is the read-only half of the same kit. Press the copy glyph: it becomes a " ..
+        "green check for just over a second, then falls back on its own. Press it again mid-check " ..
+        "and the second press takes the window over — a generation counter owns the revert, so the " ..
+        "first one cannot cut the second one short.")
+      tab:AddTextBox({
+        Text = "Share code",
+        Description = "Copyable makes it non-editable; the glyph is the only control.",
+        Default = "EZUI-7F3A-22",
+        Copyable = true,
+      })
+
+      tab:AddSection("Number field")
+      tab:AddParagraph(
+        "The same focus ring, plus four movements of its own. HOLD − or + instead of tapping: the " ..
+        "first step lands at once, then after a third of a second it repeats, accelerating while " ..
+        "you hold. Push a box against its Min or Max and the refusal is visible — it bumps 2px " ..
+        "toward the side you pushed and returns to the exact position it left, while the glyph at " ..
+        "that end fades to the disabled alpha rather than changing colour. Type a shorthand into " ..
+        "the first one — 1k, 4.4m — and it expands on the way in; the $ is stripped for you, and " ..
+        "while the caret is in the field you see the raw number, not the compact one. Last, roll " ..
+        "the wheel over a box: the value only follows it while the pointer is really over the box, " ..
+        "which is why the panel behind still scrolls everywhere else.")
+      tab:AddNumberBox({
+        Text = "Budget",
+        Description = "Compact display with a $ prefix. Try typing 4.4m.",
+        -- 1.5M, not 1.25M: compact carries ONE decimal, and 1.25 formats as "1.2" (%.1f rounds an
+        -- exactly-representable half to even). A tour about polish should not open on a number that
+        -- reads like a rounding bug, so the default sits on a step that survives the round trip.
+        Default = 1500000, Min = 0, Max = 10000000, Step = 250000,
+        Format = "compact", Prefix = "$",
+      })
+      tab:AddNumberBox({
+        Text = "Retries",
+        Description = "Plain, 0–5. It starts AT Min, so − is already dimmed.",
+        Default = 0, Min = 0, Max = 5, Step = 1,
+      })
+
+      tab:AddSection("Button states")
+      tab:AddParagraph(
+        "Hover any button for the wash, press for the 0.97 scale and the deeper fill, release for " ..
+        "the spring back. The two below are the states you cannot reach by hovering.")
+      -- Loading: the label fades out, a spinner fades in and spins on ONE repeating tween (not a
+      -- Heartbeat loop). The busy flag is the important bit — without it a second click would stack
+      -- another timer and the first one would clear the loading state early.
+      local busy = false
+      local loadBtn
+      loadBtn = tab:AddButton({ Text = "Run a task (loading state)", Icon = "refresh-cw", Variant = "secondary",
+        Callback = function()
+          if busy then return end
+          busy = true
+          loadBtn.SetLoading(true)
+          task.delay(1.8, function()
+            loadBtn.SetLoading(false)
+            busy = false
+            window:ShowSuccess({ Title = "Done", Message = "The spinner was one repeating tween." })
+          end)
+        end })
+
+      -- Disabled: dims the surface, the label and the description, and blocks input — but SetEnabled
+      -- blocks USER input only, so .Set/.SetValue still move the control while it is dimmed. The
+      -- second half of this callback proves that.
+      local off = false
+      local dimBtn
+      dimBtn = tab:AddButton({ Text = "Disable the toggle and slider", Icon = "lock", Variant = "outline",
+        Callback = function()
+          off = not off
+          demoToggle.SetEnabled(not off)
+          demoSlider.SetEnabled(not off)
+          dimBtn.SetText(off and "Enable the toggle and slider" or "Disable the toggle and slider")
+          if off then
+            -- still moves while disabled: dimmed is not frozen, it is just not clickable
+            demoToggle.Set(false)
+            demoSlider.SetValue(65)
+            window:ShowInfo({ Title = "Dimmed, not frozen",
+              Message = "Both are disabled, yet code just moved them. Only YOUR input is blocked." })
+          end
+        end })
+
+      tab:AddButton({ Text = "Born disabled (nothing happens)", Variant = "destructive", Disabled = true,
+        Callback = function() window:ShowError({ Title = "This should never fire" }) end })
+
+      tab:AddSection("Reduced motion")
+      tab:AddParagraph(
+        "Every movement on this tab is one switch away from being instant. Turn it on, then come " ..
+        "back up and click the same controls: the knob teleports, the slider fill jumps to its new " ..
+        "width, the completion flash never appears, and the two REFUSALS — the number box bump and " ..
+        "the field shake — do not run at all, because a pure there-and-back has no end state worth " ..
+        "snapping to. Turn it off and the tab animates again.")
+      -- SetAnimationsEnabled is process-wide and explicit: last writer wins, so this toggle also
+      -- overrides the OS default the window booted with. Inverted on purpose — the switch reads
+      -- "reduce", the library flag reads "animate".
+      tab:AddToggle({
+        Text = "Reduce motion",
+        Description = "The same switch the OS reduce-motion setting drives by default.",
+        Default = false,
+        Callback = function(on) window:SetAnimationsEnabled(not on) end,
+      })
+    end
+
+end
+
+-- Module: showcase/overlays
+EmbeddedModules["showcase/overlays"] = function()
+    -- Tab 3 — everything that leaves the panel: toasts, the dialog, the two popovers, and the scrim
+    -- that locks the whole window.
+    return function(window)
+      local tab = window:AddTab({ Name = "Overlays", Icon = "bell" })
+
+      tab:AddSection("Toasts")
+      tab:AddParagraph(
+        "Raise three or four in a row, then put the cursor over the stack. They fan out on a " ..
+        "stagger — each row further back waits a beat longer — and the countdown pauses while you " ..
+        "hover. Move away and they collapse back to a stack with the newest in front. Each toast is " ..
+        "one canvas group, so it fades and exits as a single piece instead of part by part.")
+      tab:AddButton({ Text = "Success", Icon = "circle-check",
+        Callback = function() window:ShowSuccess({ Title = "Saved", Message = "Everything landed." }) end })
+      tab:AddButton({ Text = "Warning", Icon = "triangle-alert", Variant = "secondary",
+        Callback = function() window:ShowWarning({ Title = "Careful", Message = "That one is close to the limit." }) end })
+      tab:AddButton({ Text = "Error", Icon = "circle-x", Variant = "destructive",
+        Callback = function() window:ShowError({ Title = "Failed", Message = "The request came back empty." }) end })
+      tab:AddButton({ Text = "Info", Icon = "info", Variant = "outline",
+        Callback = function() window:ShowInfo({ Title = "Heads up", Message = "Nothing is on fire." }) end })
+      tab:AddButton({ Text = "With an action button", Variant = "ghost", Callback = function()
+        window:Notify({ Title = "Item deleted", Message = "Removed from your inventory.", Type = "warning",
+          Action = { Text = "Undo", Callback = function() window:ShowSuccess({ Title = "Restored" }) end } })
+      end })
+      -- Promise morphs ONE toast: the spinner row becomes the success row in place, with a pulse.
+      -- The busy guard keeps a second click from stacking a second 1.6s task.
+      local promising = false
+      tab:AddButton({ Text = "Loading toast that resolves", Icon = "loader", Variant = "secondary", Callback = function()
+        if promising then return end
+        promising = true
+        window:Promise(function() task.wait(1.6); return 42 end, {
+          Loading = "Fetching…", Error = "Could not fetch",
+          Success = function(n) return "Fetched " .. tostring(n) .. " rows" end,
+          Finally = function() promising = false end })
+      end })
+      -- The same spinner with no Promise around it: ShowLoading pins Duration to 0, so the toast waits
+      -- for DismissNotification(id). The id doubles as the busy guard, and OnDismiss clears it so
+      -- closing the toast by its own X cannot leave a stale one behind.
+      local loadingId
+      tab:AddButton({ Text = "Spinner toast, dismissed by hand", Icon = "loader", Variant = "outline", Callback = function()
+        if loadingId then window:DismissNotification(loadingId); loadingId = nil; return end
+        loadingId = window:ShowLoading({ Title = "Working…", Message = "Click the button again to dismiss it.",
+          OnDismiss = function() loadingId = nil end })
+      end })
+      -- Moving the stack is the clearest look at the exit: a toast leaves toward the edge its corner is
+      -- anchored to, so the same dismissal slides right, left, up or down.
+      tab:AddSelectBox({ Text = "Toast corner", Default = "bottom-right", Searchable = false,
+        Description = "Move the stack, raise a toast, and watch which way it leaves.",
+        Options = { "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right" },
+        Callback = function(v)
+          window:SetNotificationPosition(v)
+          window:ShowInfo({ Title = "Stack moved", Message = tostring(v), Duration = 2500 })
+        end })
+
+      tab:AddSection("Dialog")
+      tab:AddParagraph(
+        "The card fades in from 94%, rises about 12px and settles with a spring; the scrim behind it " ..
+        "fades rather than cutting in, and the card has its own drop shadow on top of the scrim. " ..
+        "The keyboard answers in two different ways. Escape (or gamepad B) is a DISMISSAL: the card " ..
+        "folds back down — shrink, fade, drop, scrim last — and no footer callback runs at all, so " ..
+        "nothing below is a safe way to say yes. Return (or gamepad A) is the answer: it fires the " ..
+        "LAST button, the primary one on the right, callback and all.")
+      tab:AddButton({ Text = "Open a dialog", Icon = "message-square", Callback = function()
+        window:Dialog({ Title = "Delete this loadout?", Message = "This cannot be undone.", Icon = "trash-2",
+          Buttons = {
+            { Text = "Cancel", Variant = "secondary" },
+            { Text = "Delete", Variant = "destructive", Icon = "trash-2",
+              Callback = function() window:ShowSuccess({ Title = "Deleted" }) end } } })
+      end })
+      -- theme.Colors.destructive is rgb(239, 68, 68) in BOTH palettes (core/theme.lua:21 and :104), so
+      -- the literal survives SetMode. A page is handed only `window`, which exposes no theme.
+      local DESTRUCTIVE = Color3.fromRGB(239, 68, 68)
+      tab:AddButton({ Text = "Badge header", Icon = "triangle-alert", Variant = "destructive", Callback = function()
+        -- IconBadge centres the header and sets the glyph in a rounded square tinted 15% toward
+        -- IconColor — the destructive red is what makes so shallow a mix read as a colour at all.
+        window:Dialog({ Title = "Ban this player?", Message = "They lose access the moment you confirm.",
+          Icon = "ban", IconBadge = true, IconColor = DESTRUCTIVE, Buttons = {
+            { Text = "Cancel", Variant = "secondary" },
+            { Text = "Ban", Variant = "destructive", Icon = "ban" } } })
+      end })
+      tab:AddButton({ Text = "A wider card", Icon = "expand", Variant = "outline", Callback = function()
+        -- Width is px, clamped to the window minus a 24px margin each side: an over-wide number fills
+        -- the frame instead of spilling out of it.
+        window:Dialog({ Title = "Release notes", Width = 460, Icon = "expand",
+          Message = "460 wide instead of the default 320. Still one canvas group, so the whole sheet — " ..
+            "header, rule and footer — zooms and fades as a single piece at any width.",
+          Buttons = { { Text = "Close" } } })
+      end })
+      tab:AddButton({ Text = "Stack two dialogs", Icon = "layers", Variant = "secondary", Callback = function()
+        -- Both open from HERE rather than from the first card's footer: a footer button runs its
+        -- callback and then closes its own dialog, so a second opened that way would be left alone
+        -- with the scrim fading out from under it. This way the first card holds the scrim for the pair.
+        window:Dialog({ Title = "Underneath", Message = "This one painted the scrim and holds it.",
+          Buttons = { { Text = "Close", Variant = "secondary" } } })
+        window:Dialog({ Title = "On top", Icon = "layers",
+          Message = "The room is no darker than it was for one card — a stacked dialog skips the scrim " ..
+            "instead of laying a second over the first. Escape and Return answer here only.",
+          Buttons = { { Text = "Close", Variant = "secondary" },
+            -- A footer button that opens another dialog: this card closes under the new one, and the
+            -- keyboard follows the top of the stack, not the card that did the opening.
+            { Text = "One more on top", Callback = function()
+              window:Dialog({ Title = "Third", Buttons = { { Text = "Done" } },
+                Message = "Its opener closed beneath it; the bottom card still holds the scrim." })
+            end } } })
+      end })
+
+      tab:AddSection("Popovers")
+      tab:AddParagraph(
+        "Open the dropdown and watch where it comes FROM: it grows out of its own field, scaling up " ..
+        "with a slide, and the caret rotates 180 degrees while it does. It gets the same frosted " ..
+        "glass and drop shadow as the window, so it floats instead of sitting flat. Close it and it " ..
+        "shrinks back down rather than blinking out. Near the bottom of the screen it flips upward " ..
+        "and grows from the other edge.")
+      -- Eight options: the search field auto-appears above five, so this shows the sticky search
+      -- with its own focus ring without having to pass Searchable.
+      tab:AddSelectBox({ Text = "Region", Default = "eu-west",
+        Description = "More than five options, so the search field appears on its own.",
+        Options = {
+          { Value = "eu-west", Text = "Europe West", Icon = "globe" },
+          { Value = "eu-north", Text = "Europe North", Icon = "globe" },
+          { Value = "us-east", Text = "US East", Icon = "map-pin" },
+          { Value = "us-west", Text = "US West", Icon = "map-pin" },
+          { Divider = true },
+          { Value = "ap-south", Text = "Asia Pacific South", Icon = "navigation" },
+          { Value = "ap-north", Text = "Asia Pacific North", Icon = "navigation" },
+          { Value = "sa-east", Text = "South America East", Icon = "compass" },
+          { Value = "af-south", Text = "Africa South", Icon = "compass" },
+        },
+        Callback = function(v) window:ShowInfo({ Title = "Region", Message = tostring(v), Duration = 2000 }) end })
+
+      -- No AllowNone here: components/selectbox.lua only consults it on the SINGLE-select path
+      -- (a multi list may always be emptied), so passing it would imply a behaviour it does not have.
+      tab:AddSelectBox({ Text = "Modules", Multi = true,
+        Description = "Multi-select: the field summarises, and a clear button appears once something is picked.",
+        Options = { "Aim", "ESP", "Movement", "Render", "Audio", "Network" },
+        -- Multi hands the callback an ARRAY of values, so count it rather than tostring it.
+        Callback = function(list) window:ShowInfo({ Title = "Modules", Message = #list .. " selected", Duration = 2000 }) end })
+
+      tab:AddParagraph(
+        "The colour picker is the same popover machinery. The SV square and the hue strip each have " ..
+        "a dot with a 1px rim so it stays visible over a bright patch, and the swatch on the row " ..
+        "follows live as you drag.")
+      tab:AddColorPicker({ Text = "Highlight colour", Default = Color3.fromRGB(120, 160, 255) })
+
+      tab:AddSection("Keybind")
+      -- The listening state is the FOCUS ring recipe, not the accent: components/keybind.lua paints
+      -- the chip stroke Colors.ring while listening and only flashes Colors.primary on capture.
+      tab:AddParagraph(
+        "Click the chip: it goes into listening state — its hairline thickens to 2px, lifts to the " ..
+        "neutral ring colour and breathes in and out, and the label reads 'Press a key'. The next " ..
+        "key you press is captured with an accent flash on that same hairline as the ring leaves. " ..
+        "Escape cancels and keeps the old binding.")
+      tab:AddKeybind({ Text = "Flash a toast", Default = Enum.KeyCode.G,
+        Callback = function() window:ShowInfo({ Title = "Keybind fired", Duration = 1500 }) end })
+
+      tab:AddSection("Locked")
+      tab:AddParagraph(
+        "Lock the window and every control it registered — on this tab and the other three — drops " ..
+        "under a scrim with an invisible shield above it: the row still reads, it just stops " ..
+        "answering the mouse. That scrim is its own flag, separate from a disabled control — Disabled " ..
+        "dims one control and blocks its input while its value still updates, and clearing either one " ..
+        "does not clear the other.")
+      local locked, lockBtn = false, nil
+      lockBtn = tab:AddButton({ Text = "Lock every control", Icon = "lock", Variant = "outline", Callback = function()
+        locked = not locked
+        -- LockAll reaches every registered control, this button included, so its own shield has to come
+        -- straight back off or the click that undoes the lock would never land.
+        if locked then window:LockAll(); lockBtn.SetLocked(false) else window:UnlockAll() end
+        lockBtn.SetText(locked and "Unlock every control" or "Lock every control")
+      end })
+    end
+
+end
+
+-- Module: showcase/surfaces
+EmbeddedModules["showcase/surfaces"] = function()
+    -- Tab 4 — the display controls that carry the type hierarchy and the hairlines, plus the two
+    -- containers. Tooltips are attached here too: Tooltip is a host-level option, so it works on any
+    -- Add* control (it does NOT work on AddAccordion, which is built outside the host mixin).
+    return function(window, logo)
+      -- The same brand PNG the title bar downloads (example/showcase.lua passes it in) — a URL, not an
+      -- asset id. Kept as a default so this page stands on its own if it is required bare.
+      logo = logo or "https://alfin-efendy.github.io/ez-rbx-ui/brand/ezui-blade-zu-icon.png"
+      -- A deliberately over-long tab name: the sidebar button is ~100px of text, and a tab label is one
+      -- line with TextTruncate.AtEnd, so the name you see in the sidebar ends in an ellipsis.
+      local tab = window:AddTab({ Name = "Surfaces, tables and cards", Icon = "layers" })
+
+      tab:AddSection("Type hierarchy")
+      tab:AddParagraph(
+        "Three weights, three roles. The section heading above is the overline: 11px Medium, " ..
+        "uppercase, muted — it groups without shouting. This paragraph is body Regular in the muted " ..
+        "foreground with a 1.25 line height, so a block of it does not clot together. A label is the " ..
+        "same size in the full foreground, which is why it reads as a value and this reads as prose.")
+      tab:AddLabel({ Text = "A plain label — full foreground, one line.",
+        Tooltip = "Tooltips fade in after a ~0.35s hover intent, and are inverted against the panel." })
+      tab:AddLabel({ Variant = "paragraph",
+        Text = "A paragraph label honours explicit line breaks too:\nthis is the second line,\nand this is the third." })
+
+      tab:AddSection("Hairlines")
+      tab:AddParagraph(
+        "A separator is a 1px rule in the border colour — the same token as the panel edge, the " ..
+        "dialog footer rule and the table header underline, so every divider in the library sits on " ..
+        "one value. Two of them around this row:")
+      tab:AddSeparator()
+      tab:AddLabel("Between two separators.")
+      tab:AddSeparator()
+
+      tab:AddSection("Card")
+      tab:AddParagraph(
+        "A card is the row surface one step up from the panel, with its own hairline and radius. Its " ..
+        "action buttons size to their own text instead of stretching edge to edge.")
+      tab:AddCard({
+        Title = "Depth, honestly",
+        Body = "Shadow and glow are siblings rendered UNDER their host; the rim light and the sheen " ..
+               "are clipped children on top. That ordering is what keeps a glow behind a toggle " ..
+               "instead of washing over it.",
+        Tooltip = "Cards accept a Tooltip as well — it attaches to the whole card frame.",
+        Buttons = {
+          { Text = "Nice", Callback = function() window:ShowSuccess({ Title = "Agreed", Duration = 1500 }) end },
+          { Text = "Show me a toast", Variant = "secondary",
+            Callback = function() window:ShowInfo({ Title = "Here you go", Duration = 1500 }) end },
+          { Text = "Dismiss", Variant = "ghost" },
+        },
+      })
+      tab:AddCard({
+        Banner = logo,
+        Title = "A second card, with a banner and a title far too long to fit on one line of it",
+        Body = "The banner is an 80px slot at the top of the card, filled with whatever Asset can " ..
+               "resolve — an asset id, or a URL like this one. The slot is reserved first and the " ..
+               "picture lands when the download finishes, so a card never blocks on the network; " ..
+               "where the executor cannot download at all the slot is never built and the card just " ..
+               "starts at its title. That title is the other thing to look at: one line with " ..
+               "TextTruncate.AtEnd, so it stops in an ellipsis instead of wrapping or widening.",
+        Buttons = {
+          { Text = "Where did it come from?", Variant = "secondary", Callback = function()
+            window:ShowInfo({ Title = "Same mark as the title bar", Duration = 2000,
+              Message = "One white-on-transparent PNG, tinted per mode up there, full colour here." })
+          end },
+        },
+      })
+
+      tab:AddSection("Table")
+      tab:AddParagraph(
+        "The header row is pinned and the body scrolls under it. Rows answer hover with a fill wash " ..
+        "only — the row colour itself stays a pure token, so a theme switch cannot drift it. The " ..
+        "first row's middle cell is longer than its column on purpose: a cell is one line with " ..
+        "TextTruncate.AtEnd, so it ends in an ellipsis rather than wrapping or widening the column.")
+      tab:AddTable({
+        Columns = { "Layer", "Rendered as", "Sits" },
+        Rows = {
+          { "Drop shadow", "a 9-slice image sibling that spreads wider and darkens while you drag", "under" },
+          { "Accent glow", "9-slice image", "under" },
+          { "Rim light", "gradient on stroke", "on top" },
+          { "Sheen", "gradient frame", "on top" },
+          { "Grain", "tiled noise", "clipped" },
+        },
+        Height = 110,
+        Tooltip = "Scroll the body — the header stays put.",
+      })
+
+      tab:AddSection("Accordion")
+      tab:AddParagraph(
+        "Open and close it a couple of times: the collapse is the mirror of the expand, not a faster " ..
+        "cut, and the caret turns at the same pace rather than snapping. The header answers hover " ..
+        "with its own wash while the card body keeps its colour.")
+      local acc = tab:AddAccordion({ Title = "Nested controls", Icon = "rows-3", Expanded = false })
+      acc:AddToggle({ Text = "A toggle in here", Default = true, Description = "Same spring as on the Motion tab." })
+      acc:AddSlider({ Text = "And a slider", Min = 0, Max = 10, Default = 6 })
+      acc:AddButton({ Text = "And a button", Variant = "secondary",
+        Tooltip = "Controls inside an accordion get the full host API, tooltips included.",
+        Callback = function() window:ShowInfo({ Title = "From inside the accordion", Duration = 1500 }) end })
+
+      tab:AddSection("Split pane")
+      tab:AddParagraph(
+        "Two panes sharing one seam, and the seam is draggable: grab the small grip pill in the middle " ..
+        "and pull. Its glyph is muted at rest and lifts to the foreground while the pointer is on the " ..
+        "handle, and the pill itself scales up for as long as you hold it, then springs back on " ..
+        "release. Each pane is a full control host — the two below are live controls, not a picture of " ..
+        "a layout — so they reflow as the fractions move.")
+      local split = tab:AddResizable({ Direction = "Horizontal",
+        Panes = { { Default = 0.45 }, { Default = 0.55 } }, Height = 116 })
+      split.Panes[1]:AddLabel("Left pane")
+      split.Panes[1]:AddToggle({ Text = "A toggle", Default = true })
+      split.Panes[2]:AddLabel("Right pane")
+      split.Panes[2]:AddProgressBar({ Default = 0.6 })
+
+      tab:AddSection("Image")
+      tab:AddParagraph(
+        "The image control takes a Lucide name as well as an asset id. Rendered as a glyph it is " ..
+        "tinted to the theme foreground, so it re-tints itself when you switch mode on the Look tab " ..
+        "— no second asset for light mode.")
+      tab:AddImage({ Lucide = "layers", Height = 72,
+        Tooltip = "Switch to light mode on the Look tab and come back — this glyph follows." })
+    end
+
+end
+
 -- Module: ../output/bundle
 EmbeddedModules["../output/bundle"] = function()
     -- Bundled Lua Script
@@ -12,196 +487,485 @@ EmbeddedModules["../output/bundle"] = function()
 
     local EmbeddedModules = {}
 
-    -- Module: core/create
-    EmbeddedModules["core/create"] = function()
-        -- Callable table: Create("Frame", {...}) builds an instance; Create.corner/padding/... are helpers.
-        local Create = {}
+    -- Module: core/effects
+    EmbeddedModules["core/effects"] = function()
+        -- Deps injected via Init(R). Layer kit: 9-slice shadow/glow siblings, gradient rim on a
+        -- UIStroke, lift/reskin helpers and a skeleton shimmer. Under ZIndexBehavior.Sibling a child
+        -- always renders above its parent's fill, so dark/glow layers are SIBLINGS of the host with a
+        -- lower ZIndex (never children); the caller picks that ZIndex.
+        --
+        -- Every function takes the owning window's theme explicitly (2nd positional arg on the
+        -- constructors, trailing arg on the geometry helpers) and throws without one: the module never
+        -- reads a global theme, so light/dark values always come from the theme actually being rendered.
+        --
+        --   Effects.shadow(parent, theme, { name, level, zIndex })  -> ImageLabel | nil (shadowId == '')
+        --   Effects.glow(parent, theme, colorToken, level, zIndex, name) -> ImageLabel | nil (mobile/'off')
+        --   Effects.place(shadow, x, y, w, h, level, theme)          one-shot geometry (px, host top-left)
+        --   Effects.mirror(shadow, host, level, theme)              geometry from host.Position/Size
+        --   Effects.follow(shadow, host, level, theme, maid)        Absolute* property signals -> place
+        --   Effects.rim(stroke, theme)                              gradient child on a UIStroke
+        --   Effects.lift(shadow, theme, on)                         drag/resize spread + darken
+        --   Effects.reskin(layer, theme, kind, colorToken)          re-apply per-mode alpha/tint
+        --   Effects.skeleton(parent, theme, { size, radius, ... })  -> { Frame, Gradient, Stop }
+        -- `level` is a key of theme.Effect holding { spread, offsetY }: window/dialog/popover/toast/
+        -- tooltip/control. Every helper that takes a layer tolerates nil (shadows are nil until the
+        -- 9-slice asset id is verified in Studio), so call sites need no `if shadow then` of their own.
+        local Effects = {}
+        local Create, Theme, Animate, Safe, Device
 
-        local function build(className, props)
-          local inst = Instance.new(className)
-          props = props or {}
-          local parent
-          for k, v in pairs(props) do
-            if type(k) == "number" then
-              v.Parent = inst                 -- child
-            elseif k == "Parent" then
-              parent = v                      -- defer
-            else
-              inst[k] = v
-            end
+        -- Skeleton shimmer defaults until theme.lua grows an Effect.skeleton group; a theme that
+        -- defines { period, rotation, band } under Effect.skeleton wins over these.
+        local SKELETON = { period = 1.1, rotation = 15 }
+        -- Per-layer bookkeeping (level, kind, tint token, rest size, lifted flag) keyed weakly by the
+        -- instance so a destroyed layer never pins its entry.
+        local meta = setmetatable({}, { __mode = "k" })
+
+        function Effects.Init(R)
+          Create = R.Create; Theme = R.Theme; Animate = R.Animate; Safe = R.Safe; Device = R.Device
+        end
+
+        local function need(theme, fn)
+          if type(theme) ~= "table" or type(theme.Effect) ~= "table" then
+            error("Effects." .. fn .. ": theme (Theme.new instance) required", 3)
           end
-          if parent then inst.Parent = parent end
-          return inst
+          return theme
         end
 
-        setmetatable(Create, { __call = function(_, className, props) return build(className, props) end })
-
-        function Create.corner(radius)
-          return Create("UICorner", { CornerRadius = UDim.new(0, radius) })
+        local function metaOf(layer)
+          local m = meta[layer]
+          if not m then m = {}; meta[layer] = m end
+          return m
         end
 
-        function Create.padding(t)
-          t = t or {}
-          return Create("UIPadding", {
-            PaddingTop = UDim.new(0, t.top or t.all or 0),
-            PaddingBottom = UDim.new(0, t.bottom or t.all or 0),
-            PaddingLeft = UDim.new(0, t.left or t.all or 0),
-            PaddingRight = UDim.new(0, t.right or t.all or 0),
-          })
-        end
-
-        function Create.listLayout(opts)
-          opts = opts or {}
-          return Create("UIListLayout", {
-            Padding = UDim.new(0, opts.Padding or 0),
-            FillDirection = opts.FillDirection or Enum.FillDirection.Vertical,
-            SortOrder = opts.SortOrder or Enum.SortOrder.LayoutOrder,
-          })
-        end
-
-        -- Transparency is passed through the constructor table: a nil value never becomes a key, so
-        -- callers that omit it leave the UIStroke default (0) untouched and existing stroke assertions
-        -- keep their shape.
-        function Create.stroke(color, thickness, transparency)
-          return Create("UIStroke", { Color = color, Thickness = thickness or 1, Transparency = transparency })
-        end
-
-        -- Keypoint array from { {t, value}, ... } pairs. Always an array literal (never the single-value
-        -- or two-value Sequence overloads) so the mock exposes Color.color[1] (window_test reads it) and
-        -- Roblox takes the same multi-keypoint constructor path headless and in Studio. Fails fast here
-        -- instead of at Roblox's opaque "keypoint" error inside Sequence.new.
-        local function keypoints(stops, ctor, what)
-          if type(stops) ~= "table" or #stops == 0 then
-            error("Create." .. what .. ": stops = { {t, value}, ... } required", 3)
+        -- A layer remembers the level it was created with, so geometry calls may omit it.
+        local function levelOf(theme, level, layer)
+          local key = level or (meta[layer] and meta[layer].level) or "control"
+          local lv = theme.Effect[key]
+          if type(lv) ~= "table" or type(lv.spread) ~= "number" then
+            error("Effects: unknown level '" .. tostring(key) .. "' (window/dialog/popover/toast/tooltip/control)", 3)
           end
-          local out = {}
-          for i, s in ipairs(stops) do out[i] = ctor(s[1], s[2]) end
-          return out
+          return lv
         end
 
-        -- Colour gradient: { rotation = deg, stops = { {0, Color3}, {1, Color3} } }
-        function Create.gradient(opts)
-          opts = opts or {}
-          return Create("UIGradient", {
-            Rotation = opts.rotation or 0,
-            Color = ColorSequence.new(keypoints(opts.stops, ColorSequenceKeypoint.new, "gradient")),
+        local function shadowId(theme)
+          local id = theme.Effect.shadowId
+          if type(id) ~= "string" or id == "" then return nil end
+          return id
+        end
+
+        -- Shared 9-slice ImageLabel for shadow and glow. SliceCenter only where Rect exists: an executor
+        -- without the Rect global would otherwise throw here, and a stretched slice still renders as a
+        -- soft blob rather than nothing.
+        local function sliceLayer(parent, theme, props)
+          local img = Create("ImageLabel", {
+            Name = props.name, Image = shadowId(theme), ScaleType = Enum.ScaleType.Slice,
+            ImageColor3 = props.color, ImageTransparency = props.alpha,
+            AnchorPoint = Vector2.new(0.5, 0.5), Active = false, BackgroundTransparency = 1,
+            ZIndex = props.zIndex or 0, Parent = parent,
           })
+          if Rect and Rect.new then
+            local s = theme.Effect.slice
+            img.SliceCenter = Rect.new(s.x0, s.y0, s.x1, s.y1)
+          end
+          return img
         end
 
-        -- Transparency-only gradient (a "shade" over an existing fill): stops = { {t, alpha}, ... }.
-        -- Colour is left at the UIGradient default (white) so it multiplies the fill to itself.
-        function Create.shade(opts)
-          opts = opts or {}
-          return Create("UIGradient", {
-            Rotation = opts.rotation or 0,
-            Transparency = NumberSequence.new(keypoints(opts.stops, NumberSequenceKeypoint.new, "shade")),
+        -- Filled (not hollow) 9-slice shadow, black tint, per-mode alpha. nil while Effect.shadowId is
+        -- '' (the default until the asset is verified in Studio).
+        function Effects.shadow(parent, theme, opts)
+          need(theme, "shadow"); opts = opts or {}
+          if not shadowId(theme) then return nil end
+          local img = sliceLayer(parent, theme, {
+            name = opts.name or "Shadow", color = Color3.new(0, 0, 0), alpha = Theme.fx(theme).shadow, zIndex = opts.zIndex,
           })
+          local m = metaOf(img); m.kind = "shadow"; m.level = opts.level
+          return img
         end
 
-        -- Apply a theme Font role (title/header/label/body/muted) to a TextLabel/TextButton/TextBox.
-        -- Unknown roles degrade to body instead of a nil index so a typo still renders. FontFace is
-        -- written only when the theme resolves one (Theme.FontFace may return nil where Font.fromName
-        -- is unavailable); Font stays BuilderSans either way so the label never falls back to the
-        -- engine default face. LineHeight is written only for roles that declare it.
-        function Create.text(label, theme, role)
-          local fonts = type(theme) == "table" and theme.Font or nil
-          local spec = fonts and (fonts[role] or fonts.body)
-          if not spec then error("Create.text: theme.Font[" .. tostring(role) .. "] (or .body fallback) required", 2) end
-          label.Font = Enum.Font.BuilderSans
-          label.TextSize = spec.Size
-          if spec.LineHeight ~= nil then label.LineHeight = spec.LineHeight end
-          local face = type(theme.FontFace) == "function" and theme.FontFace(spec.Weight) or nil
-          if face ~= nil then label.FontFace = face end
-          return label
+        -- controlGlow 'auto' skips glows on phones (small screens, no hover to reveal them), 'off'
+        -- skips them everywhere; anything else keeps them.
+        local function glowAllowed(theme)
+          local mode = theme.Effect.controlGlow
+          if mode == "off" or mode == false then return false end
+          if mode == "auto" and Device.IsMobile() then return false end
+          return true
         end
 
-        return Create
+        -- Same asset tinted with the token Color3 itself (not a copy) so identity compares and reskin
+        -- work; rests hidden (ImageTransparency 1), the owner tweens it to Theme.fx(theme).glow.
+        function Effects.glow(parent, theme, colorToken, level, zIndex, name)
+          need(theme, "glow")
+          if colorToken == nil then error("Effects.glow: colorToken (a theme.Colors value) required", 2) end
+          if not shadowId(theme) or not glowAllowed(theme) then return nil end
+          local img = sliceLayer(parent, theme, { name = name or "Glow", color = colorToken, alpha = 1, zIndex = zIndex })
+          local m = metaOf(img); m.kind = "glow"; m.level = level; m.token = colorToken
+          return img
+        end
+
+        -- ---- geometry ---------------------------------------------------------------------------------
+        -- A lifted layer keeps its extra spread through place/mirror so the per-frame mirror during a
+        -- drag does not undo lift(); `rest` is the unlifted size the next lift(false) returns to.
+        local function growth(theme, m)
+          return m.lifted and 2 * theme.Effect.lift.spreadDelta or 0
+        end
+
+        local function writeGeometry(shadow, theme, m, rest, xs, xo, ys, yo)
+          m.rest = rest
+          local g = growth(theme, m)
+          shadow.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
+          shadow.Position = UDim2.new(xs, xo, ys, yo)
+        end
+
+        -- One-shot geometry from a host rect in px (top-left x/y, size w/h): the layer is centred on
+        -- the host, grown by 2*spread and dropped by offsetY (popover, tooltip, dialog via follow).
+        function Effects.place(shadow, x, y, w, h, level, theme)
+          if not shadow then return nil end
+          need(theme, "place")
+          local lv, m = levelOf(theme, level, shadow), metaOf(shadow)
+          writeGeometry(shadow, theme, m, { 0, w + 2 * lv.spread, 0, h + 2 * lv.spread }, 0, x + w / 2, 0, y + h / 2 + lv.offsetY)
+          return shadow
+        end
+
+        -- Geometry from host.Position/host.Size (UDim2 math: same Scale, Offset + 2*spread / + offsetY).
+        -- Honours host.AnchorPoint, so a centre-pivoted window and a top-left FAB both get a centred
+        -- shadow; with AnchorPoint (0.5, 0.5) the Position is simply the host's plus offsetY.
+        function Effects.mirror(shadow, host, level, theme)
+          if not (shadow and host) then return nil end
+          need(theme, "mirror")
+          local pos, size = host.Position, host.Size
+          if not (pos and size) then return shadow end
+          local lv, m = levelOf(theme, level, shadow), metaOf(shadow)
+          local a = host.AnchorPoint
+          local ax, ay = a and a.X or 0, a and a.Y or 0
+          local sp = 2 * lv.spread
+          writeGeometry(shadow, theme, m, { size.X.Scale, size.X.Offset + sp, size.Y.Scale, size.Y.Offset + sp },
+            pos.X.Scale + (0.5 - ax) * size.X.Scale, pos.X.Offset + (0.5 - ax) * size.X.Offset,
+            pos.Y.Scale + (0.5 - ay) * size.Y.Scale, pos.Y.Offset + (0.5 - ay) * size.Y.Offset + lv.offsetY)
+          return shadow
+        end
+
+        -- Track an AutomaticSize host (dialog card) through its Absolute* property signals. Signal
+        -- handlers run on engine threads, so the write goes through Safe.mutate; nil Absolute* (headless
+        -- mock, or a host not yet laid out) skips the sync. Absolute coordinates are screen-space, so
+        -- the shadow's parent origin is subtracted to land in the shared parent's local space.
+        -- Returns { Sync, Disconnect } (maid-compatible) and gives it to `maid` when one is passed.
+        function Effects.follow(shadow, host, level, theme, maid)
+          if not (shadow and host) then return nil end
+          need(theme, "follow")
+          levelOf(theme, level, shadow)
+          local function sync()
+            local ap, as = host.AbsolutePosition, host.AbsoluteSize
+            if not (ap and as) then return end
+            local parent = shadow.Parent
+            local pp = parent and parent.AbsolutePosition
+            local px, py = pp and pp.X or 0, pp and pp.Y or 0
+            Effects.place(shadow, ap.X - px, ap.Y - py, as.X, as.Y, level, theme)
+          end
+          local function deferred() Safe.mutate(sync) end
+          local c1 = host:GetPropertyChangedSignal("AbsoluteSize"):Connect(deferred)
+          local c2 = host:GetPropertyChangedSignal("AbsolutePosition"):Connect(deferred)
+          local handle = { Sync = sync, Disconnect = function() c1:Disconnect(); c2:Disconnect() end }
+          if maid then maid:Give(handle) end
+          sync()
+          return handle
+        end
+
+        -- ---- rim ----------------------------------------------------------------------------------------
+        local function rimStops(fx) return { { 0, fx.edgeTop }, { 1, fx.edgeBottom } } end
+
+        local function paintRim(g, fx)
+          g.Rotation = 90
+          g.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, fx.edgeTop), NumberSequenceKeypoint.new(1, fx.edgeBottom),
+          })
+          return g
+        end
+
+        -- Edge light: ONE UIGradient child on the stroke whose Transparency multiplies the stroke's
+        -- (lit at the top, fading down). stroke.Color is never touched (tests compare it by reference)
+        -- and a second call updates the existing gradient in place (reskin path).
+        function Effects.rim(stroke, theme)
+          if not stroke then return nil end
+          local fx = Theme.fx(need(theme, "rim"))
+          local g = stroke:FindFirstChildOfClass("UIGradient")
+          if g then return paintRim(g, fx) end
+          g = Create.shade({ rotation = 90, stops = rimStops(fx) })
+          g.Name = "Rim"; g.Parent = stroke
+          return g
+        end
+
+        -- ---- lift / reskin --------------------------------------------------------------------------
+        -- Rest size: what place/mirror last wrote, else the current Size (a shadow lifted before any
+        -- placement is assumed unlifted).
+        local function restOf(shadow, m)
+          if m.rest then return m.rest end
+          local s = shadow.Size
+          if not s then return nil end
+          m.rest = { s.X.Scale, s.X.Offset, s.Y.Scale, s.Y.Offset }
+          return m.rest
+        end
+
+        local function shadowAlpha(theme, lifted)
+          local fx = Theme.fx(theme)
+          return lifted and (fx.shadow + theme.Effect.lift.alphaDelta) or fx.shadow
+        end
+
+        -- Grab feedback (drag/resize): spread grows by 2*lift.spreadDelta and the alpha shifts by
+        -- lift.alphaDelta while `on`; back to rest on release. Motion.fast either way.
+        -- `alpha` overrides the computed transparency for an owner that folds more than the mode into it
+        -- (the window adds its own Transparency). It must ride THIS tween: a second tween on the same
+        -- instance cancels this one outright, and the shadow would keep the alpha but never finish
+        -- growing -- it stayed oversized for the rest of the session.
+        function Effects.lift(shadow, theme, on, alpha)
+          if not shadow then return nil end
+          need(theme, "lift")
+          local m = metaOf(shadow)
+          m.lifted = on and true or false
+          local goal = { ImageTransparency = type(alpha) == "number" and alpha or shadowAlpha(theme, m.lifted) }
+          local rest = restOf(shadow, m)
+          if rest then
+            local g = growth(theme, m)
+            goal.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
+          end
+          return Animate.to(shadow, "fast", goal)
+        end
+
+        -- Re-apply per-mode alpha/tint after SetMode/SetAccent. `kind` and `colorToken` default to what
+        -- the layer was created with. A shown glow (alpha < 1) picks up the new mode's glow alpha; a
+        -- hidden one stays hidden. 'rim' accepts the UIStroke or its gradient.
+        function Effects.reskin(layer, theme, kind, colorToken)
+          if not layer then return nil end
+          need(theme, "reskin")
+          local m = meta[layer]
+          kind = kind or (m and m.kind)
+          if kind == "shadow" then
+            layer.ImageTransparency = shadowAlpha(theme, m and m.lifted)
+          elseif kind == "glow" then
+            local tok = colorToken or (m and m.token)
+            if tok then layer.ImageColor3 = tok; metaOf(layer).token = tok end
+            if (layer.ImageTransparency or 1) < 1 then layer.ImageTransparency = Theme.fx(theme).glow end
+          elseif kind == "rim" then
+            if layer.ClassName == "UIStroke" then return Effects.rim(layer, theme) end
+            paintRim(layer, Theme.fx(theme))
+          else
+            error("Effects.reskin: kind 'shadow' | 'glow' | 'rim' required", 2)
+          end
+          return layer
+        end
+
+        -- ---- skeleton -------------------------------------------------------------------------------
+        -- Loading placeholder: a surface block with a diagonal band swept across it by ONE looping
+        -- gradient tween (Offset -1 -> 1). Under reduced motion Animate.loop rests the gradient at its
+        -- goal (band swept out of view) and creates no tween, so the block is static. Stop() cancels the
+        -- loop, fades the block out (fold-out curve) and destroys it; instant when motion is off.
+        -- opts: size (UDim2), radius, name, position, zIndex, band (Color3 multiplier at the band centre).
+        function Effects.skeleton(parent, theme, opts)
+          need(theme, "skeleton"); opts = opts or {}
+          local sk = theme.Effect.skeleton or SKELETON
+          local frame = Create("Frame", {
+            Name = opts.name or "Skeleton", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
+            Size = opts.size or UDim2.new(1, 0, 1, 0), Position = opts.position, ZIndex = opts.zIndex,
+            Active = false, Parent = parent,
+          })
+          Create.corner(opts.radius or theme.Radius.sm).Parent = frame
+          local white = Color3.new(1, 1, 1)
+          local band = opts.band or sk.band or Theme.fx(theme).inset
+          local g = Create.gradient({ rotation = sk.rotation or SKELETON.rotation, stops = { { 0, white }, { 0.5, band }, { 1, white } } })
+          g.Name = "Shimmer"; g.Offset = Vector2.new(-1, 0); g.Parent = frame
+          local loop = Animate.loop(g, sk.period or SKELETON.period, { Offset = Vector2.new(1, 0) }, Enum.EasingStyle.Linear)
+          local stopped = false
+          local function Stop()
+            if stopped then return end
+            stopped = true
+            loop.Cancel()
+            -- owner already torn down (parent destroyed) -> nothing left to fade
+            if frame.Parent == nil then frame:Destroy(); return end
+            Animate.exitTo(frame, "exit", { BackgroundTransparency = 1 }, function() frame:Destroy() end)
+          end
+          return { Frame = frame, Gradient = g, Stop = Stop }
+        end
+
+        return Effects
 
     end
 
-    -- Module: components/card
-    EmbeddedModules["components/card"] = function()
-        -- Deps injected via Init(R). A rich content card: optional banner image, title,
-        -- body paragraph, and an optional row of action buttons. Built from primitives.
-        local Card = {}
-        local Create, DefaultTheme, Maid, Asset, Button, Safe
+    -- Module: components/toggle
+    EmbeddedModules["components/toggle"] = function()
+        -- Deps injected via Init(R).
+        local Toggle = {}
+        local Create, DefaultTheme, Animate, Maid, Flag, Safe, Effects, Recipes
 
-        function Card.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Asset = R.Asset; Button = R.Button; Safe = R.Safe
+        function Toggle.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe
+          Effects = R.Effects; Recipes = R.Recipes
         end
 
-        function Card.new(opts)
+        -- Token core/theme.lua does not carry yet (reported as a deviation); the theme wins the moment
+        -- Stroke.knob exists. Same escape hatch core/animate.lua uses for its FALLBACK durations.
+        local FALLBACK = { knobRim = 0.7 }
+
+        -- shadcn switch proportions, pinned by toggle_test. Every knob offset is derived from them so the
+        -- ON position, the press stretch and the rim never need a second literal.
+        local TRACK_W, TRACK_H = 44, 24
+
+        function Toggle.new(opts)
           opts = opts or {}
           local theme = opts.Theme or DefaultTheme
           local maid = Maid.new()
+          local value = false
+          local onChanged
 
-          local card = Create("Frame", { Name = "Card", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
-            AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), LayoutOrder = opts.LayoutOrder or 0,
-            Parent = opts.Parent, Create.corner(theme.Radius.md),
-            Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = theme.Spacing.inputY, bottom = theme.Spacing.inputY }),
-            Create.listLayout({ Padding = theme.Spacing.gap }) })
-          Create.stroke(theme.Colors.border, 1).Parent = card
+          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
+          local rowH = hasDesc and 50 or 34
+          local padY = hasDesc and 8 or 0
 
-          local lo = 0
-          local banner
-          local function makeBanner(image)
-            lo = lo + 1
-            banner = Create("ImageLabel", { Name = "Banner", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
-              Image = image, ScaleType = Enum.ScaleType.Crop, Size = UDim2.new(1, 0, 0, 80), LayoutOrder = lo,
-              Parent = card, Create.corner(theme.Radius.sm) })
-          end
-          if Asset.resolvable(opts.Banner) then
-            -- Reserve the 80px slot now and let the image land when it resolves: asset ids call back
-            -- synchronously, URLs download off-thread (game:HttpGet yields) so construction never blocks.
-            -- The callback may run on a non-privileged thread, hence Safe.mutate.
-            makeBanner("")
-            Asset.imageAsync(opts.Banner, function(id) Safe.mutate(function() banner.Image = id end) end)
-          else
-            local resolved = Asset.image(opts.Banner)
-            if resolved then makeBanner(resolved) end
-          end
-          if opts.Title then
-            lo = lo + 1
-            Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title,
-              TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-              TextTruncate = Enum.TextTruncate.AtEnd, Size = UDim2.new(1, 0, 0, 18), LayoutOrder = lo, Parent = card }),
-              theme, "label")
-          end
-          if opts.Body then
-            lo = lo + 1
-            Create.text(Create("TextLabel", { Name = "Body", BackgroundTransparency = 1, Text = opts.Body,
+          local btn = Create("TextButton", {
+            Name = "Toggle", AutoButtonColor = false, Text = "",
+            BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
+            Size = UDim2.new(1, 0, 0, rowH), LayoutOrder = opts.LayoutOrder or 0,
+            Parent = opts.Parent,
+            Create.corner(theme.Radius.md),
+            Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = padY, bottom = padY }),
+          })
+          local label = Create.text(Create("TextLabel", {
+            Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Toggle",
+            TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+            Size = UDim2.new(1, -54, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn,
+          }), theme, "label")
+          local desc
+          if hasDesc then
+            desc = Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
               TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-              TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = Enum.AutomaticSize.Y,
-              Size = UDim2.new(1, 0, 0, 0), LayoutOrder = lo, Parent = card }), theme, "muted")
+              TextYAlignment = Enum.TextYAlignment.Top,
+              Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -54, 0, 18), Parent = btn }), theme, "muted")
           end
-          if opts.Buttons and #opts.Buttons > 0 then
-            lo = lo + 1
-            local row = Create("Frame", { Name = "Actions", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
-              LayoutOrder = lo, Parent = card,
-              Create.listLayout({ Padding = theme.Spacing.gap, FillDirection = Enum.FillDirection.Horizontal }) })
-            for i, b in ipairs(opts.Buttons) do
-              -- AutoWidth: the label sizes the button (a forced 96px used to clip longer captions). The
-              -- button owns its own reskin closure through AccentReg, so the whole control (not just its
-              -- Frame) goes to the maid to unregister it on Destroy.
-              local control = Button.new({ Parent = row, Text = b.Text, Variant = b.Variant, Callback = b.Callback,
-                Theme = theme, AccentReg = opts.AccentReg, AutoWidth = true, LayoutOrder = i })
-              maid:Give(control)
-            end
+          -- ZIndex 2 so the track sits above the accent glow (1) and the hover wash (0), all siblings
+          -- under btn; a child glow would render over the knob instead of behind the pill.
+          local track = Create("Frame", {
+            Name = "Track", BackgroundColor3 = theme.Colors.switchTrackOff, BorderSizePixel = 0, ZIndex = 2,
+            Size = UDim2.new(0, TRACK_W, 0, TRACK_H), Position = UDim2.new(1, -TRACK_W, 0.5, -TRACK_H / 2),
+            Parent = btn, Create.corner(TRACK_H / 2),
+          })
+          local trackStroke = Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = track })
+
+          local knobSize = theme.Sizes.knob
+          local knobPad = (TRACK_H - knobSize) / 2
+          local knobY = -knobSize / 2
+          local offX, onX = knobPad, TRACK_W - knobSize - knobPad
+          local stretchW = knobSize * theme.Motion.knobStretch
+          local knob = Create("Frame", {
+            Name = "Knob", BackgroundColor3 = theme.Colors.foreground, BorderSizePixel = 0, ZIndex = 3,
+            Size = UDim2.new(0, knobSize, 0, knobSize), Position = UDim2.new(0, offX, 0.5, knobY),
+            Parent = track, Create.corner(knobSize / 2),
+          })
+          -- Rim: a white knob on a white ON track (Adaptive light) would otherwise dissolve into it.
+          local knobStroke = Create.stroke(theme.Colors.background, 1, theme.Stroke.knob or FALLBACK.knobRim)
+          knobStroke.Parent = knob
+          -- Accent glow BEHIND the track, sibling under btn. nil while Effect.shadowId is '' (and on
+          -- phones under controlGlow 'auto'), so every use is guarded.
+          local glow = Effects.glow(btn, theme, theme.Colors.primary, "control", 1, "TrackGlow")
+          Effects.mirror(glow, track, "control", theme)
+
+          local function knobRest() return UDim2.new(0, value and onX or offX, 0.5, knobY) end
+
+          -- `built` makes the first apply (Flag.bind's initial paint) a plain write: the rest pose costs
+          -- no tween at build time, every later change animates.
+          local built = false
+          local function apply(v)
+            value = v and true or false
+            local instant = not built
+            Safe.mutate(function()
+              local trackC = value and theme.Colors.primary or theme.Colors.switchTrackOff
+              local knobC = value and theme.Colors.primaryForeground or theme.Colors.foreground
+              -- ON dissolves the grey stroke so the accent pill reads as one clean shape
+              local strokeA = value and 1 or theme.Stroke.control
+              local glowA = value and theme.fx(theme).glow or 1
+              if instant then
+                knob.Position = knobRest(); knob.Size = UDim2.new(0, knobSize, 0, knobSize)
+                knob.BackgroundColor3 = knobC; track.BackgroundColor3 = trackC
+                trackStroke.Transparency = strokeA
+                if glow then glow.ImageTransparency = glowA end
+                return
+              end
+              -- Geometry springs (Back/Out overshoots ~1px past the stop); the knob COLOUR is a separate
+              -- Quart tween because Back/Out on a Color3 overshoots past the target and flashes.
+              Animate.springTo(knob, "release", { Position = knobRest(), Size = UDim2.new(0, knobSize, 0, knobSize) })
+              Animate.to(knob, "base", { BackgroundColor3 = knobC })
+              Animate.to(track, "base", { BackgroundColor3 = trackC })
+              Animate.to(trackStroke, "fast", { Transparency = strokeA })
+              if glow then Animate.to(glow, "base", { ImageTransparency = glowA }) end
+            end)
+          end
+
+          local commit = Flag.bind(opts, opts.Default == true, apply)
+          built = true
+
+          -- ---- state ----------------------------------------------------------------
+          local hover = Recipes.hover(btn, { theme = theme, corner = theme.Radius.md,
+            inset = { x = theme.Spacing.inputX, y = padY } })
+          maid:Give(hover.disconnect)
+
+          local enabled = true
+          local function setEnabled(b)
+            enabled = b ~= false
+            Safe.mutate(function()
+              local parts = { { track, "BackgroundTransparency", 0 }, { knob, "BackgroundTransparency", 0 },
+                { label, "TextTransparency", 0 } }
+              if desc then parts[#parts + 1] = { desc, "TextTransparency", 0 } end
+              Recipes.disabled(parts, not enabled, theme)
+            end)
+          end
+
+          -- Press leans the knob toward where the tap will send it: it stretches to knob*knobStretch with
+          -- the TRAILING edge pinned, then springs back to the rest pose on release or mouse-out.
+          local pressed = false
+          local function pressKnob()
+            pressed = true
+            Animate.to(knob, "press", {
+              Size = UDim2.new(0, stretchW, 0, knobSize),
+              Position = UDim2.new(0, value and (TRACK_W - knobPad - stretchW) or knobPad, 0.5, knobY),
+            })
+          end
+          local function releaseKnob()
+            if not pressed then return end
+            pressed = false
+            Animate.springTo(knob, "release", { Size = UDim2.new(0, knobSize, 0, knobSize), Position = knobRest() })
           end
 
           if opts.AccentReg then maid:Give(opts.AccentReg(function()
-            card.BackgroundColor3 = theme.Colors.card
-            local st = card:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
-            if banner then banner.BackgroundColor3 = theme.Colors.surface end
-            local ti = card:FindFirstChild("Title"); if ti then ti.TextColor3 = theme.Colors.foreground end
-            local bo = card:FindFirstChild("Body"); if bo then bo.TextColor3 = theme.Colors.mutedForeground end
+            btn.BackgroundColor3 = theme.Colors.surface
+            label.TextColor3 = theme.Colors.foreground
+            if desc then desc.TextColor3 = theme.Colors.mutedForeground end
+            trackStroke.Color = theme.Colors.border
+            knobStroke.Color = theme.Colors.background
+            Effects.reskin(glow, theme, "glow", theme.Colors.primary)
+            hover.reskin()
+            apply(value)
           end)) end
 
-          maid:Give(card)
-          return { Frame = card, Destroy = function() maid:DoCleanup() end }
+          local api = { Frame = btn }
+          function api.Get() return value end
+          function api.Set(v)
+            commit(v and true or false)
+            if opts.Callback then opts.Callback(value) end
+            if onChanged then onChanged(value) end
+          end
+          function api.OnChanged(fn) onChanged = fn end
+          -- Blocks USER input only: Set / a config restore still updates state and visuals while disabled.
+          function api.SetEnabled(b) setEnabled(b) end
+          function api.Destroy() maid:DoCleanup() end
+
+          maid:Give(btn.MouseButton1Down:Connect(function() if enabled then pressKnob() end end))
+          maid:Give(btn.MouseButton1Up:Connect(releaseKnob))
+          maid:Give(btn.MouseLeave:Connect(releaseKnob))
+          maid:Give(btn.MouseButton1Click:Connect(function() if enabled then api.Set(not value) end end))
+          maid:Give(btn)
+          if opts.Disabled then setEnabled(false) end
+          return api
         end
 
-        return Card
+        return Toggle
 
     end
 
@@ -688,620 +1452,6 @@ EmbeddedModules["../output/bundle"] = function()
 
     end
 
-    -- Module: core/signal
-    EmbeddedModules["core/signal"] = function()
-        local Signal = {}
-        Signal.__index = Signal
-
-        function Signal.new()
-          return setmetatable({ _handlers = {}, _order = {} }, Signal)
-        end
-
-        function Signal:Connect(fn)
-          self._order[#self._order + 1] = fn
-          self._handlers[fn] = true
-          return { Disconnect = function()
-            self._handlers[fn] = nil
-            for i, f in ipairs(self._order) do if f == fn then table.remove(self._order, i) break end end
-          end }
-        end
-
-        function Signal:Once(fn)
-          local conn
-          conn = self:Connect(function(...) conn.Disconnect(); fn(...) end)
-          return conn
-        end
-
-        function Signal:Fire(...)
-          local snapshot = {}
-          for i, fn in ipairs(self._order) do snapshot[i] = fn end
-          for _, fn in ipairs(snapshot) do if self._handlers[fn] then fn(...) end end
-        end
-
-        function Signal:DisconnectAll()
-          self._handlers = {}; self._order = {}
-        end
-
-        return Signal
-
-    end
-
-    -- Module: core/animate
-    EmbeddedModules["core/animate"] = function()
-        -- Deps injected via Init(R) (the bundler cannot rewrite require() inside embedded modules).
-        local TweenService = game:GetService("TweenService")
-
-        local Animate = {}
-        local Theme
-        local motionTbl -- Animate.useMotion override (a window's merged theme.Motion); nil = Theme.Motion
-        -- Reduced motion is process-wide (single-window norm). `explicit` remembers that a user/config
-        -- choice was made so a later applyDefault (OS preference) never overrides it.
-        local enabled, explicit = true, false
-        -- Last-resort duration when a token is unknown everywhere (keeps a typo from throwing in Studio).
-        local DEFAULT_DUR = 0.18
-        -- Today's values for tokens that core/theme.lua may not define yet (F1 lands them in parallel);
-        -- theme tokens win whenever present, these only cover the gap.
-        local FALLBACK = { spin = 0.8, exit = 0.14, exitScale = 0.96, popSlide = 6 }
-
-        function Animate.Init(R)
-          Theme = R.Theme
-          Animate.Motion = motionTbl or Theme.Motion
-        end
-
-        Animate.EASING = {
-          pop = Enum.EasingStyle.Back, smooth = Enum.EasingStyle.Quint,
-          enter = Enum.EasingStyle.Quint, exit = Enum.EasingStyle.Quart,
-          snap = Enum.EasingStyle.Quad or Enum.EasingStyle.Quart, -- Quad guard: older enum tables lack it
-        }
-        Animate.DIR = { In = Enum.EasingDirection.In, Out = Enum.EasingDirection.Out, InOut = Enum.EasingDirection.InOut }
-
-        -- Motion token lookup: useMotion table -> Theme.Motion -> FALLBACK. Only numbers count (a nested
-        -- token group like Motion.shake must never reach TweenInfo); returns nil when unknown.
-        local function token(name)
-          local v = motionTbl and motionTbl[name]
-          if type(v) ~= "number" and Theme and Theme.Motion then v = Theme.Motion[name] end
-          if type(v) == "number" then return v end
-          return FALLBACK[name]
-        end
-
-        local function resolve(duration)
-          if type(duration) == "number" then return duration end
-          if type(duration) == "string" then return token(duration) or DEFAULT_DUR end
-          return DEFAULT_DUR
-        end
-
-        -- Delay is optional everywhere and must reach TweenInfo.new as a number (nil delayTime is not
-        -- verified safe in Roblox): nil/unknown token -> 0.
-        local function resolveDelay(delay)
-          if type(delay) == "number" then return delay end
-          if type(delay) == "string" then return token(delay) or 0 end
-          return 0
-        end
-
-        -- Point resolve() at a window's merged theme.Motion so CreateWindow{ Theme = { Motion = {...} } }
-        -- applies. Process-wide like setEnabled; nil restores the Theme defaults.
-        function Animate.useMotion(tbl)
-          motionTbl = type(tbl) == "table" and tbl or nil
-          Animate.Motion = motionTbl or (Theme and Theme.Motion)
-        end
-
-        function Animate.info(duration, style, dir, delay)
-          return TweenInfo.new(duration, style or Enum.EasingStyle.Quart, dir or Enum.EasingDirection.Out, 0, false, delay or 0)
-        end
-
-        -- Explicit choice (SetAnimationsEnabled / config.Animations): last writer wins.
-        function Animate.setEnabled(b) enabled = b and true or false; explicit = true end
-        -- Environment default (OS reduce-motion): only applies while nobody chose explicitly.
-        function Animate.applyDefault(b)
-          if not explicit then enabled = b and true or false end
-          return enabled
-        end
-        function Animate.isEnabled() return enabled end
-        function Animate.isExplicit() return explicit end
-
-        -- Stub returned when motion is disabled: the goal is already applied and any
-        -- Completed handler runs immediately (mirrors the synchronous test mock).
-        local function instantTween()
-          return { Completed = { Connect = function(_, fn) if fn then fn() end; return { Disconnect = function() end } end } }
-        end
-
-        local function applyNow(instance, goalProps)
-          for k, v in pairs(goalProps) do instance[k] = v end
-        end
-
-        function Animate.to(instance, duration, goalProps, style, dir, delay)
-          if not enabled then
-            applyNow(instance, goalProps)
-            return instantTween()
-          end
-          local tween = TweenService:Create(instance, Animate.info(resolve(duration), style, dir, resolveDelay(delay)), goalProps)
-          tween:Play()
-          return tween
-        end
-
-        -- Tween, then run onComplete. Connects Completed BEFORE Play so the handler still
-        -- fires under the synchronous test mock (and runs immediately when motion is off).
-        function Animate.toThen(instance, duration, goalProps, onComplete, style, dir, delay)
-          if not enabled then
-            applyNow(instance, goalProps)
-            if onComplete then onComplete() end
-            return instantTween()
-          end
-          local tween = TweenService:Create(instance, Animate.info(resolve(duration), style, dir, resolveDelay(delay)), goalProps)
-          if onComplete then tween.Completed:Connect(onComplete) end
-          tween:Play()
-          return tween
-        end
-
-        -- spring: a tween with a Back/Out overshoot (the library's "expressive" feel).
-        function Animate.springTo(instance, duration, goalProps)
-          return Animate.to(instance, duration, goalProps, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-        end
-
-        -- rotate convenience (defaults to a Back/Out overshoot).
-        function Animate.rotateTo(instance, duration, deg, style, dir)
-          return Animate.to(instance, duration, { Rotation = deg },
-            style or Enum.EasingStyle.Back, dir or Enum.EasingDirection.Out)
-        end
-
-        -- exit: Quart/In (accelerating away) — the shared "leave" curve for popovers/toasts/dialogs.
-        function Animate.exitTo(instance, duration, goalProps, onDone)
-          return Animate.toThen(instance, duration, goalProps, onDone, Animate.EASING.exit, Animate.DIR.In)
-        end
-
-        -- Sequential toThen: each step { inst, dur, goal, style, dir, delay } starts from the previous
-        -- Completed (so the whole chain is synchronous under the mock); onDone after the last one.
-        function Animate.chain(steps, onDone)
-          local i = 0
-          local function step()
-            i = i + 1
-            local s = steps and steps[i]
-            if not s then if onDone then onDone() end; return end
-            Animate.toThen(s[1], s[2], s[3], step, s[4], s[5], s[6])
-          end
-          step()
-        end
-
-        -- Looping tween; repeatCount -1 (default) runs until Cancel. Returns { Cancel } — wrap it in a
-        -- function before maid:Give (maid only knows Disconnect/Destroy/functions). Never restart a
-        -- loop from Completed: the mock fires Completed synchronously inside Play, which would recurse.
-        function Animate.loop(instance, duration, goalProps, style, reverses, repeatCount)
-          reverses = reverses == true
-          if not enabled then
-            -- Rest pose without motion: a one-way loop rests at its goal; a ping-pong loop rests where
-            -- it started, so the instance is left untouched.
-            if not reverses then applyNow(instance, goalProps) end
-            return { Cancel = function() end }
-          end
-          local info = TweenInfo.new(resolve(duration), style or Enum.EasingStyle.Linear, Enum.EasingDirection.InOut,
-            repeatCount or -1, reverses, 0)
-          local tween = TweenService:Create(instance, info, goalProps)
-          tween:Play()
-          return { Cancel = function() tween:Cancel() end }
-        end
-
-        -- Endless Linear rotation for loader glyphs, period Motion.spin. Rest pose is Rotation 0: set
-        -- on start, on Cancel, and when motion is off (a static 'loader' glyph, never a frozen mid-spin one).
-        function Animate.spin(img, duration)
-          img.Rotation = 0
-          if not enabled then return { Cancel = function() img.Rotation = 0 end } end
-          local handle = Animate.loop(img, duration or token("spin"), { Rotation = 360 }, Enum.EasingStyle.Linear, false, -1)
-          return { Cancel = function() handle.Cancel(); img.Rotation = 0 end }
-        end
-
-        -- Ping-pong loop (attention pulse, completion pulse); cycles nil = endless.
-        function Animate.pulse(instance, duration, goalProps, style, cycles)
-          return Animate.loop(instance, duration, goalProps, style, true, cycles or -1)
-        end
-
-        local function uiScaleOf(inst)
-          local us = inst:FindFirstChildOfClass("UIScale")
-          if not us then us = Instance.new("UIScale"); us.Parent = inst end
-          return us
-        end
-
-        -- pop-in: scale a UIScale child from 0.9 -> 1 with a Back/Out overshoot.
-        function Animate.pop(inst, duration)
-          local us = uiScaleOf(inst)
-          us.Scale = 0.9
-          return Animate.to(us, duration or "base", { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-        end
-
-        -- Popover open: grow from Motion.exitScale with a Back/Out overshoot (base) while sliding
-        -- Motion.popSlide px into place from the anchor side (Quart/Out, fast). edge 'down' = opens
-        -- below its anchor, so it starts popSlide px ABOVE its final Position; 'up' starts below.
-        -- The final Position is the caller's own, so layout code reading it synchronously still holds.
-        function Animate.popIn(frame, edge)
-          local us = uiScaleOf(frame)
-          if not enabled then us.Scale = 1; return instantTween() end
-          local target = frame.Position
-          us.Scale = token("exitScale")
-          if target then
-            local dy = (edge == "up") and token("popSlide") or -token("popSlide")
-            frame.Position = UDim2.new(target.X.Scale, target.X.Offset, target.Y.Scale, target.Y.Offset + dy)
-            Animate.to(frame, "fast", { Position = target }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-          end
-          return Animate.springTo(us, "base", { Scale = 1 })
-        end
-
-        -- Popover close: shrink to Motion.exitScale (Quart/In over Motion.exit), then onDone (destroy).
-        function Animate.popOut(frame, onDone)
-          local us = uiScaleOf(frame)
-          return Animate.toThen(us, token("exit"), { Scale = token("exitScale") }, onDone, Animate.EASING.exit, Animate.DIR.In)
-        end
-
-        return Animate
-
-    end
-
-    -- Module: core/overlay
-    EmbeddedModules["core/overlay"] = function()
-        -- Deps injected via Init(R).
-        local Overlay = {}
-        local Create, Mount
-        local root = nil
-        local catcher = nil -- full-screen click-catcher behind open popovers (closes them on outside click)
-        local popovers = {} -- set of close functions for open popovers (dropdowns, color pickers)
-
-        -- Process-wide UI scale (last writer wins, like Animate.setEnabled): the window that last called
-        -- SetUIScale owns it. Overlay children scale THEMSELVES from this number (UIScale on the toast
-        -- container / tip / dropdown / card) — never a UIScale on the overlay root, because the catcher's
-        -- (1,0,1,0) size would then stop covering the screen.
-        local DEFAULT_SCALE = 1
-        local uiScale = DEFAULT_SCALE
-        local dialogDepth = 0 -- stacked-dialog counter (2.12); reset() zeroes it
-
-        -- Overlay layers (ZIndexBehavior.Sibling: siblings compare ZIndex). Components read from here
-        -- instead of repeating the literals: popover content is Z.popover+N, dialog card Z.modal+N, etc.
-        Overlay.Z = { catcher = 1000, popover = 1001, modal = 1500, fab = 1700, toast = 1800, tooltip = 2000 }
-
-        -- Anchor-to-popover gap when the caller passes none: today's selectbox literal (4px), kept
-        -- as the default so a caller that has not yet forwarded a theme token keeps its geometry.
-        local DEFAULT_GAP = 4
-        -- Unmeasured-screen fallback (mock / first frame before AbsoluteSize is valid).
-        local FALLBACK_VIEWPORT = { X = 1920, Y = 1080 }
-
-        function Overlay.Init(R) Create = R.Create; Mount = R.Mount end
-
-        -- Anonymous (random at runtime, readable in Studio) name so overlay instances don't carry the
-        -- "EzUI" signature into the GUI tree. Falls back to the readable label if Mount is unavailable.
-        local function anon(readable)
-          if Mount and Mount.anonName then return Mount.anonName(readable) end
-          return readable
-        end
-
-        -- A transparent full-screen button mounted under the popover (Z.catcher, the popover is
-        -- Z.popover+). A click anywhere outside the popover lands on it and closes everything.
-        local function ensureCatcher()
-          if catcher and catcher.Parent ~= nil then return end
-          if not root then return end
-          catcher = Create("ImageButton", {
-            Name = anon("OverlayCatcher"), AutoButtonColor = false, BackgroundTransparency = 1,
-            Active = true, Size = UDim2.new(1, 0, 1, 0), ZIndex = Overlay.Z.catcher, Parent = root,
-          })
-          catcher.MouseButton1Click:Connect(function() Overlay.closeAll() end)
-        end
-
-        local function removeCatcher()
-          if catcher then catcher:Destroy(); catcher = nil end
-        end
-
-        -- Non-creating getter: the live overlay root or nil. Used by Safe's capability probe so it
-        -- never forces root creation. Roblox-safe liveness check (a destroyed Instance has Parent=nil).
-        function Overlay.peek()
-          if root and root.Parent ~= nil then return root end
-          return nil
-        end
-
-        function Overlay.get(parentGui)
-          -- Roblox-safe liveness check: reading a non-existent member (e.g. a mock-only
-          -- "_destroyed" flag) THROWS on real Instances. A destroyed Instance has Parent=nil.
-          if root and root.Parent ~= nil then return root end
-          root = Create("Frame", {
-            Name = anon("OverlayRoot"),
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 1, 0),
-            ZIndex = Overlay.Z.catcher,
-            ClipsDescendants = false,
-            Parent = parentGui,
-          })
-          return root
-        end
-
-        function Overlay.mount(element)
-          assert(root, "Overlay.get(parentGui) must be called before mount")
-          element.Parent = root
-          return element
-        end
-
-        -- Popover registry: components register their Close fn so the window can close
-        -- every open popover at once (e.g. on drag/resize/minimize/shutdown).
-        function Overlay.trackPopover(closeFn) popovers[closeFn] = true; ensureCatcher(); return closeFn end
-        function Overlay.untrackPopover(closeFn)
-          popovers[closeFn] = nil
-          if next(popovers) == nil then removeCatcher() end
-        end
-        function Overlay.closeAll()
-          local fns = popovers; popovers = {}
-          for fn in pairs(fns) do pcall(fn) end
-          removeCatcher()
-        end
-
-        -- Screen size for popover placement; falls back when unmeasured (mock / first frame).
-        function Overlay.viewport()
-          if root then
-            local s = root.AbsoluteSize
-            if s and (s.X or 0) > 0 and (s.Y or 0) > 0 then return s end
-          end
-          return { X = FALLBACK_VIEWPORT.X, Y = FALLBACK_VIEWPORT.Y } -- a copy: callers must not mutate the fallback
-        end
-
-        -- Popover geometry shared by SelectBox / ColorPicker: prefer below the anchor, flip above only
-        -- when below overflows AND above fits (otherwise stay below: an overflow beats a negative y),
-        -- and clamp x inside [0, viewport - w - gap]. `w`/`h` are the popover's on-screen size, so a
-        -- caller with a UIScale passes w*scale, h*scale (2.22). Returns x, y, openUp.
-        function Overlay.placePopover(anchorPos, anchorSize, w, h, gap)
-          gap = gap or DEFAULT_GAP
-          local ax, ay = anchorPos and anchorPos.X or 0, anchorPos and anchorPos.Y or 0
-          local ah = anchorSize and anchorSize.Y or 0
-          local vp = Overlay.viewport()
-          local below = ay + ah + gap
-          local above = ay - gap - h
-          local openUp = (below + h > vp.Y) and (above >= 0)
-          local y = openUp and above or below
-          local x = math.max(0, math.min(ax, vp.X - w - gap))
-          return x, y, openUp
-        end
-
-        -- Process-wide UI scale (see header). Overlay-hosted components read scale() when they build so
-        -- their own UIScale matches the window; nothing is attached to the root here.
-        function Overlay.setScale(n)
-          if type(n) ~= "number" or n ~= n or n <= 0 then
-            error("Overlay.setScale(n): positive number expected, got " .. tostring(n), 2)
-          end
-          uiScale = n
-          return n
-        end
-        function Overlay.scale() return uiScale end
-
-        -- Stacked dialogs (2.12): each open dialog pushes, each close pops. Depth is clamped at 0 so an
-        -- unbalanced pop (double-close, close after reset) can never make later dialogs mis-layer.
-        function Overlay.pushDialog() dialogDepth = dialogDepth + 1; return dialogDepth end
-        function Overlay.popDialog() dialogDepth = math.max(0, dialogDepth - 1); return dialogDepth end
-        function Overlay.dialogDepth() return dialogDepth end
-
-        function Overlay.reset()
-          root = nil; catcher = nil; popovers = {}
-          uiScale = DEFAULT_SCALE; dialogDepth = 0
-        end
-
-        return Overlay
-
-    end
-
-    -- Module: components/numberbox
-    EmbeddedModules["components/numberbox"] = function()
-        -- Deps injected via Init(R).
-        local RunService = game:GetService("RunService")
-        local NumberBox = {}
-        local Create, DefaultTheme, Maid, Icons, Flag, Numfmt, Safe, Animate, Recipes
-
-        function NumberBox.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Icons = R.Icons; Flag = R.Flag; Numfmt = R.Numfmt; Safe = R.Safe
-          Animate = R.Animate; Recipes = R.Recipes
-        end
-
-        function NumberBox.new(opts)
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local maid = Maid.new()
-          local minV, maxV, step = opts.Min, opts.Max, opts.Step or 1
-          local value = opts.Default or 0
-          local hasLabel = opts.Text ~= nil and opts.Text ~= ""
-          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-          local rowH = (not hasLabel) and 30 or (hasDesc and 56 or 46)
-          -- SetEnabled blocks USER input only (steppers, wheel, typing): SetValue/Flag.bind restores keep
-          -- updating value and visuals while disabled (plan 2.8 contract a).
-          local enabled = true
-          local hovering = false               -- pointer really over the Box (wheel gate)
-
-          local function clamp(n)
-            n = tonumber(n) or value
-            if minV then n = math.max(minV, n) end
-            if maxV then n = math.min(maxV, n) end
-            return n
-          end
-
-          local root = Create("Frame", { Name = "NumberBoxRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
-            Size = UDim2.new(1, 0, 0, rowH), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
-            Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
-          if hasLabel then
-            Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
-              TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-              TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-              Position = UDim2.new(0, 0, 0, hasDesc and 6 or 0),
-              Size = UDim2.new(0.5, -8, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = root }), theme, "label")
-            if hasDesc then
-              Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
-                TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-                TextYAlignment = Enum.TextYAlignment.Top,
-                Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(0.5, -8, 0, 26), Parent = root }), theme, "muted")
-            end
-          end
-          local box = Create("Frame", { Name = "Box", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
-            Position = hasLabel and UDim2.new(0.5, 4, 0.5, -15) or UDim2.new(0, 0, 0, 0),
-            Size = hasLabel and UDim2.new(0.5, -4, 0, 30) or UDim2.new(1, 0, 0, 30),
-            Parent = root, Create.corner(theme.Radius.input) })
-          -- the Box's only UIStroke: the focus recipe owns its Thickness, strokeColor() its Color
-          local boxStroke = Create.stroke(theme.Colors.border, 1); boxStroke.Parent = box
-          -- +/- are structural glyphs: they rest at Icon.structural (muted), never the accent (1.4)
-          local function structural() return theme.Colors[theme.Icon.structural] end
-          local function stepBtn(name, icon, x)
-            local b = Create("ImageButton", { Name = name, AutoButtonColor = false, BackgroundColor3 = theme.Colors.surface,
-              Size = UDim2.new(0, 26, 1, -6), Position = x, Parent = box, Create.corner(theme.Radius.sm) })
-            local img = Create("ImageLabel", { BackgroundTransparency = 1, ImageTransparency = 0, Size = UDim2.new(0, 14, 0, 14),
-              Position = UDim2.new(0.5, -7, 0.5, -7), Parent = b })
-            Icons.apply(img, icon, structural())
-            -- The wash sits at ZIndex 0 INSIDE the button: above the button's own fill, below the glyph
-            -- (Sibling behaviour), so the +/- answer a pointer without a second surface in the Box.
-            local hover = Recipes.hover(b, { theme = theme, host = b, corner = theme.Radius.sm, kind = "wash" })
-            maid:Give(hover.disconnect)
-            -- Press squashes the GLYPH, never the button: the shared recipe's Motion.pressScale keeps the
-            -- +/- feeling like every other control, and the button keeps the 26px hit area it draws.
-            maid:Give(Recipes.press(b, img, { theme = theme }).disconnect)
-            return b, img, hover
-          end
-          local minus, minusImg, minusHover = stepBtn("Minus", "minus", UDim2.new(0, 3, 0.5, -12))
-          local plus, plusImg, plusHover = stepBtn("Plus", "plus", UDim2.new(1, -29, 0.5, -12))
-          local input = Create.text(Create("TextBox", { Name = "Input", BackgroundTransparency = 1, Text = tostring(value),
-            TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Center, ClearTextOnFocus = false,
-            Position = UDim2.new(0, 32, 0, 0), Size = UDim2.new(1, -64, 1, 0), Parent = box }), theme, "body")
-
-          local atMin, atMax = false, false
-          -- A glyph at its bound reads as disabled: it fades to Opacity.disabled over Motion.fast instead
-          -- of swapping colour. The last state is remembered per glyph so a themer re-derive or a
-          -- SetValue that never crosses a bound spends no tween on an unchanged goal.
-          local dimmed = { [minusImg] = false, [plusImg] = false }
-          -- A disabled control dims every glyph, so the whole-control dim outranks the per-bound one; the
-          -- bound state is still recorded, which is exactly the rest Recipes.disabled restores on enable.
-          local function glyphAlpha(img) return (dimmed[img] or not enabled) and theme.Opacity.disabled or 0 end
-          local function dim(img, off)
-            if dimmed[img] == off then return end
-            dimmed[img] = off
-            Animate.to(img, "fast", { ImageTransparency = glyphAlpha(img) })
-          end
-          local function updateBounds()
-            atMin = minV ~= nil and value <= minV
-            atMax = maxV ~= nil and value >= maxV
-            Safe.mutate(function()
-              dim(minusImg, atMin); minus.Active = not atMin
-              dim(plusImg, atMax); plus.Active = not atMax
-            end)
-          end
-
-          local function fmt(n)
-            return Numfmt.format(n, { Format = opts.Format, Decimals = opts.Decimals, Prefix = opts.Prefix, Suffix = opts.Suffix })
-          end
-          local focused = false
-          -- single source of the Box stroke colour, read by the focus recipe and the themer closure alike
-          local function strokeColor(f) return f and theme.Colors.ring or theme.Colors.border end
-          local function render() Safe.mutate(function() input.Text = focused and tostring(value) or fmt(value) end) end
-          local function apply(n) value = clamp(n); render(); updateBounds() end
-          local commit = Flag.bind(opts, clamp(opts.Default or 0), apply)
-          local function set(n) commit(clamp(n)); if opts.Callback then opts.Callback(value) end end
-
-          -- A press refused at Min/Max bumps the Box Motion.bumpPx toward the side the user pushed and
-          -- returns to the EXACT starting Position table (no drift). Motion off = no bump at all, and a
-          -- bump already in flight is never restarted (its rest would be the displaced offset).
-          local bumping = false
-          local function bump(dir)
-            if bumping or dir == nil or not Animate.isEnabled() then return end
-            local rest = box.Position
-            bumping = true
-            Animate.chain({
-              { box, "press", { Position = UDim2.new(rest.X.Scale, rest.X.Offset + dir * theme.Motion.bumpPx,
-                rest.Y.Scale, rest.Y.Offset) }, Animate.EASING.snap, Animate.DIR.Out },
-              { box, "press", { Position = rest }, Animate.EASING.snap, Animate.DIR.Out },
-            }, function() bumping = false end)
-          end
-
-          -- SetEnabled: surface dim + input guards. SetLocked (the host's scrim) is a separate flag and
-          -- neither of them clears the other; Recipes.disabled keeps each part's rest so a glyph that was
-          -- dimmed at a bound comes back dimmed.
-          local function setEnabled(b)
-            b = b and true or false
-            if enabled == b then return end
-            enabled = b
-            Safe.mutate(function()
-              input.TextEditable = b
-              Recipes.disabled({
-                { box, "BackgroundTransparency", 0 },
-                { minusImg, "ImageTransparency", dimmed[minusImg] and theme.Opacity.disabled or 0 },
-                { plusImg, "ImageTransparency", dimmed[plusImg] and theme.Opacity.disabled or 0 },
-              }, not b, theme)
-            end)
-          end
-
-          local function holdRepeat(btn, stepFn, atBoundFn, dir)
-            local conn, held
-            local function stop()
-              held = false
-              if conn then conn:Disconnect(); conn = nil end
-            end
-            maid:Give(btn.MouseButton1Down:Connect(function()
-              if not enabled then return end
-              if atBoundFn() then bump(dir); return end
-              held = true
-              stepFn()                                  -- immediate first step
-              local elapsed, since = 0, 0
-              conn = RunService.Heartbeat:Connect(function(dt)
-                if not held then return end
-                elapsed = elapsed + dt
-                if elapsed < 0.35 then return end       -- initial hold delay
-                since = since + dt
-                local interval = math.max(0.03, 0.12 - (elapsed - 0.35) * 0.06)  -- accelerate
-                if since >= interval then
-                  since = 0
-                  if atBoundFn() then stop(); return end
-                  stepFn()
-                end
-              end)
-            end))
-            maid:Give(btn.MouseButton1Up:Connect(stop))
-            maid:Give(btn.MouseLeave:Connect(stop))
-            maid:Give(stop)
-          end
-          holdRepeat(minus, function() set(value - step) end, function() return atMin end, -1)
-          holdRepeat(plus, function() set(value + step) end, function() return atMax end, 1)
-          maid:Give(input.Focused:Connect(function() focused = true; input.Text = tostring(value) end))
-          maid:Give(input.FocusLost:Connect(function()
-            focused = false
-            local parsed = Numfmt.parse(input.Text, { Prefix = opts.Prefix, Suffix = opts.Suffix })
-            if parsed ~= nil then set(parsed) else render() end
-          end))
-          maid:Give(Recipes.focus(boxStroke, input, strokeColor, { theme = theme }).disconnect)
-          -- Wheel gate: InputChanged fires for anything that moves over the Box (and a wheel event that
-          -- is not consumed here keeps scrolling the panel behind it), so the value only follows the
-          -- wheel while the pointer is really over the Box or the field holds focus.
-          maid:Give(box.MouseEnter:Connect(function() hovering = true end))
-          maid:Give(box.MouseLeave:Connect(function() hovering = false end))
-          maid:Give(box.InputChanged:Connect(function(io)
-            if io.UserInputType == Enum.UserInputType.MouseWheel and enabled and (hovering or focused) then
-              local dir = (io.Position.Z >= 0) and 1 or -1
-              set(value + step * dir)
-            end
-          end))
-          maid:Give(root)
-          if opts.Disabled then setEnabled(false) end
-
-          if opts.AccentReg then maid:Give(opts.AccentReg(function()
-            root.BackgroundColor3 = theme.Colors.surface
-            box.BackgroundColor3 = theme.Colors.background
-            boxStroke.Color = strokeColor(focused)
-            input.TextColor3 = theme.Colors.foreground
-            local ti = root:FindFirstChild("Title"); if ti then ti.TextColor3 = theme.Colors.foreground end
-            local de = root:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
-            minus.BackgroundColor3 = theme.Colors.surface; plus.BackgroundColor3 = theme.Colors.surface
-            Icons.apply(minusImg, "minus", structural()); Icons.apply(plusImg, "plus", structural())
-            minusHover.reskin(); plusHover.reskin()   -- the wash owns a colour token too
-            updateBounds()
-          end)) end
-
-          return {
-            Frame = root,
-            GetValue = function() return value end,
-            SetValue = function(n) set(n) end,
-            SetMin = function(n) minV = n; set(value) end,
-            SetMax = function(n) maxV = n; set(value) end,
-            SetEnabled = function(b) setEnabled(b) end,
-            Destroy = function() maid:DoCleanup() end,
-          }
-        end
-
-        return NumberBox
-
-    end
-
     -- Module: components/progressbar
     EmbeddedModules["components/progressbar"] = function()
         -- Deps injected via Init(R).
@@ -1372,838 +1522,325 @@ EmbeddedModules["../output/bundle"] = function()
 
     end
 
-    -- Module: components/table
-    EmbeddedModules["components/table"] = function()
-        -- Deps injected via Init(R).
-        local Table = {}
-        local Create, DefaultTheme, Maid, Safe, Recipes
-        function Table.Init(R) Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Safe = R.Safe; Recipes = R.Recipes end
+    -- Module: components/resizable
+    EmbeddedModules["components/resizable"] = function()
+        -- Deps injected via Init(R). shadcn-style resizable split panes with draggable handles.
+        local Resizable = {}
+        local Create, DefaultTheme, Maid, Icons, Host, REG, Drag, Device, Animate, Recipes
 
-        -- Row geometry (today's literals): 24px rows, Body starts 2px under the header so the 1px
-        -- HeaderRule sits in that gap; cells inset 4px so header text lines up with body cells.
-        local ROW_H, BODY_Y, CELL_INSET = 24, 26, 4
+        function Resizable.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Icons = R.Icons; Host = R.Host; REG = R
+          Drag = R.Drag; Device = R.Device; Animate = R.Animate; Recipes = R.Recipes
+        end
 
-        function Table.new(opts)
+        function Resizable.new(opts)
           opts = opts or {}
           local theme = opts.Theme or DefaultTheme
           local maid = Maid.new()
-          local cols = opts.Columns or {}
+          local horizontal = (opts.Direction or "Horizontal") == "Horizontal"
+          local defs = opts.Panes or { {}, {} }
+          local n = #defs
+          local fr, total = {}, 0
+          for i = 1, n do fr[i] = defs[i].Default or (1 / n); total = total + fr[i] end
+          for i = 1, n do fr[i] = fr[i] / total end
 
-          local root = Create("Frame", { Name = "Table", BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, (opts.Height or 120) + BODY_Y), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
+          local container = Create("Frame", { Name = "Resizable", BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, opts.Height or (horizontal and 160 or 200)),
+            LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
 
-          -- Body rows answer hover through the FILL kind of the hover recipe: the Row lays its cells out
-          -- with a horizontal UIListLayout, so a wash Frame would be laid out as an extra column. `fill`
-          -- tweens the Row's own BackgroundTransparency and never writes BackgroundColor3 (theme_test
-          -- pins the first row's colour by identity). Handles are dropped with the rows on Clear().
-          local rowHovers = {}
-          local function dropRowHovers()
-            for i = #rowHovers, 1, -1 do rowHovers[i](); rowHovers[i] = nil end
-          end
+          -- The GAP between panes is fixed (panes must not drift apart on a phone), but the HANDLE that
+          -- sits in it is finger-sized on touch: it overhangs the gap symmetrically, so the Line and Grip
+          -- (AnchorPoint 0.5) stay centred on the seam whatever the hit width is.
+          local GAP = theme.Sizes.splitGap
+          local handleW = Device.IsTouch() and theme.Sizes.touchHit or GAP
 
-          local function makeRow(parent, cells, header, order)
-            local row = Create("Frame", { Name = header and "Header" or "Row",
-              BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = header and 1 or 0,
-              Size = UDim2.new(1, 0, 0, ROW_H), LayoutOrder = order or 0, Parent = parent,
-              Create.corner(header and 0 or theme.Radius.xs),
-              Create.listLayout({ Padding = CELL_INSET, FillDirection = Enum.FillDirection.Horizontal }) })
-            -- the header sits on the root while body rows sit inside Body's padding: inset it the same
-            if header then Create.padding({ left = CELL_INSET, right = CELL_INSET }).Parent = row end
-            if not header then
-              local hv = Recipes.hover(row, { theme = theme, kind = "fill" })
-              rowHovers[#rowHovers + 1] = hv.disconnect
-            end
-            for i, text in ipairs(cells) do
-              local cell = Create.text(Create("TextLabel", { Name = "Cell", BackgroundTransparency = 1, Text = tostring(text),
-                TextColor3 = header and theme.Colors.mutedForeground or theme.Colors.foreground,
-                TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-                Size = UDim2.new(0, 0, 1, 0), LayoutOrder = i, Parent = row }), theme, "muted")
-              -- header keeps the muted size but reads Medium (plan 1.2); nil-safe where Font.fromName is absent
-              local face = header and theme.FontFace and theme.FontFace(Enum.FontWeight.Medium)
-              if face then cell.FontFace = face end
-              Create("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill, Parent = cell })
-            end
-            return row
-          end
+          local paneFrames, panes, handles, gripPaint = {}, {}, {}, {}
 
-          makeRow(root, cols, true, 0)
-          local rule = Create("Frame", { Name = "HeaderRule", BackgroundColor3 = theme.Colors.border,
-            BackgroundTransparency = theme.Stroke.divider, BorderSizePixel = 0,
-            Position = UDim2.new(0, 0, 0, BODY_Y - 1), Size = UDim2.new(1, 0, 0, 1), Parent = root })
-          local body = Create("ScrollingFrame", { Name = "Body", BackgroundColor3 = theme.Colors.surface,
-            BackgroundTransparency = 0.5, BorderSizePixel = 0,
-            Position = UDim2.new(0, 0, 0, BODY_Y), Size = UDim2.new(1, 0, 1, -BODY_Y),
-            AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(0, 0, 0, 0), Parent = root,
-            Create.corner(theme.Radius.sm), Create.padding({ all = CELL_INSET }), Create.listLayout({ Padding = 2 }) })
-          Recipes.scrollbar(body, theme)
-
-          local order = 0
-          local api = { Frame = root, Body = body }
-          function api.AddRow(cells)
-            order = order + 1
-            local o = order
-            local row
-            Safe.mutate(function() row = makeRow(body, cells, false, o) end)
-            return row
-          end
-          function api.Clear()
-            order = 0
-            Safe.mutate(function()
-              dropRowHovers()
-              for _, c in ipairs(body:GetChildren()) do if c.Name == "Row" then c:Destroy() end end
-            end)
-          end
-          function api.SetData(rows) api.Clear(); for _, r in ipairs(rows or {}) do api.AddRow(r) end end
-          function api.Destroy() maid:DoCleanup(); root:Destroy() end
-
-          api.SetData(opts.Rows)
-          maid:Give(root)
-          maid:Give(dropRowHovers)
-
-          if opts.AccentReg then maid:Give(opts.AccentReg(function()
-            body.BackgroundColor3 = theme.Colors.surface
-            Recipes.scrollbar(body, theme)                 -- scrollbar tint follows the border token
-            rule.BackgroundColor3 = theme.Colors.border
-            local header = root:FindFirstChild("Header")
-            if header then for _, c in ipairs(header:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.mutedForeground end end end
-            for _, row in ipairs(body:GetChildren()) do
-              if row.Name == "Row" then
-                row.BackgroundColor3 = theme.Colors.surface
-                for _, c in ipairs(row:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.foreground end end
+          local function applyLayout()
+            local cum = 0
+            for i = 1, n do
+              local f = paneFrames[i]
+              if horizontal then
+                f.Position = UDim2.new(cum, (i > 1) and GAP / 2 or 0, 0, 0)
+                f.Size = UDim2.new(fr[i], (n > 1) and -GAP or 0, 1, 0)
+              else
+                f.Position = UDim2.new(0, 0, cum, (i > 1) and GAP / 2 or 0)
+                f.Size = UDim2.new(1, 0, fr[i], (n > 1) and -GAP or 0)
               end
+              cum = cum + fr[i]
+              if i < n and handles[i] then
+                if horizontal then
+                  handles[i].Position = UDim2.new(cum, -handleW / 2, 0, 0); handles[i].Size = UDim2.new(0, handleW, 1, 0)
+                else
+                  handles[i].Position = UDim2.new(0, 0, cum, -handleW / 2); handles[i].Size = UDim2.new(1, 0, 0, handleW)
+                end
+              end
+            end
+          end
+
+          for i = 1, n do
+            local pane = Create("Frame", { Name = "Pane", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
+              ClipsDescendants = true, Parent = container, Create.corner(theme.Radius.md), Create.padding({ all = 8 }),
+              Create.listLayout({ Padding = theme.Spacing.gap }) })
+            -- a pane is a card surface like Accordion/Card, so it gets the same 1px border rather than
+            -- floating as an unbounded slab of `card` against the panel
+            Create.stroke(theme.Colors.border, 1, theme.Stroke.control).Parent = pane
+            paneFrames[i] = pane
+            local order = 0
+            local paneApi = { Frame = pane }
+            -- The full host context (not just the theme): controls nested in a pane get Flag persistence,
+            -- tab search and LockAll exactly like controls mounted straight on a Tab or an Accordion.
+            Host.attach(paneApi, { R = REG, content = pane, theme = theme, config = opts.Config, window = opts.Window,
+              registerSearchable = opts.RegisterSearchable, accentThemer = opts.AccentThemer,
+              registerControl = opts.RegisterControl,
+              nextOrder = function() order = order + 1; return order end })
+            panes[i] = paneApi
+          end
+
+          for k = 1, n - 1 do
+            local handle = Create("ImageButton", { Name = "Handle", AutoButtonColor = false,
+              BackgroundTransparency = 1, ZIndex = 5, Parent = container })
+            Create("Frame", { Name = "Line", BackgroundColor3 = theme.Colors.border, BorderSizePixel = 0, ZIndex = 5,
+              Parent = handle,
+              Size = horizontal and UDim2.new(0, 1, 1, 0) or UDim2.new(1, 0, 0, 1),
+              Position = horizontal and UDim2.new(0.5, 0, 0, 0) or UDim2.new(0, 0, 0.5, 0),
+              AnchorPoint = horizontal and Vector2.new(0.5, 0) or Vector2.new(0, 0.5) })
+            local grip = Create("Frame", { Name = "Grip", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
+              ZIndex = 6, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+              Size = horizontal and UDim2.new(0, 8, 0, 16) or UDim2.new(0, 16, 0, 8),
+              Parent = handle, Create.corner(theme.Radius.sm) })
+            Create.stroke(theme.Colors.border, 1).Parent = grip
+            -- the grip grows while the seam is being dragged; a UIScale keeps the pill's corner radius
+            -- and its glyph in proportion, which a Size tween on the frame alone would not
+            local gripScale = Create("UIScale", { Scale = 1, Parent = grip })
+            local gi = Create("ImageLabel", { BackgroundTransparency = 1, Size = UDim2.new(0, 8, 0, 8),
+              Position = UDim2.new(0.5, -4, 0.5, -4), Parent = grip })
+            local glyph = horizontal and "grip-vertical" or "grip-horizontal"
+            Icons.apply(gi, glyph, theme.Colors[theme.Icon.structural])
+            -- structural glyph: rests muted, lifts to foreground while the pointer is on the handle (and
+            -- while it is held, which is what a drag looks like to the recipe). The recipe owns
+            -- ImageColor3 from here on; reskin() re-derives the current state after SetMode/SetAccent.
+            local hover = Recipes.hover(handle, { theme = theme, kind = "text", icon = gi,
+              rest = theme.Icon.structural, hover = theme.Icon.structuralActive })
+            maid:Give(hover.disconnect)
+            local function paintGrip()
+              Icons.apply(gi, glyph, theme.Colors[theme.Icon.structural])
+              hover.reskin()
+            end
+            gripPaint[k] = paintGrip
+            handles[k] = handle
+
+            -- Drag.bind, not a hand-rolled InputBegan/InputChanged pair: the old handler reacted to EVERY
+            -- Touch InputChanged, so a second finger anywhere on screen dragged this seam. Deltas come
+            -- from the fractions captured at onBegin (dx/dy are measured from the drag start), so a
+            -- dropped frame or a clamped step never accumulates drift.
+            local fr0L, fr0R
+            Drag.bind(handle, {
+              onBegin = function()
+                fr0L, fr0R = fr[k], fr[k + 1]
+                Animate.to(gripScale, "fast", { Scale = theme.Motion.handleGrow })
+              end,
+              onChange = function(dx, dy)
+                if not fr0L then return end
+                local sz = container.AbsoluteSize
+                local span = (sz and (horizontal and sz.X or sz.Y)) or 1
+                if span <= 0 then span = 1 end
+                local d = (horizontal and dx or dy) / span
+                local minL, minR = (defs[k].Min or 0.1), (defs[k + 1].Min or 0.1)
+                local nl, nr = fr0L + d, fr0R - d
+                if nl >= minL and nr >= minR then fr[k] = nl; fr[k + 1] = nr; applyLayout() end
+              end,
+              onEnd = function()
+                fr0L, fr0R = nil, nil
+                Animate.springTo(gripScale, "release", { Scale = 1 })
+              end,
+            }, maid)
+          end
+
+          applyLayout()
+
+          if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function()
+            for _, f in ipairs(paneFrames) do
+              f.BackgroundColor3 = theme.Colors.card
+              local ps = f:FindFirstChildOfClass("UIStroke"); if ps then ps.Color = theme.Colors.border end
+            end
+            for k, hd in ipairs(handles) do
+              local line = hd:FindFirstChild("Line"); if line then line.BackgroundColor3 = theme.Colors.border end
+              local grip = hd:FindFirstChild("Grip")
+              if grip then
+                grip.BackgroundColor3 = theme.Colors.surface
+                local st = grip:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
+              end
+              if gripPaint[k] then gripPaint[k]() end
             end
           end)) end
 
-          return api
+          maid:Give(container)
+          return { Frame = container, Panes = panes, Destroy = function() maid:DoCleanup() end }
         end
 
-        return Table
+        return Resizable
 
     end
 
-    -- Module: components/tab
-    EmbeddedModules["components/tab"] = function()
-        -- Deps injected via Init(R) (bundler cannot rewrite require() inside embedded modules).
-        local Tab = {}
-        local Create, DefaultTheme, Animate, Maid, Icons, Accordion, Host, REG, Safe, Recipes, Device
+    -- Module: components/label
+    EmbeddedModules["components/label"] = function()
+        -- Deps injected via Init(R).
+        local Label = {}
+        local Create, DefaultTheme, Safe
+        local RunService = game:GetService("RunService")
+        local warn = warn or function() end   -- Roblox global; no-op fallback under the headless test mock
+        -- Run a function on its OWN task-scheduler thread (never the caller's). Falls back to inline only if
+        -- `task` is missing. Used so a yielding label source never touches the construction/Heartbeat thread.
+        local spawn = (type(task) == "table" and task.spawn) or function(fn) return fn() end
 
-        function Tab.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate
-          Maid = R.Maid; Icons = R.Icons; Accordion = R.Accordion; Host = R.Host; REG = R; Safe = R.Safe
-          Recipes = R.Recipes; Device = R.Device
+        function Label.Init(R) Create = R.Create; DefaultTheme = R.Theme; Safe = R.Safe end
+
+        -- ── Shared reactive scheduler ───────────────────────────────────────────────
+        -- ONE Heartbeat connection drives EVERY function-valued (reactive) label. It exists only while at
+        -- least one label is registered (zero idle cost) and is dropped when the last one deregisters, so
+        -- N reactive labels cost O(1) connections, not O(N). Per frame it only accumulates dt; the re-eval +
+        -- write happen at most once per label-interval. The poll's GUI access (reading frame.Parent, writing
+        -- frame.Text) is capability-gated and routed through Safe.mutate: NOT every executor grants the GUI
+        -- capability to a RunService.Heartbeat handler, and a raw access there throws "lacking capability
+        -- Plugin" every interval (and aborted the whole drain, killing every other reactive label). Safe.mutate
+        -- writes inline when the capability is present and defers/degrades quietly when it is not.
+        local entries = {}            -- list of { acc, interval, tick }; tick() returns false when dead
+        local conn = nil
+
+        local function stepAll(dt)
+          dt = dt or 0
+          local alive, n = {}, 0
+          for _, e in ipairs(entries) do
+            e.acc = e.acc + dt
+            local keep = true
+            if e.acc >= e.interval then e.acc = 0; keep = e.tick() end   -- re-eval+write at interval cadence
+            if keep then n = n + 1; alive[n] = e end
+          end
+          entries = alive
+          if n == 0 and conn then conn:Disconnect(); conn = nil end
         end
 
-        function Tab.new(opts)
+        local function register(entry)
+          entries[#entries + 1] = entry
+          if not conn then conn = RunService.Heartbeat:Connect(stepAll) end
+        end
+
+        local function unregister(entry)
+          for i = #entries, 1, -1 do if entries[i] == entry then table.remove(entries, i) end end
+          if #entries == 0 and conn then conn:Disconnect(); conn = nil end
+        end
+
+        function Label.new(opts)
           opts = opts or {}
           local theme = opts.Theme or DefaultTheme
-          local maid = Maid.new()
-          local order = 0
-          local selected = false
+          local variant = opts.Variant or "default"
+          local source = opts.Text or ""          -- string OR function
+          local interval = opts.Interval or 1
 
-          -- Label + icon share one tint role: structural (muted) at rest, structuralActive (foreground)
-          -- once selected. Resolved by token NAME at paint time so SetMode/SetAccent re-tint by name.
-          local function tintRole() return selected and theme.Icon.structuralActive or theme.Icon.structural end
-          local function tint() return theme.Colors[tintRole()] end
+          local color = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
+          -- section = overline role (Medium 11, uppercased below); everything else reads at body size
+          local role = (variant == "section") and "overline" or "body"
+          local size = theme.Font[role].Size
 
-          -- sidebar button
-          local button = Create("TextButton", {
-            Name = "TabButton",
-            Text = "",
-            AutoButtonColor = false,
-            BackgroundColor3 = theme.Colors.surface,
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 34),
-            LayoutOrder = opts.LayoutOrder or 0,
-            Parent = opts.SidebarParent,
-            Create.corner(theme.Radius.md),
-            Create.padding({ left = 10, right = 10 }),
-          })
-          local icon = Create("ImageLabel", {
-            Name = "Icon",
-            BackgroundTransparency = 1,
-            Size = UDim2.new(0, 16, 0, 16),
-            Position = UDim2.new(0, 4, 0.5, -8),
-            Parent = button,
-          })
-          if opts.Icon then Icons.apply(icon, opts.Icon, tint()) else icon.Visible = false end
-          local label = Create("TextLabel", {
+          local frame = Create.text(Create("TextLabel", {
             Name = "Label",
             BackgroundTransparency = 1,
-            Text = opts.Name or "Tab",
-            TextColor3 = tint(),
+            Text = "",                            -- set by setSource below (static value, or first eval)
+            TextColor3 = color,
             TextXAlignment = Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd,
-            Size = UDim2.new(1, opts.Icon and -30 or -6, 1, 0),
-            Position = UDim2.new(0, opts.Icon and 30 or 6, 0, 0),
-            Parent = button,
-          })
-          Create.text(label, theme, "label")
+            TextYAlignment = Enum.TextYAlignment.Top,
+            TextWrapped = variant == "paragraph",
+            Size = UDim2.new(1, 0, 0, size + 6),
+            AutomaticSize = (variant == "paragraph") and Enum.AutomaticSize.Y or Enum.AutomaticSize.None,
+            LayoutOrder = opts.LayoutOrder or 0,
+            Parent = opts.Parent,
+          }), theme, role)
 
-          -- Hover lifts label + icon to the active tint. The recipe resolves rest/hover by token name at
-          -- paint time, so `rest` is re-pointed on Select/Deselect: a pointer leaving the SELECTED tab
-          -- then paints it back to foreground, not muted. Skipped by the recipe on touch-only devices.
-          local hoverOpts = { theme = theme, kind = "text", label = label, icon = icon,
-            rest = tintRole(), hover = theme.Icon.structuralActive }
-          local hover = Recipes.hover(button, hoverOpts)
-          maid:Give(hover.disconnect)
+          -- keep the unregister so Destroy drops the closure (one used to leak per destroyed label)
+          local unreg = opts.AccentReg and opts.AccentReg(function()
+            frame.TextColor3 = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
+          end)
 
-          -- Fill + label + icon for the current `selected`. animated = Select/Deselect (handler thread:
-          -- tweened, symmetric both ways); instant = themer closure (no tween inside a reskin), which
-          -- also re-reads the fill colour for UNselected tabs so the hover wash never shows a stale mode.
-          local function paintState(animated)
-            hoverOpts.rest = tintRole()
-            local c = tint()
-            if animated then
-              Animate.to(button, "fast", { BackgroundTransparency = selected and 0 or 1 })
-              Animate.to(label, "hover", { TextColor3 = c })
-              if opts.Icon then Icons.tint(icon, c, "hover") end
-            else
-              button.BackgroundColor3 = theme.Colors.surface
-              label.TextColor3 = c
-              if opts.Icon then Icons.apply(icon, opts.Icon, c) end
-              hover.reskin() -- a pointer currently over the tab keeps its lifted tint
-            end
+          local lastText, erroring, entry = nil, false, nil
+
+          -- Write a value to the label. direct=true writes inline (label creation runs on the main thread,
+          -- which holds the capability); otherwise routes through Safe.mutate so a caller that may lack the
+          -- GUI capability (a coroutine/task.spawn thread, OR the reactive poll's Heartbeat handler on
+          -- executors that don't grant it there) stays capability-safe. The lastText guard skips redundant
+          -- property writes (a value that hasn't changed costs nothing).
+          local function applyText(s, direct)
+            s = (variant == "section") and string.upper(tostring(s)) or tostring(s)
+            if s == lastText then return end
+            lastText = s
+            if direct then frame.Text = s else Safe.mutate(function() frame.Text = s end) end
           end
 
-          -- content (plain Frame + slide transition; NOT a CanvasGroup, so a focused TextBox's
-          -- caret/selection renders — CanvasGroups composite children to a buffer that omits
-          -- the caret overlay, which made text cursors invisible/non-blinking).
-          local content = Create("Frame", {
-            Name = "TabContent",
-            BackgroundTransparency = 1,
-            Visible = false,
-            Size = UDim2.new(1, 0, 0, 0),
-            AutomaticSize = Enum.AutomaticSize.Y,
-            Parent = opts.ContentParent,
-            Create.listLayout({ Padding = theme.Spacing.gap }),
-            Create.padding({ all = theme.Spacing.pad }),
-          })
-
-          -- Drive the parent ScrollingFrame's CanvasSize explicitly from this tab's content height.
-          -- AutomaticCanvasSize is unreliable here because the CanvasGroup starts hidden (measured 0).
-          local contentLayout = content:FindFirstChildOfClass("UIListLayout")
-          local contentPad = theme.Spacing.pad
-          -- carousel travel distance = the visible panel height (so a switch reads as a full page swap);
-          -- fall back to a sensible constant before the scroll frame has an AbsoluteSize (first paint / headless)
-          local function panelH()
-            local sf = content.Parent
-            local s = sf and sf.AbsoluteSize
-            return (s and s.Y and s.Y > 0 and s.Y) or 360
-          end
-          local function syncCanvas()
-            -- Driven by the AbsoluteContentSize property-changed signal below (engine thread, no GUI
-            -- capability on strict executors) AND by Select() (capability). Reading AbsoluteContentSize and
-            -- writing CanvasSize are both protected -> marshal through Safe.mutate (inline when capable).
-            Safe.mutate(function()
-              local sf = content.Parent
-              if selected and sf then
-                local acs = contentLayout.AbsoluteContentSize
-                sf.CanvasSize = UDim2.new(0, 0, 0, ((acs and acs.Y) or 0) + contentPad * 2)
+          -- Re-evaluate a function source on its OWN scheduler thread, never on the caller's. The caller is UI
+          -- construction (initial eval) or the shared Heartbeat tick. A source that yields (a
+          -- RemoteFunction:InvokeServer / task.wait getter) called inline would yield the caller -- and on a
+          -- capability-strict executor the caller resumes WITHOUT the GUI capability, after which the NEXT
+          -- control's write threw "lacking capability Plugin" and aborted the whole section. task.spawn isolates
+          -- the source completely, so construction never yields/degrades; the write is always capability-safe
+          -- (Safe.mutate). On error, keep the last good value (no per-tick flicker) and warn once per streak.
+          local function evaluate()
+            if type(source) ~= "function" then return end
+            local fn = source
+            spawn(function()
+              local ok, res = pcall(fn)
+              if fn ~= source then return end                   -- source swapped while we ran -> drop stale result
+              if ok then
+                erroring = false
+                applyText(res, false)
+              elseif not erroring then
+                erroring = true
+                warn("[EzUI] Label dynamic text error: " .. tostring(res))
               end
             end)
           end
-          maid:Give(contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas))
 
-          local api = { Button = button, Content = content, Maid = maid }
-
-          function api:IsSelected() return selected end
-
-          -- vertical carousel: the incoming page slides in from sign*panelH, the outgoing exits to
-          -- -sign*panelH, both in sync and on the SAME curve (EASING.smooth) — so the two pages move as
-          -- one filmstrip, never colliding or drifting apart mid-slide.
-          -- dir +1 = navigating to a later tab (filmstrip scrolls up); -1 = earlier tab (scrolls down).
-          function api:Select(dir)
-            selected = true
-            local sign = (dir == -1) and -1 or 1
-            content.Position = UDim2.new(0, 0, 0, sign * panelH())
-            content.Visible = true
-            if content.Parent then content.Parent.CanvasPosition = Vector2.new(0, 0) end
-            syncCanvas()
-            Animate.to(content, "slow", { Position = UDim2.new(0, 0, 0, 0) }, Animate.EASING.smooth)
-            paintState(true)
+          local function startReactive()
+            if entry then return end
+            entry = { acc = 0, interval = interval, tick = function()
+              -- Reading frame.Parent and writing frame.Text both touch the protected GUI, which throws on a
+              -- Heartbeat thread that lacks the executor capability. pcall the destroyed-probe and route the
+              -- write through Safe.mutate so the poll never throws/spams -- it updates when the capability is
+              -- present and degrades quietly otherwise (instead of aborting the whole drain).
+              local ok, parent = pcall(function() return frame.Parent end)
+              if ok and parent == nil then return false end  -- destroyed -> drop from the scheduler
+              evaluate()                                      -- runs the source off-thread; write is capability-safe
+              return true
+            end }
+            register(entry)
           end
 
-          function api:Deselect(dir)
-            if not selected then content.Visible = false; return end  -- already inactive: nothing to animate out
-            selected = false
-            local sign = (dir == -1) and -1 or 1
-            Animate.toThen(content, "slow", { Position = UDim2.new(0, 0, 0, -sign * panelH()) }, function()
-              if not selected then content.Visible = false; content.Position = UDim2.new(0, 0, 0, 0) end
-            end, Animate.EASING.smooth)
-            paintState(true)
+          local function stopReactive()
+            if entry then unregister(entry); entry = nil end
           end
 
-          function api.MountRow(child)
-            order = order + 1
-            child.LayoutOrder = order
-            child.Parent = content
-            return order
-          end
-
-          -- AddLabel/AddParagraph/AddSection/AddSeparator/AddButton/AddToggle/AddTextBox/
-          -- AddNumberBox/AddSelectBox are provided by the Host mixin (below).
-          Host.attach(api, {
-            R = REG, content = content, theme = theme, config = opts.Config, window = opts.Window,
-            registerSearchable = opts.RegisterSearchable, accentThemer = opts.AccentThemer,
-            registerControl = opts.RegisterControl,
-            nextOrder = function() order = order + 1; return order end,
-          })
-
-          if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function() paintState(false) end)) end
-
-          function api:AddAccordion(accOpts)
-            accOpts = accOpts or {}
-            order = order + 1
-            accOpts.Parent = content
-            accOpts.LayoutOrder = order
-            accOpts.Theme = theme
-            accOpts.Config = opts.Config
-            accOpts.Window = opts.Window
-            accOpts.RegisterSearchable = opts.RegisterSearchable
-            accOpts.AccentThemer = opts.AccentThemer
-            accOpts.RegisterControl = opts.RegisterControl
-            return Accordion.new(accOpts)
-          end
-
-          function api:SetIcon(name) opts.Icon = name; Safe.mutate(function() Icons.apply(icon, name, tint()); icon.Visible = true end) end
-          function api:SetTitle(s) Safe.mutate(function() label.Text = s end) end
-
-          -- Wash: the button's own fill at Opacity.tabHover while the pointer is over an UNselected tab
-          -- (the selected one is already solid). Bound only where a pointer exists — touch fires
-          -- Enter/Down/Up with no Leave, so a tap would leave the wash stuck — and a touch release falls
-          -- back to rest for the same reason (mirrors Recipes.hover).
-          if Device.SupportsHover() then
-            local function wash(on)
-              if not selected then Animate.to(button, "hover", { BackgroundTransparency = on and theme.Opacity.tabHover or 1 }) end
-            end
-            maid:Give(button.MouseEnter:Connect(function() wash(true) end))
-            maid:Give(button.MouseLeave:Connect(function() wash(false) end))
-            maid:Give(button.MouseButton1Up:Connect(function() if Device.GetInput() == "Touch" then wash(false) end end))
-          end
-          maid:Give(button.MouseButton1Click:Connect(function() if opts.OnActivate then opts.OnActivate(api) end end))
-          maid:Give(button)
-          maid:Give(content)
-          function api.Destroy() maid:DoCleanup() end
-
-          return api
-        end
-
-        return Tab
-
-    end
-
-    -- Module: core/safe
-    EmbeddedModules["core/safe"] = function()
-        -- Deps injected via Init(R). Runs GUI mutations in a capability-bearing context: inline when the
-        -- current thread already holds the GUI ("Plugin") capability, otherwise deferred to the next
-        -- RunService.Heartbeat (whose callback holds the capability). This is the Roblox-executor analogue
-        -- of runOnUiThread/Dispatcher.Invoke -- it marshals work to a privileged context; it is NOT state
-        -- management. See components/selectbox.lua runLoader for the original Heartbeat:Once pattern.
-        local Safe = {}
-        local Overlay
-        local RunService = game:GetService("RunService")
-
-        local queue = {}          -- FIFO of deferred jobs
-        local flushConn = nil
-
-        function Safe.Init(R) Overlay = R.Overlay end
-
-        -- Does the CURRENT thread hold the GUI capability? Probe with a harmless, signature-free,
-        -- idempotent same-value write to the protected overlay root. The write is capability-gated: it
-        -- succeeds on the main thread / a signal handler and throws on a task.spawn/coroutine thread.
-        -- No attribute/name is added, so no EzUI signature leaks. No protected root yet -> assume true
-        -- (runtime mutators are only reached once a window exists; init runs on the main thread anyway).
-        local function defaultHasCapability()
-          -- The whole probe runs inside ONE pcall: Overlay.peek() reads root.Parent, and READING a
-          -- protected Instance property ALSO throws "lacking capability" on a thread without it (not just
-          -- writes). So peek() must be inside the pcall too -- previously it ran outside, so its throw
-          -- escaped the probe and Safe.mutate never reached the Heartbeat fallback. Semantics preserved:
-          -- no root yet -> peek short-circuits and reads nothing -> no throw -> true (assume capability);
-          -- root + capability -> read+write succeed -> true; root + no capability -> read throws -> false.
-          return (pcall(function()
-            local root = Overlay and Overlay.peek and Overlay.peek()
-            if root then root.BackgroundTransparency = root.BackgroundTransparency end
-          end))
-        end
-
-        local hasCapability = defaultHasCapability
-        function Safe._setCapabilityCheck(fn) hasCapability = fn or defaultHasCapability end
-
-        local function flush()
-          flushConn = nil
-          -- Runs inside a Heartbeat callback => capability present. Drain FIFO; isolate each job so one
-          -- failure does not abort the drain.
-          local i = 1
-          while i <= #queue do local job = queue[i]; i = i + 1; pcall(job) end
-          for k = #queue, 1, -1 do queue[k] = nil end
-        end
-
-        -- Run fn in a capability-bearing context. Inline (synchronous) if the current thread has the
-        -- capability; otherwise enqueue and flush on the next Heartbeat (FIFO preserved).
-        function Safe.mutate(fn)
-          if hasCapability() then return fn() end
-          queue[#queue + 1] = fn
-          if not flushConn then flushConn = RunService.Heartbeat:Once(flush) end
-        end
-
-        return Safe
-
-    end
-
-    -- Module: core/maid
-    EmbeddedModules["core/maid"] = function()
-        local Maid = {}
-        Maid.__index = Maid
-
-        function Maid.new()
-          return setmetatable({ _tasks = {} }, Maid)
-        end
-
-        function Maid:Give(task)
-          self._tasks[#self._tasks + 1] = task
-          return task
-        end
-
-        local function cleanupTask(t)
-          -- Roblox Instances and RBXScriptConnections are userdata (type()=="userdata"),
-          -- NOT tables — so type()-based branching silently skips them and leaks UI/connections.
-          -- Use typeof() (Roblox global; falls back to type() under the headless mock).
-          local kind = (typeof and typeof(t)) or type(t)
-          if kind == "function" then
-            t()
-          elseif kind == "Instance" then
-            t:Destroy()
-          elseif kind == "RBXScriptConnection" then
-            t:Disconnect()
-          elseif kind == "table" then
-            if type(t.Disconnect) == "function" then t:Disconnect()
-            elseif type(t.Destroy) == "function" then t:Destroy()
+          -- Point the label at a new source. A function -> reactive (poll on the shared scheduler); a
+          -- string -> static (stop polling). Evaluates/writes immediately so the value shows at once.
+          local function setSource(v, direct)
+            source = v
+            if type(v) == "function" then
+              startReactive()
+              evaluate()                  -- function source: evaluated off-thread (a string never yields)
+            else
+              stopReactive()
+              applyText(v, direct)        -- static string: safe to write inline on the caller's thread
             end
           end
+
+          setSource(source, true)                 -- initial render (creation is on a capability-bearing thread)
+
+          return {
+            Frame = frame,
+            SetText = function(v) setSource(v, false) end,   -- a user call may arrive on a coroutine -> Safe path
+            Destroy = function() stopReactive(); if unreg then unreg() end; frame:Destroy() end,
+          }
         end
 
-        function Maid:DoCleanup()
-          local tasks = self._tasks
-          self._tasks = {}
-          for i = #tasks, 1, -1 do
-            local ok, err = pcall(cleanupTask, tasks[i])
-            if not ok and warn then warn("Maid task error: " .. tostring(err)) end
-          end
-        end
-
-        Maid.Destroy = Maid.DoCleanup
-
-        return Maid
-
-    end
-
-    -- Module: core/device
-    EmbeddedModules["core/device"] = function()
-        -- Deps injected via Init(R) (bundler cannot rewrite require() inside embedded modules).
-        -- Centralized device/platform detection. Phone-vs-tablet is a best-effort viewport
-        -- heuristic (Roblox exposes no physical-size/DPI), driven primarily by aspect ratio so
-        -- it is DPI-independent; tune via Device.Configure. Console/Desktop/Touch are reliable.
-        local UserInputService = game:GetService("UserInputService")
-        local GuiService = game:GetService("GuiService")
-
-        local Device = {}
-        local Signal
-        local DEFAULTS = { TabletMaxAspect = 1.55, TabletMinDiagonal = math.huge }
-        local cfg = { TabletMaxAspect = DEFAULTS.TabletMaxAspect, TabletMinDiagonal = DEFAULTS.TabletMinDiagonal }
-
-        local function viewport()
-          local cam = workspace and workspace.CurrentCamera
-          local vp = cam and cam.ViewportSize
-          if vp and vp.X and vp.X > 0 then return vp end
-          return { X = 1280, Y = 720 }
-        end
-
-        function Device.GetType()
-          if GuiService and GuiService.IsTenFootInterface and GuiService:IsTenFootInterface() then
-            return "Console"
-          end
-          local touch = UserInputService.TouchEnabled
-          local mouse = UserInputService.MouseEnabled
-          if touch and not mouse then
-            local vp = viewport()
-            local a, b = math.max(vp.X, vp.Y), math.min(vp.X, vp.Y)
-            local aspect = (b > 0) and (a / b) or 1
-            local diag = math.sqrt(vp.X * vp.X + vp.Y * vp.Y)
-            if aspect <= cfg.TabletMaxAspect or diag >= cfg.TabletMinDiagonal then return "Tablet" end
-            return "Mobile"
-          end
-          return "Desktop"
-        end
-
-        function Device.IsMobile() return Device.GetType() == "Mobile" end
-        function Device.IsTablet() return Device.GetType() == "Tablet" end
-        function Device.IsDesktop() return Device.GetType() == "Desktop" end
-        function Device.IsConsole() return Device.GetType() == "Console" end
-        function Device.IsTouch() return UserInputService.TouchEnabled == true end
-
-        -- Capability probes resolve the service lazily under pcall: an exotic executor may hand back nil
-        -- from GetService or lack a newer property (GuiService.ReducedMotionEnabled on older clients),
-        -- and a probe must degrade to its conservative default instead of throwing inside a hover bind.
-        local function readService(name, prop)
-          local ok, v = pcall(function() return game:GetService(name)[prop] end)
-          if ok then return v end
-          return nil
-        end
-
-        -- Hover affordances (wash, tooltip intent, halo) only make sense with a pointer; touch-only
-        -- devices skip them rather than getting a stuck hover state after the first tap.
-        function Device.SupportsHover() return readService("UserInputService", "MouseEnabled") == true end
-        -- OS-level accessibility flag; Animate reads it to default reduced-motion users to instant goals.
-        function Device.PrefersReducedMotion() return readService("GuiService", "ReducedMotionEnabled") == true end
-
-        function Device.GetInput()
-          local t = UserInputService.GetLastInputType and UserInputService:GetLastInputType()
-          local name = (t and t.Name) or ""
-          if name == "Touch" then return "Touch" end
-          if name:find("Gamepad") then return "Gamepad" end
-          return "KeyboardMouse"
-        end
-
-        local lastType, lastInput
-        function Device._recompute()
-          local t, i = Device.GetType(), Device.GetInput()
-          if t ~= lastType or i ~= lastInput then
-            lastType, lastInput = t, i
-            if Device.Changed then Device.Changed:Fire({ Type = t, Input = i, Viewport = viewport() }) end
-          end
-        end
-
-        function Device.Configure(opts)
-          if type(opts) == "table" then
-            if tonumber(opts.TabletMaxAspect) then cfg.TabletMaxAspect = tonumber(opts.TabletMaxAspect) end
-            if tonumber(opts.TabletMinDiagonal) then cfg.TabletMinDiagonal = tonumber(opts.TabletMinDiagonal) end
-          end
-          Device._recompute()
-        end
-
-        local connected = false
-        function Device.Init(R)
-          Signal = R.Signal
-          cfg.TabletMaxAspect = DEFAULTS.TabletMaxAspect
-          cfg.TabletMinDiagonal = DEFAULTS.TabletMinDiagonal
-          if not Device.Changed then Device.Changed = Signal.new() end
-          lastType, lastInput = Device.GetType(), Device.GetInput()
-          if connected then return end
-          connected = true
-          local function hook(sig) if sig and sig.Connect then sig:Connect(function() Device._recompute() end) end end
-          hook(UserInputService.LastInputTypeChanged)
-          if UserInputService.GetPropertyChangedSignal then
-            hook(UserInputService:GetPropertyChangedSignal("TouchEnabled"))
-            hook(UserInputService:GetPropertyChangedSignal("MouseEnabled"))
-            hook(UserInputService:GetPropertyChangedSignal("KeyboardEnabled"))
-          end
-          local cam = workspace and workspace.CurrentCamera
-          if cam and cam.GetPropertyChangedSignal then hook(cam:GetPropertyChangedSignal("ViewportSize")) end
-        end
-
-        return Device
-
-    end
-
-    -- Module: core/effects
-    EmbeddedModules["core/effects"] = function()
-        -- Deps injected via Init(R). Layer kit: 9-slice shadow/glow siblings, gradient rim on a
-        -- UIStroke, lift/reskin helpers and a skeleton shimmer. Under ZIndexBehavior.Sibling a child
-        -- always renders above its parent's fill, so dark/glow layers are SIBLINGS of the host with a
-        -- lower ZIndex (never children); the caller picks that ZIndex.
-        --
-        -- Every function takes the owning window's theme explicitly (2nd positional arg on the
-        -- constructors, trailing arg on the geometry helpers) and throws without one: the module never
-        -- reads a global theme, so light/dark values always come from the theme actually being rendered.
-        --
-        --   Effects.shadow(parent, theme, { name, level, zIndex })  -> ImageLabel | nil (shadowId == '')
-        --   Effects.glow(parent, theme, colorToken, level, zIndex, name) -> ImageLabel | nil (mobile/'off')
-        --   Effects.place(shadow, x, y, w, h, level, theme)          one-shot geometry (px, host top-left)
-        --   Effects.mirror(shadow, host, level, theme)              geometry from host.Position/Size
-        --   Effects.follow(shadow, host, level, theme, maid)        Absolute* property signals -> place
-        --   Effects.rim(stroke, theme)                              gradient child on a UIStroke
-        --   Effects.lift(shadow, theme, on)                         drag/resize spread + darken
-        --   Effects.reskin(layer, theme, kind, colorToken)          re-apply per-mode alpha/tint
-        --   Effects.skeleton(parent, theme, { size, radius, ... })  -> { Frame, Gradient, Stop }
-        -- `level` is a key of theme.Effect holding { spread, offsetY }: window/dialog/popover/toast/
-        -- tooltip/control. Every helper that takes a layer tolerates nil (shadows are nil until the
-        -- 9-slice asset id is verified in Studio), so call sites need no `if shadow then` of their own.
-        local Effects = {}
-        local Create, Theme, Animate, Safe, Device
-
-        -- Skeleton shimmer defaults until theme.lua grows an Effect.skeleton group; a theme that
-        -- defines { period, rotation, band } under Effect.skeleton wins over these.
-        local SKELETON = { period = 1.1, rotation = 15 }
-        -- Per-layer bookkeeping (level, kind, tint token, rest size, lifted flag) keyed weakly by the
-        -- instance so a destroyed layer never pins its entry.
-        local meta = setmetatable({}, { __mode = "k" })
-
-        function Effects.Init(R)
-          Create = R.Create; Theme = R.Theme; Animate = R.Animate; Safe = R.Safe; Device = R.Device
-        end
-
-        local function need(theme, fn)
-          if type(theme) ~= "table" or type(theme.Effect) ~= "table" then
-            error("Effects." .. fn .. ": theme (Theme.new instance) required", 3)
-          end
-          return theme
-        end
-
-        local function metaOf(layer)
-          local m = meta[layer]
-          if not m then m = {}; meta[layer] = m end
-          return m
-        end
-
-        -- A layer remembers the level it was created with, so geometry calls may omit it.
-        local function levelOf(theme, level, layer)
-          local key = level or (meta[layer] and meta[layer].level) or "control"
-          local lv = theme.Effect[key]
-          if type(lv) ~= "table" or type(lv.spread) ~= "number" then
-            error("Effects: unknown level '" .. tostring(key) .. "' (window/dialog/popover/toast/tooltip/control)", 3)
-          end
-          return lv
-        end
-
-        local function shadowId(theme)
-          local id = theme.Effect.shadowId
-          if type(id) ~= "string" or id == "" then return nil end
-          return id
-        end
-
-        -- Shared 9-slice ImageLabel for shadow and glow. SliceCenter only where Rect exists: an executor
-        -- without the Rect global would otherwise throw here, and a stretched slice still renders as a
-        -- soft blob rather than nothing.
-        local function sliceLayer(parent, theme, props)
-          local img = Create("ImageLabel", {
-            Name = props.name, Image = shadowId(theme), ScaleType = Enum.ScaleType.Slice,
-            ImageColor3 = props.color, ImageTransparency = props.alpha,
-            AnchorPoint = Vector2.new(0.5, 0.5), Active = false, BackgroundTransparency = 1,
-            ZIndex = props.zIndex or 0, Parent = parent,
-          })
-          if Rect and Rect.new then
-            local s = theme.Effect.slice
-            img.SliceCenter = Rect.new(s.x0, s.y0, s.x1, s.y1)
-          end
-          return img
-        end
-
-        -- Filled (not hollow) 9-slice shadow, black tint, per-mode alpha. nil while Effect.shadowId is
-        -- '' (the default until the asset is verified in Studio).
-        function Effects.shadow(parent, theme, opts)
-          need(theme, "shadow"); opts = opts or {}
-          if not shadowId(theme) then return nil end
-          local img = sliceLayer(parent, theme, {
-            name = opts.name or "Shadow", color = Color3.new(0, 0, 0), alpha = Theme.fx(theme).shadow, zIndex = opts.zIndex,
-          })
-          local m = metaOf(img); m.kind = "shadow"; m.level = opts.level
-          return img
-        end
-
-        -- controlGlow 'auto' skips glows on phones (small screens, no hover to reveal them), 'off'
-        -- skips them everywhere; anything else keeps them.
-        local function glowAllowed(theme)
-          local mode = theme.Effect.controlGlow
-          if mode == "off" or mode == false then return false end
-          if mode == "auto" and Device.IsMobile() then return false end
-          return true
-        end
-
-        -- Same asset tinted with the token Color3 itself (not a copy) so identity compares and reskin
-        -- work; rests hidden (ImageTransparency 1), the owner tweens it to Theme.fx(theme).glow.
-        function Effects.glow(parent, theme, colorToken, level, zIndex, name)
-          need(theme, "glow")
-          if colorToken == nil then error("Effects.glow: colorToken (a theme.Colors value) required", 2) end
-          if not shadowId(theme) or not glowAllowed(theme) then return nil end
-          local img = sliceLayer(parent, theme, { name = name or "Glow", color = colorToken, alpha = 1, zIndex = zIndex })
-          local m = metaOf(img); m.kind = "glow"; m.level = level; m.token = colorToken
-          return img
-        end
-
-        -- ---- geometry ---------------------------------------------------------------------------------
-        -- A lifted layer keeps its extra spread through place/mirror so the per-frame mirror during a
-        -- drag does not undo lift(); `rest` is the unlifted size the next lift(false) returns to.
-        local function growth(theme, m)
-          return m.lifted and 2 * theme.Effect.lift.spreadDelta or 0
-        end
-
-        local function writeGeometry(shadow, theme, m, rest, xs, xo, ys, yo)
-          m.rest = rest
-          local g = growth(theme, m)
-          shadow.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
-          shadow.Position = UDim2.new(xs, xo, ys, yo)
-        end
-
-        -- One-shot geometry from a host rect in px (top-left x/y, size w/h): the layer is centred on
-        -- the host, grown by 2*spread and dropped by offsetY (popover, tooltip, dialog via follow).
-        function Effects.place(shadow, x, y, w, h, level, theme)
-          if not shadow then return nil end
-          need(theme, "place")
-          local lv, m = levelOf(theme, level, shadow), metaOf(shadow)
-          writeGeometry(shadow, theme, m, { 0, w + 2 * lv.spread, 0, h + 2 * lv.spread }, 0, x + w / 2, 0, y + h / 2 + lv.offsetY)
-          return shadow
-        end
-
-        -- Geometry from host.Position/host.Size (UDim2 math: same Scale, Offset + 2*spread / + offsetY).
-        -- Honours host.AnchorPoint, so a centre-pivoted window and a top-left FAB both get a centred
-        -- shadow; with AnchorPoint (0.5, 0.5) the Position is simply the host's plus offsetY.
-        function Effects.mirror(shadow, host, level, theme)
-          if not (shadow and host) then return nil end
-          need(theme, "mirror")
-          local pos, size = host.Position, host.Size
-          if not (pos and size) then return shadow end
-          local lv, m = levelOf(theme, level, shadow), metaOf(shadow)
-          local a = host.AnchorPoint
-          local ax, ay = a and a.X or 0, a and a.Y or 0
-          local sp = 2 * lv.spread
-          writeGeometry(shadow, theme, m, { size.X.Scale, size.X.Offset + sp, size.Y.Scale, size.Y.Offset + sp },
-            pos.X.Scale + (0.5 - ax) * size.X.Scale, pos.X.Offset + (0.5 - ax) * size.X.Offset,
-            pos.Y.Scale + (0.5 - ay) * size.Y.Scale, pos.Y.Offset + (0.5 - ay) * size.Y.Offset + lv.offsetY)
-          return shadow
-        end
-
-        -- Track an AutomaticSize host (dialog card) through its Absolute* property signals. Signal
-        -- handlers run on engine threads, so the write goes through Safe.mutate; nil Absolute* (headless
-        -- mock, or a host not yet laid out) skips the sync. Absolute coordinates are screen-space, so
-        -- the shadow's parent origin is subtracted to land in the shared parent's local space.
-        -- Returns { Sync, Disconnect } (maid-compatible) and gives it to `maid` when one is passed.
-        function Effects.follow(shadow, host, level, theme, maid)
-          if not (shadow and host) then return nil end
-          need(theme, "follow")
-          levelOf(theme, level, shadow)
-          local function sync()
-            local ap, as = host.AbsolutePosition, host.AbsoluteSize
-            if not (ap and as) then return end
-            local parent = shadow.Parent
-            local pp = parent and parent.AbsolutePosition
-            local px, py = pp and pp.X or 0, pp and pp.Y or 0
-            Effects.place(shadow, ap.X - px, ap.Y - py, as.X, as.Y, level, theme)
-          end
-          local function deferred() Safe.mutate(sync) end
-          local c1 = host:GetPropertyChangedSignal("AbsoluteSize"):Connect(deferred)
-          local c2 = host:GetPropertyChangedSignal("AbsolutePosition"):Connect(deferred)
-          local handle = { Sync = sync, Disconnect = function() c1:Disconnect(); c2:Disconnect() end }
-          if maid then maid:Give(handle) end
-          sync()
-          return handle
-        end
-
-        -- ---- rim ----------------------------------------------------------------------------------------
-        local function rimStops(fx) return { { 0, fx.edgeTop }, { 1, fx.edgeBottom } } end
-
-        local function paintRim(g, fx)
-          g.Rotation = 90
-          g.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, fx.edgeTop), NumberSequenceKeypoint.new(1, fx.edgeBottom),
-          })
-          return g
-        end
-
-        -- Edge light: ONE UIGradient child on the stroke whose Transparency multiplies the stroke's
-        -- (lit at the top, fading down). stroke.Color is never touched (tests compare it by reference)
-        -- and a second call updates the existing gradient in place (reskin path).
-        function Effects.rim(stroke, theme)
-          if not stroke then return nil end
-          local fx = Theme.fx(need(theme, "rim"))
-          local g = stroke:FindFirstChildOfClass("UIGradient")
-          if g then return paintRim(g, fx) end
-          g = Create.shade({ rotation = 90, stops = rimStops(fx) })
-          g.Name = "Rim"; g.Parent = stroke
-          return g
-        end
-
-        -- ---- lift / reskin --------------------------------------------------------------------------
-        -- Rest size: what place/mirror last wrote, else the current Size (a shadow lifted before any
-        -- placement is assumed unlifted).
-        local function restOf(shadow, m)
-          if m.rest then return m.rest end
-          local s = shadow.Size
-          if not s then return nil end
-          m.rest = { s.X.Scale, s.X.Offset, s.Y.Scale, s.Y.Offset }
-          return m.rest
-        end
-
-        local function shadowAlpha(theme, lifted)
-          local fx = Theme.fx(theme)
-          return lifted and (fx.shadow + theme.Effect.lift.alphaDelta) or fx.shadow
-        end
-
-        -- Grab feedback (drag/resize): spread grows by 2*lift.spreadDelta and the alpha shifts by
-        -- lift.alphaDelta while `on`; back to rest on release. Motion.fast either way.
-        -- `alpha` overrides the computed transparency for an owner that folds more than the mode into it
-        -- (the window adds its own Transparency). It must ride THIS tween: a second tween on the same
-        -- instance cancels this one outright, and the shadow would keep the alpha but never finish
-        -- growing -- it stayed oversized for the rest of the session.
-        function Effects.lift(shadow, theme, on, alpha)
-          if not shadow then return nil end
-          need(theme, "lift")
-          local m = metaOf(shadow)
-          m.lifted = on and true or false
-          local goal = { ImageTransparency = type(alpha) == "number" and alpha or shadowAlpha(theme, m.lifted) }
-          local rest = restOf(shadow, m)
-          if rest then
-            local g = growth(theme, m)
-            goal.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
-          end
-          return Animate.to(shadow, "fast", goal)
-        end
-
-        -- Re-apply per-mode alpha/tint after SetMode/SetAccent. `kind` and `colorToken` default to what
-        -- the layer was created with. A shown glow (alpha < 1) picks up the new mode's glow alpha; a
-        -- hidden one stays hidden. 'rim' accepts the UIStroke or its gradient.
-        function Effects.reskin(layer, theme, kind, colorToken)
-          if not layer then return nil end
-          need(theme, "reskin")
-          local m = meta[layer]
-          kind = kind or (m and m.kind)
-          if kind == "shadow" then
-            layer.ImageTransparency = shadowAlpha(theme, m and m.lifted)
-          elseif kind == "glow" then
-            local tok = colorToken or (m and m.token)
-            if tok then layer.ImageColor3 = tok; metaOf(layer).token = tok end
-            if (layer.ImageTransparency or 1) < 1 then layer.ImageTransparency = Theme.fx(theme).glow end
-          elseif kind == "rim" then
-            if layer.ClassName == "UIStroke" then return Effects.rim(layer, theme) end
-            paintRim(layer, Theme.fx(theme))
-          else
-            error("Effects.reskin: kind 'shadow' | 'glow' | 'rim' required", 2)
-          end
-          return layer
-        end
-
-        -- ---- skeleton -------------------------------------------------------------------------------
-        -- Loading placeholder: a surface block with a diagonal band swept across it by ONE looping
-        -- gradient tween (Offset -1 -> 1). Under reduced motion Animate.loop rests the gradient at its
-        -- goal (band swept out of view) and creates no tween, so the block is static. Stop() cancels the
-        -- loop, fades the block out (fold-out curve) and destroys it; instant when motion is off.
-        -- opts: size (UDim2), radius, name, position, zIndex, band (Color3 multiplier at the band centre).
-        function Effects.skeleton(parent, theme, opts)
-          need(theme, "skeleton"); opts = opts or {}
-          local sk = theme.Effect.skeleton or SKELETON
-          local frame = Create("Frame", {
-            Name = opts.name or "Skeleton", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
-            Size = opts.size or UDim2.new(1, 0, 1, 0), Position = opts.position, ZIndex = opts.zIndex,
-            Active = false, Parent = parent,
-          })
-          Create.corner(opts.radius or theme.Radius.sm).Parent = frame
-          local white = Color3.new(1, 1, 1)
-          local band = opts.band or sk.band or Theme.fx(theme).inset
-          local g = Create.gradient({ rotation = sk.rotation or SKELETON.rotation, stops = { { 0, white }, { 0.5, band }, { 1, white } } })
-          g.Name = "Shimmer"; g.Offset = Vector2.new(-1, 0); g.Parent = frame
-          local loop = Animate.loop(g, sk.period or SKELETON.period, { Offset = Vector2.new(1, 0) }, Enum.EasingStyle.Linear)
-          local stopped = false
-          local function Stop()
-            if stopped then return end
-            stopped = true
-            loop.Cancel()
-            -- owner already torn down (parent destroyed) -> nothing left to fade
-            if frame.Parent == nil then frame:Destroy(); return end
-            Animate.exitTo(frame, "exit", { BackgroundTransparency = 1 }, function() frame:Destroy() end)
-          end
-          return { Frame = frame, Gradient = g, Stop = Stop }
-        end
-
-        return Effects
+        return Label
 
     end
 
@@ -2433,648 +2070,6 @@ EmbeddedModules["../output/bundle"] = function()
         end
 
         return Button
-
-    end
-
-    -- Module: components/toggle
-    EmbeddedModules["components/toggle"] = function()
-        -- Deps injected via Init(R).
-        local Toggle = {}
-        local Create, DefaultTheme, Animate, Maid, Flag, Safe, Effects, Recipes
-
-        function Toggle.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe
-          Effects = R.Effects; Recipes = R.Recipes
-        end
-
-        -- Token core/theme.lua does not carry yet (reported as a deviation); the theme wins the moment
-        -- Stroke.knob exists. Same escape hatch core/animate.lua uses for its FALLBACK durations.
-        local FALLBACK = { knobRim = 0.7 }
-
-        -- shadcn switch proportions, pinned by toggle_test. Every knob offset is derived from them so the
-        -- ON position, the press stretch and the rim never need a second literal.
-        local TRACK_W, TRACK_H = 44, 24
-
-        function Toggle.new(opts)
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local maid = Maid.new()
-          local value = false
-          local onChanged
-
-          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-          local rowH = hasDesc and 50 or 34
-          local padY = hasDesc and 8 or 0
-
-          local btn = Create("TextButton", {
-            Name = "Toggle", AutoButtonColor = false, Text = "",
-            BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
-            Size = UDim2.new(1, 0, 0, rowH), LayoutOrder = opts.LayoutOrder or 0,
-            Parent = opts.Parent,
-            Create.corner(theme.Radius.md),
-            Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = padY, bottom = padY }),
-          })
-          local label = Create.text(Create("TextLabel", {
-            Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Toggle",
-            TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-            Size = UDim2.new(1, -54, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn,
-          }), theme, "label")
-          local desc
-          if hasDesc then
-            desc = Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
-              TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-              TextYAlignment = Enum.TextYAlignment.Top,
-              Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -54, 0, 18), Parent = btn }), theme, "muted")
-          end
-          -- ZIndex 2 so the track sits above the accent glow (1) and the hover wash (0), all siblings
-          -- under btn; a child glow would render over the knob instead of behind the pill.
-          local track = Create("Frame", {
-            Name = "Track", BackgroundColor3 = theme.Colors.switchTrackOff, BorderSizePixel = 0, ZIndex = 2,
-            Size = UDim2.new(0, TRACK_W, 0, TRACK_H), Position = UDim2.new(1, -TRACK_W, 0.5, -TRACK_H / 2),
-            Parent = btn, Create.corner(TRACK_H / 2),
-          })
-          local trackStroke = Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = track })
-
-          local knobSize = theme.Sizes.knob
-          local knobPad = (TRACK_H - knobSize) / 2
-          local knobY = -knobSize / 2
-          local offX, onX = knobPad, TRACK_W - knobSize - knobPad
-          local stretchW = knobSize * theme.Motion.knobStretch
-          local knob = Create("Frame", {
-            Name = "Knob", BackgroundColor3 = theme.Colors.foreground, BorderSizePixel = 0, ZIndex = 3,
-            Size = UDim2.new(0, knobSize, 0, knobSize), Position = UDim2.new(0, offX, 0.5, knobY),
-            Parent = track, Create.corner(knobSize / 2),
-          })
-          -- Rim: a white knob on a white ON track (Adaptive light) would otherwise dissolve into it.
-          local knobStroke = Create.stroke(theme.Colors.background, 1, theme.Stroke.knob or FALLBACK.knobRim)
-          knobStroke.Parent = knob
-          -- Accent glow BEHIND the track, sibling under btn. nil while Effect.shadowId is '' (and on
-          -- phones under controlGlow 'auto'), so every use is guarded.
-          local glow = Effects.glow(btn, theme, theme.Colors.primary, "control", 1, "TrackGlow")
-          Effects.mirror(glow, track, "control", theme)
-
-          local function knobRest() return UDim2.new(0, value and onX or offX, 0.5, knobY) end
-
-          -- `built` makes the first apply (Flag.bind's initial paint) a plain write: the rest pose costs
-          -- no tween at build time, every later change animates.
-          local built = false
-          local function apply(v)
-            value = v and true or false
-            local instant = not built
-            Safe.mutate(function()
-              local trackC = value and theme.Colors.primary or theme.Colors.switchTrackOff
-              local knobC = value and theme.Colors.primaryForeground or theme.Colors.foreground
-              -- ON dissolves the grey stroke so the accent pill reads as one clean shape
-              local strokeA = value and 1 or theme.Stroke.control
-              local glowA = value and theme.fx(theme).glow or 1
-              if instant then
-                knob.Position = knobRest(); knob.Size = UDim2.new(0, knobSize, 0, knobSize)
-                knob.BackgroundColor3 = knobC; track.BackgroundColor3 = trackC
-                trackStroke.Transparency = strokeA
-                if glow then glow.ImageTransparency = glowA end
-                return
-              end
-              -- Geometry springs (Back/Out overshoots ~1px past the stop); the knob COLOUR is a separate
-              -- Quart tween because Back/Out on a Color3 overshoots past the target and flashes.
-              Animate.springTo(knob, "release", { Position = knobRest(), Size = UDim2.new(0, knobSize, 0, knobSize) })
-              Animate.to(knob, "base", { BackgroundColor3 = knobC })
-              Animate.to(track, "base", { BackgroundColor3 = trackC })
-              Animate.to(trackStroke, "fast", { Transparency = strokeA })
-              if glow then Animate.to(glow, "base", { ImageTransparency = glowA }) end
-            end)
-          end
-
-          local commit = Flag.bind(opts, opts.Default == true, apply)
-          built = true
-
-          -- ---- state ----------------------------------------------------------------
-          local hover = Recipes.hover(btn, { theme = theme, corner = theme.Radius.md,
-            inset = { x = theme.Spacing.inputX, y = padY } })
-          maid:Give(hover.disconnect)
-
-          local enabled = true
-          local function setEnabled(b)
-            enabled = b ~= false
-            Safe.mutate(function()
-              local parts = { { track, "BackgroundTransparency", 0 }, { knob, "BackgroundTransparency", 0 },
-                { label, "TextTransparency", 0 } }
-              if desc then parts[#parts + 1] = { desc, "TextTransparency", 0 } end
-              Recipes.disabled(parts, not enabled, theme)
-            end)
-          end
-
-          -- Press leans the knob toward where the tap will send it: it stretches to knob*knobStretch with
-          -- the TRAILING edge pinned, then springs back to the rest pose on release or mouse-out.
-          local pressed = false
-          local function pressKnob()
-            pressed = true
-            Animate.to(knob, "press", {
-              Size = UDim2.new(0, stretchW, 0, knobSize),
-              Position = UDim2.new(0, value and (TRACK_W - knobPad - stretchW) or knobPad, 0.5, knobY),
-            })
-          end
-          local function releaseKnob()
-            if not pressed then return end
-            pressed = false
-            Animate.springTo(knob, "release", { Size = UDim2.new(0, knobSize, 0, knobSize), Position = knobRest() })
-          end
-
-          if opts.AccentReg then maid:Give(opts.AccentReg(function()
-            btn.BackgroundColor3 = theme.Colors.surface
-            label.TextColor3 = theme.Colors.foreground
-            if desc then desc.TextColor3 = theme.Colors.mutedForeground end
-            trackStroke.Color = theme.Colors.border
-            knobStroke.Color = theme.Colors.background
-            Effects.reskin(glow, theme, "glow", theme.Colors.primary)
-            hover.reskin()
-            apply(value)
-          end)) end
-
-          local api = { Frame = btn }
-          function api.Get() return value end
-          function api.Set(v)
-            commit(v and true or false)
-            if opts.Callback then opts.Callback(value) end
-            if onChanged then onChanged(value) end
-          end
-          function api.OnChanged(fn) onChanged = fn end
-          -- Blocks USER input only: Set / a config restore still updates state and visuals while disabled.
-          function api.SetEnabled(b) setEnabled(b) end
-          function api.Destroy() maid:DoCleanup() end
-
-          maid:Give(btn.MouseButton1Down:Connect(function() if enabled then pressKnob() end end))
-          maid:Give(btn.MouseButton1Up:Connect(releaseKnob))
-          maid:Give(btn.MouseLeave:Connect(releaseKnob))
-          maid:Give(btn.MouseButton1Click:Connect(function() if enabled then api.Set(not value) end end))
-          maid:Give(btn)
-          if opts.Disabled then setEnabled(false) end
-          return api
-        end
-
-        return Toggle
-
-    end
-
-    -- Module: components/slider
-    EmbeddedModules["components/slider"] = function()
-        -- Deps injected via Init(R).
-        local Slider = {}
-        local Create, DefaultTheme, Animate, Maid, Flag, Safe, Effects, Recipes, Device
-        local UserInputService = game:GetService("UserInputService")
-        function Slider.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe
-          Effects = R.Effects; Recipes = R.Recipes; Device = R.Device
-        end
-
-        -- Rail geometry pinned by theme_test/slider_test: a 6px track 16px above the padded row bottom,
-        -- with a 12px handle centred on it. The Hit strip and the halo derive from these.
-        local TRACK_H, TRACK_Y, HANDLE = 6, -16, 12
-
-        function Slider.new(opts)
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local maid = Maid.new()
-          local minV = opts.Min or 0
-          local maxV = opts.Max or 100
-          local step = opts.Step or 1
-          local value = minV
-          local onChanged
-
-          local function snap(n)
-            n = tonumber(n) or value
-            if step and step > 0 then n = math.floor((n - minV) / step + 0.5) * step + minV end
-            if n < minV then n = minV elseif n > maxV then n = maxV end
-            return n
-          end
-
-          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-          -- symmetric vertical padding so the title/track/handle aren't flush against the row edges;
-          -- grow the row height by 2*padY so the inner layout (title at top, track anchored to the
-          -- inner bottom) keeps its relative geometry and simply gains breathing room top and bottom.
-          local padY = theme.Spacing.inputY
-          local root = Create("Frame", { Name = "SliderRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
-            Size = UDim2.new(1, 0, 0, (opts.Text and (hasDesc and 62 or 46) or 28) + padY * 2), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
-            Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = padY, bottom = padY }) })
-          local valueLabel, titleLabel, descLabel
-          if opts.Text then
-            -- Title is the row label (14, Medium) like every other row; the 16px slot and the track
-            -- offset are pinned geometry (theme_test), so only the type role changes.
-            titleLabel = Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
-              TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-              Size = UDim2.new(1, -40, 0, 16), Parent = root }), theme, "label")
-            valueLabel = Create.text(Create("TextLabel", { Name = "Value", BackgroundTransparency = 1, Text = "0",
-              TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Right,
-              Size = UDim2.new(0, 40, 0, 16), Position = UDim2.new(1, -40, 0, 0), Parent = root }), theme, "muted")
-            if hasDesc then
-              descLabel = Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
-                TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-                TextYAlignment = Enum.TextYAlignment.Top,
-                Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -40, 0, 18), Parent = root }), theme, "muted")
-            end
-          end
-          -- The empty part of the rail is the window background (one step below the row) plus a stroke,
-          -- so an untouched slider still reads as a groove rather than a gap.
-          local track = Create("Frame", { Name = "Track", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
-            Size = UDim2.new(1, 0, 0, TRACK_H), Position = UDim2.new(0, 0, 1, TRACK_Y), Parent = root, Create.corner(TRACK_H / 2) })
-          local trackStroke = Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = track })
-          local fill = Create("Frame", { Name = "Fill", BackgroundColor3 = theme.Colors.primary, BorderSizePixel = 0,
-            Size = UDim2.new(0, 0, 1, 0), Parent = track, Create.corner(TRACK_H / 2) })
-          -- AnchorPoint (0.5, 0.5): the handle sits ON the value point, so the grow UIScale expands about
-          -- its centre instead of dragging the glyph down-right from a top-left origin.
-          local handle = Create("Frame", { Name = "Handle", BackgroundColor3 = theme.Colors.foreground, BorderSizePixel = 0, ZIndex = 2,
-            AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(0, HANDLE, 0, HANDLE),
-            Position = UDim2.new(0, 0, 0.5, 0), Parent = track, Create.corner(HANDLE / 2) })
-          local handleScale = Create("UIScale", { Scale = 1, Parent = handle })
-          -- Halo: a glow parented to the TRACK at ZIndex 0 (Track has no ClipsDescendants), so it shares
-          -- the handle's coordinate space and follows it with a plain Position write -- no Absolute* math.
-          -- nil while Effect.shadowId is '' and on phones under controlGlow 'auto'.
-          local halo = Effects.glow(track, theme, theme.Colors.primary, "control", 0, "Halo")
-          Effects.mirror(halo, handle, "control", theme)
-          -- Finger-sized grab strip over the 6px rail: transparent, ZIndex above the track so pointer
-          -- input lands here rather than on the rail. Deliberately NOT 'Active' -- the rail it replaces
-          -- never sank input either, and an Active frame inside the content ScrollingFrame would swallow
-          -- the scroll the row sits in (same rule as the Recipes hover wash).
-          local hitH = theme.Sizes.sliderHit
-          local hit = Create("Frame", { Name = "Hit", BackgroundTransparency = 1, BorderSizePixel = 0, Active = false, ZIndex = 3,
-            Size = UDim2.new(1, 0, 0, hitH), Position = UDim2.new(0, 0, 1, TRACK_Y + TRACK_H / 2 - hitH / 2), Parent = root })
-
-          local dragging = false
-          local built = false
-          -- Handle and halo are both centre-anchored on the value point, so one goal serves both.
-          local function valuePos(scale) return UDim2.new(scale, 0, 0.5, 0) end
-
-          local function apply(v)
-            value = snap(v)
-            local scale = (maxV > minV) and (value - minV) / (maxV - minV) or 0
-            local direct = dragging or not built
-            Safe.mutate(function()
-              if valueLabel then valueLabel.Text = tostring(value) end
-              if direct then
-                -- an active drag writes straight through so the rail never lags the finger
-                fill.Size = UDim2.new(scale, 0, 1, 0)
-                handle.Position = valuePos(scale)
-                if halo then halo.Position = valuePos(scale) end
-                return
-              end
-              -- programmatic SetValue (config restore, api call) flows instead of jumping
-              local E, D = Animate.EASING.smooth, Animate.DIR.Out
-              Animate.to(fill, "base", { Size = UDim2.new(scale, 0, 1, 0) }, E, D)
-              Animate.to(handle, "base", { Position = valuePos(scale) }, E, D)
-              if halo then Animate.to(halo, "base", { Position = valuePos(scale) }, E, D) end
-            end)
-          end
-          local commit = Flag.bind(opts, snap(opts.Default or minV), apply)
-          built = true
-
-          local api = { Frame = root }
-          function api.GetValue() return value end
-          function api.SetValue(v) commit(snap(v)); if opts.Callback then opts.Callback(value) end; if onChanged then onChanged(value) end end
-          function api.OnChanged(fn) onChanged = fn end
-          function api.Destroy() maid:DoCleanup() end
-
-          -- ---- handle feedback ------------------------------------------------------
-          local hovering = false
-          local function handleGrow()
-            local s = dragging and theme.Motion.handleGrow or (hovering and theme.Motion.handleHover or 1)
-            Animate.springTo(handleScale, "release", { Scale = s })
-            if halo then Animate.to(halo, "base", { ImageTransparency = dragging and theme.fx(theme).glow or 1 }) end
-          end
-
-          local enabled = true
-          local function setEnabled(b)
-            local was = enabled
-            enabled = b ~= false
-            Safe.mutate(function()
-              local parts = { { fill, "BackgroundTransparency", 0 }, { handle, "BackgroundTransparency", 0 } }
-              if valueLabel then parts[#parts + 1] = { valueLabel, "TextTransparency", 0 } end
-              Recipes.disabled(parts, not enabled, theme)
-            end)
-            -- a drag already under way is forced to finish (value kept) rather than left hanging
-            if was and not enabled and dragging then dragging = false; handleGrow() end
-          end
-
-          if opts.AccentReg then maid:Give(opts.AccentReg(function()
-            root.BackgroundColor3 = theme.Colors.surface
-            track.BackgroundColor3 = theme.Colors.background
-            trackStroke.Color = theme.Colors.border
-            fill.BackgroundColor3 = theme.Colors.primary
-            handle.BackgroundColor3 = theme.Colors.foreground
-            Effects.reskin(halo, theme, "glow", theme.Colors.primary)
-            if titleLabel then titleLabel.TextColor3 = theme.Colors.foreground end
-            if descLabel then descLabel.TextColor3 = theme.Colors.mutedForeground end
-            if valueLabel then valueLabel.TextColor3 = theme.Colors.mutedForeground end
-          end)) end
-
-          local function fromX(px)
-            local ap, sz = track.AbsolutePosition, track.AbsoluteSize
-            local x0 = ap and ap.X or 0
-            local w = (sz and sz.X) or 1
-            local t = (px - x0) / (w > 0 and w or 1)
-            if t < 0 then t = 0 elseif t > 1 then t = 1 end
-            api.SetValue(minV + t * (maxV - minV))
-          end
-          maid:Give(hit.InputBegan:Connect(function(input)
-            if not enabled then return end
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-              dragging = true; handleGrow(); fromX(input.Position.X)
-            end
-          end))
-          maid:Give(UserInputService.InputChanged:Connect(function(input)
-            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-              fromX(input.Position.X)
-            end
-          end))
-          maid:Give(UserInputService.InputEnded:Connect(function(input)
-            if not dragging then return end
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-              dragging = false; handleGrow()
-            end
-          end))
-          if Device.SupportsHover() then
-            maid:Give(hit.MouseEnter:Connect(function() hovering = true; if enabled then handleGrow() end end))
-            maid:Give(hit.MouseLeave:Connect(function() hovering = false; handleGrow() end))
-          end
-
-          -- Blocks USER input only: SetValue / a config restore still updates state and visuals.
-          function api.SetEnabled(b) setEnabled(b) end
-          if opts.Disabled then setEnabled(false) end
-          maid:Give(root)
-          return api
-        end
-        return Slider
-
-    end
-
-    -- Module: components/tooltip
-    EmbeddedModules["components/tooltip"] = function()
-        -- Deps injected via Init(R). Mixin-style: Tooltip.attach(target, text) wires hover.
-        -- An INVERTED chip (foreground fill, background text) with a soft shadow, shown only after
-        -- Tooltip.delay so a pointer sweeping a column of rows never strobes a trail of tips behind it.
-        local Tooltip = {}
-        local Create, DefaultTheme, Maid, Overlay, Animate, Device, Safe, Effects
-        local TextService = game:GetService("TextService")
-
-        function Tooltip.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Animate = R.Animate
-          Device = R.Device; Safe = R.Safe; Effects = R.Effects
-        end
-
-        -- Average glyph advance, used only when TextService is unavailable. The chip itself is
-        -- AutomaticSize.X: this width only drives the viewport clamp and the shadow rectangle.
-        local GLYPH_W = 0.55
-
-        local function measure(text, size)
-          local ok, v = pcall(function()
-            return TextService:GetTextSize(text, size, Enum.Font.BuilderSans, Vector2.new(10000, 10000))
-          end)
-          if ok and v and v.X then return v.X end
-          return #tostring(text) * size * GLYPH_W
-        end
-
-        function Tooltip.attach(target, text, themeArg)
-          local theme = themeArg or DefaultTheme
-          local maid = Maid.new()
-          local handle = { Destroy = function() maid:DoCleanup() end }
-          -- Touch has no hover: a tap would leave the chip stranded on screen with nothing to dismiss it,
-          -- so the whole mixin is a no-op there (no connections, no handle state).
-          if Device and Device.IsTouch() then return handle end
-
-          local tip, shadow, armed
-
-          -- Anchored bottom-centre above the target, clamped inside the viewport and flipped BELOW when
-          -- the chip would run off the top. Absolute* are nil headless / before the first layout pass, so
-          -- everything degrades to the top-left corner rather than erroring.
-          local function geometry(scale)
-            local T = theme.Tooltip
-            local ap, as = target.AbsolutePosition, target.AbsoluteSize
-            local tx, ty = (ap and ap.X or 0), (ap and ap.Y or 0)
-            local tw, th = (as and as.X or 0), (as and as.Y or 0)
-            local gap, hgt = T.gap * scale, T.height * scale
-            local w = (measure(text, theme.Font.muted.Size) + 2 * T.padX) * scale
-            local vp = Overlay.viewport()
-            local y = ty - gap                                     -- AnchorPoint (0.5, 1): y is the BOTTOM
-            if y - hgt < 0 then y = ty + th + gap + hgt end        -- no room above -> flip below
-            if y > vp.Y then y = vp.Y end
-            local half = w / 2
-            local x = math.max(half, math.min(tx + tw / 2, vp.X - half))
-            return x, y, w, hgt
-          end
-
-          local function build()
-            if tip then return end
-            local T = theme.Tooltip
-            local scale = Overlay.scale()                          -- 2.22: the tip owns its own UIScale
-            local x, y, w, hgt = geometry(scale)
-            -- Inverted: the chip is the foreground colour with background-coloured text, so it reads as a
-            -- label ABOUT the UI rather than another surface of it. No stroke -- the inversion is the edge.
-            tip = Create("TextLabel", {
-              Name = "Tooltip", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1,
-              BorderSizePixel = 0, Text = text, TextColor3 = theme.Colors.background, TextTransparency = 1,
-              AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0, x, 0, y),
-              Size = UDim2.new(0, 0, 0, T.height), AutomaticSize = Enum.AutomaticSize.X,
-              ZIndex = Overlay.Z.tooltip,
-              Create.corner(theme.Radius.sm), Create.padding({ left = T.padX, right = T.padX }),
-            })
-            Create.text(tip, theme, "muted")
-            -- ONE UIScale: the UI scale with the pop folded into it (Animate.pop would overwrite it with 1).
-            local us = Create("UIScale", { Scale = scale * theme.Motion.popFrom, Parent = tip })
-            Overlay.mount(tip)
-            -- Sibling shadow one layer below the chip; nil while Effect.shadowId is ''.
-            shadow = Effects.shadow(tip.Parent, theme, { name = "TooltipShadow", level = "tooltip",
-              zIndex = Overlay.Z.tooltip - 1 })
-            if shadow then
-              shadow.ImageTransparency = 1
-              Effects.place(shadow, x - w / 2, y - hgt, w, hgt, "tooltip", theme)
-              Animate.to(shadow, "fast", { ImageTransparency = (theme.fx or DefaultTheme.fx)(theme).shadow })
-            end
-            Animate.springTo(us, "fast", { Scale = scale })
-            Animate.to(tip, "fast", { BackgroundTransparency = 0, TextTransparency = 0 })
-          end
-
-          -- Fade out first, destroy on completion: the chip is cleared from `tip` immediately so a new
-          -- hover during the fade builds a fresh one instead of adopting the dying instance.
-          local function hide()
-            local t, s = tip, shadow
-            tip, shadow = nil, nil
-            if not t then return end
-            if s then Animate.to(s, "exit", { ImageTransparency = 1 }, Animate.EASING.exit, Animate.DIR.In) end
-            Animate.toThen(t, "exit", { BackgroundTransparency = 1, TextTransparency = 1 }, function()
-              t:Destroy()
-              if s then s:Destroy() end
-            end, Animate.EASING.exit, Animate.DIR.In)
-          end
-
-          -- Hover intent: arm a token, and only build if the SAME token is still armed when the delay
-          -- elapses -- a MouseLeave (or a second enter) in the meantime drops it. The callback runs on a
-          -- task.delay thread, which has no GUI capability on strict executors, hence Safe.mutate.
-          local function onEnter()
-            if tip then return end
-            local token = {}
-            armed = token
-            local function fire()
-              if armed == token and not tip then Safe.mutate(build) end
-            end
-            if type(task) == "table" and task.delay then task.delay(theme.Tooltip.delay, fire) else fire() end
-          end
-
-          local function onLeave()
-            armed = nil
-            hide()
-          end
-
-          maid:Give(target.MouseEnter:Connect(onEnter))
-          maid:Give(target.MouseLeave:Connect(onLeave))
-          maid:Give(function() onLeave() end)
-          return handle
-        end
-
-        return Tooltip
-
-    end
-
-    -- Module: core/themer
-    EmbeddedModules["core/themer"] = function()
-        -- Deps injected via Init(R) (none needed). A per-window registry of accent
-        -- re-appliers. Accent-using components register a closure that recolors their
-        -- accent parts reading theme.Colors live; Window:SetAccent/SetMode fire them all with a
-        -- reason ('accent' | 'mode') so closures with mode-only work (acrylic grain, light
-        -- hairlines) can branch on it. Legacy closures simply ignore the extra argument.
-        local Themer = {}
-        function Themer.Init(_) end
-
-        Themer.ACCENTS = {
-          { Name = "Adaptive", Primary = Color3.fromRGB(250, 250, 250), Foreground = Color3.fromRGB(24, 24, 27) },
-          { Name = "Indigo",  Primary = Color3.fromRGB(99, 102, 241),  Foreground = Color3.fromRGB(250, 250, 250) },
-          { Name = "Violet",  Primary = Color3.fromRGB(139, 92, 246),  Foreground = Color3.fromRGB(250, 250, 250) },
-          { Name = "Emerald", Primary = Color3.fromRGB(16, 185, 129),  Foreground = Color3.fromRGB(250, 250, 250) },
-          { Name = "Sky",     Primary = Color3.fromRGB(56, 189, 248),  Foreground = Color3.fromRGB(24, 24, 27) },
-          { Name = "Rose",    Primary = Color3.fromRGB(244, 63, 94),   Foreground = Color3.fromRGB(250, 250, 250) },
-        }
-
-        function Themer.accent(name)
-          for _, a in ipairs(Themer.ACCENTS) do if a.Name == name then return a end end
-          return nil
-        end
-
-        function Themer.names()
-          local out = {}
-          for _, a in ipairs(Themer.ACCENTS) do out[#out + 1] = a.Name end
-          return out
-        end
-
-        function Themer.new()
-          local fns = {}
-          local self = {}
-          function self.register(fn)
-            fns[fn] = true
-            return function() fns[fn] = nil end
-          end
-          -- pcall isolates a broken closure so one component cannot leave the rest of the window
-          -- half-reskinned; reason is nil for callers that predate it.
-          function self.reskin(reason)
-            for fn in pairs(fns) do pcall(fn, reason) end
-          end
-          function self.setAccent(primary, foreground)
-            self.reskin("accent") -- closures read theme.Colors live; caller mutated it before calling
-          end
-          return self
-        end
-
-        return Themer
-
-    end
-
-    -- Module: core/drag
-    EmbeddedModules["core/drag"] = function()
-        -- Deps injected via Init(R) (bundler cannot rewrite require() inside embedded modules).
-        -- A single mouse+touch drag helper. The fix vs. the old copy-pasted pattern: it captures
-        -- the SPECIFIC InputObject that started a touch drag and only reacts to that object's
-        -- movement, so stray/secondary touches and other drag handlers can't cross-fire — the
-        -- root cause of the mobile "drag to shrink grows it instead" bug.
-        local UserInputService = game:GetService("UserInputService")
-
-        local Drag = {}
-
-        -- Drag.bind(target, opts, maid)
-        --   target  : a GuiObject that receives InputBegan
-        --   opts.onBegin(input)             optional; drag started
-        --   opts.onChange(dx, dy, position) optional; delta from the start point + current position
-        --   opts.onEnd()                    optional; drag released
-        --   opts.isActive() -> boolean      optional; return false to ignore a begin
-        --   maid    : a Maid that owns the connections
-        function Drag.bind(target, opts, maid)
-          local mouseDown = false
-          local activeTouch = nil
-          local startPos = nil
-
-          local function begin(input)
-            if opts.isActive and not opts.isActive() then return end
-            local t = input.UserInputType
-            if t == Enum.UserInputType.MouseButton1 then
-              mouseDown = true; startPos = input.Position
-            elseif t == Enum.UserInputType.Touch then
-              activeTouch = input; startPos = input.Position
-            else
-              return
-            end
-            if opts.onBegin then opts.onBegin(input) end
-          end
-
-          local function change(input)
-            if not startPos then return end
-            local isMouse = mouseDown and input.UserInputType == Enum.UserInputType.MouseMovement
-            local isTouch = activeTouch ~= nil and input == activeTouch
-            if not (isMouse or isTouch) then return end
-            local p = input.Position
-            if opts.onChange then opts.onChange(p.X - startPos.X, p.Y - startPos.Y, p) end
-          end
-
-          local function finish(input)
-            local t = input.UserInputType
-            local relevant = (mouseDown and t == Enum.UserInputType.MouseButton1)
-              or (activeTouch ~= nil and input == activeTouch)
-            if not relevant then return end
-            mouseDown = false; activeTouch = nil; startPos = nil
-            if opts.onEnd then opts.onEnd() end
-          end
-
-          maid:Give(target.InputBegan:Connect(begin))
-          maid:Give(UserInputService.InputChanged:Connect(change))
-          maid:Give(UserInputService.InputEnded:Connect(finish))
-          maid:Give(target.InputEnded:Connect(finish))
-        end
-
-        return Drag
-
-    end
-
-    -- Module: components/separator
-    EmbeddedModules["components/separator"] = function()
-        -- Deps injected via Init(R).
-        local Separator = {}
-        local Create, DefaultTheme
-
-        function Separator.Init(R) Create = R.Create; DefaultTheme = R.Theme end
-
-        function Separator.new(opts)
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local frame = Create("Frame", {
-            Name = "Separator",
-            BackgroundColor3 = theme.Colors.border,
-            BackgroundTransparency = theme.Stroke.divider,   -- divider alpha role, shared with accordion/table rules
-            BorderSizePixel = 0,
-            Size = UDim2.new(1, 0, 0, 1),
-            LayoutOrder = opts.LayoutOrder or 0,
-            Parent = opts.Parent,
-          })
-          -- keep the unregister so Destroy drops the closure (one used to leak per destroyed separator)
-          local unreg = opts.AccentReg and opts.AccentReg(function() frame.BackgroundColor3 = theme.Colors.border end)
-          return { Frame = frame, Destroy = function() if unreg then unreg() end; frame:Destroy() end }
-        end
-
-        return Separator
 
     end
 
@@ -3709,672 +2704,168 @@ EmbeddedModules["../output/bundle"] = function()
 
     end
 
-    -- Module: components/colorpicker
-    EmbeddedModules["components/colorpicker"] = function()
-        -- Deps injected via Init(R). Swatch row + an overlay HSV picker (SV square + hue slider,
-        -- click/drag). Value persists as an {r,g,b} array (JSON-safe).
-        local ColorPicker = {}
-        local Create, DefaultTheme, Maid, Overlay, Flag, Animate, Safe, Recipes, Effects, Acrylic
-        local UserInputService = game:GetService("UserInputService")
-        function ColorPicker.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Flag = R.Flag
-          Animate = R.Animate; Safe = R.Safe; Recipes = R.Recipes; Effects = R.Effects; Acrylic = R.Acrylic
-        end
+    -- Module: core/create
+    EmbeddedModules["core/create"] = function()
+        -- Callable table: Create("Frame", {...}) builds an instance; Create.corner/padding/... are helpers.
+        local Create = {}
 
-        -- Popover box in logical px (the UIScale below turns it into on-screen px): SV square 110 + gap
-        -- + the 16px hue slider, inside the host padding.
-        local POP_W, POP_H = 180, 152
-        -- A popover is frosted one step LIGHTER than the window shell: the content behind it must stay
-        -- readable. theme.Acrylic.frost (0.12) is the window's value, so a theme may define
-        -- Acrylic.popoverFrost and this is the fallback until that token lands (reported as a deviation).
-        local POPOVER_FROST = 0.04
-
-        local function frostAlpha(theme)
-          local a = theme.Acrylic and theme.Acrylic.popoverFrost
-          return type(a) == "number" and a or POPOVER_FROST
-        end
-
-        -- Popover open/close motion. Animate.popIn/popOut rest a popover's UIScale at 1, which is right
-        -- until the window forwards a UI scale (2.22): a scaled popover must rest at Overlay.scale(), so
-        -- the scaled case runs the same curves and the same Motion tokens against `scale` instead.
-        local function popOpen(frame, theme, edge, scale)
-          if scale == 1 then return Animate.popIn(frame, edge) end
-          local us = frame:FindFirstChildOfClass("UIScale")
-          if not us then return nil end
-          if not Animate.isEnabled() then us.Scale = scale; return nil end
-          local target = frame.Position
-          us.Scale = scale * theme.Motion.exitScale
-          local dy = (edge == "up") and theme.Motion.popSlide or -theme.Motion.popSlide
-          frame.Position = UDim2.new(target.X.Scale, target.X.Offset, target.Y.Scale, target.Y.Offset + dy)
-          Animate.to(frame, "fast", { Position = target }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-          return Animate.springTo(us, "base", { Scale = scale })
-        end
-
-        local function popShut(frame, theme, scale, onDone)
-          if scale == 1 then return Animate.popOut(frame, onDone) end
-          local us = frame:FindFirstChildOfClass("UIScale")
-          if not us then if onDone then onDone() end; return nil end
-          return Animate.toThen(us, "exit", { Scale = scale * theme.Motion.exitScale }, onDone,
-            Animate.EASING.exit, Animate.DIR.In)
-        end
-
-        -- Color3 channels are .R/.G/.B (0-1 floats) in real Roblox.
-        local function toArr(c) return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) } end
-        local function toColor(v)
-          if type(v) == "table" and v[1] then return Color3.fromRGB(v[1], v[2], v[3]) end
-          return v
-        end
-        local function rgbToHsv(c)
-          local r, g, b = c.R, c.G, c.B
-          local mx, mn = math.max(r, g, b), math.min(r, g, b)
-          local d = mx - mn
-          local hh = 0
-          if d > 0 then
-            if mx == r then hh = ((g - b) / d) % 6
-            elseif mx == g then hh = (b - r) / d + 2
-            else hh = (r - g) / d + 4 end
-            hh = hh / 6
-          end
-          return hh, (mx == 0) and 0 or d / mx, mx
-        end
-        local function clamp01(n) if n < 0 then return 0 elseif n > 1 then return 1 end return n end
-
-        function ColorPicker.new(opts)
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local maid = Maid.new()
-          local pad = theme.Spacing.gap -- popover UIPadding; padInset pulls the frost layers back over it
-          local color = opts.Default or Color3.fromRGB(255, 255, 255)
-          local hsvH, hsvS, hsvV = rgbToHsv(color)
-          local popover
-          local shadow    -- overlay sibling under the open popover; nil while Effect.shadowId is ''
-          local popScale = 1 -- UI scale the popover was built with (Close folds back to IT, not to 1)
-          local openMaid  -- per-OPEN connections: the popover is rebuilt on every Open, and the
-                          -- UserInputService drag listeners used to pile up on the component maid
-          local stopDrag  -- ends an in-flight SV/Hue drag from outside (SetDisabled, 2.8b)
-          local posConn -- closes the popover when the control scrolls
-          local onChanged = opts.Callback
-
-          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-          local btn = Create("TextButton", { Name = "ColorPicker", AutoButtonColor = false, Text = "",
-            BackgroundColor3 = theme.Colors.surface, Size = UDim2.new(1, 0, 0, hasDesc and 50 or 34), LayoutOrder = opts.LayoutOrder or 0,
-            Parent = opts.Parent, Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
-          -- TextTransparency is written explicitly: it is the rest value the disabled recipe returns to.
-          local label = Create("TextLabel", { Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Color",
-            TextColor3 = theme.Colors.foreground, TextTransparency = 0, TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-            Position = UDim2.new(0, 0, 0, hasDesc and 8 or 0), Size = UDim2.new(1, -40, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn })
-          Create.text(label, theme, "label")
-          if hasDesc then
-            Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
-              TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-              TextYAlignment = Enum.TextYAlignment.Top,
-              Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, -40, 0, 18), Parent = btn }), theme, "muted")
-          end
-          local swatch = Create("Frame", { Name = "Swatch", BackgroundColor3 = color, BackgroundTransparency = 0, BorderSizePixel = 0,
-            Size = UDim2.new(0, 28, 0, 18), Position = UDim2.new(1, -28, 0.5, -9), Parent = btn, Create.corner(theme.Radius.sm) })
-          Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = swatch })
-
-          -- Parts the disabled state dims to Opacity.disabled, each with the value it rests at while
-          -- enabled (2.8d: Recipes.disabled restores exactly that rest, so re-enabling is lossless).
-          local DIM = { { swatch, "BackgroundTransparency", 0 }, { label, "TextTransparency", 0 } }
-          local disabled = false
-          -- `animated` = the state change (tweened through the recipe); instant = a themer replay, which
-          -- must not tween inside a re-skin.
-          local function paintDisabled(animated)
-            if animated then
-              Recipes.disabled(DIM, disabled, theme)
+        local function build(className, props)
+          local inst = Instance.new(className)
+          props = props or {}
+          local parent
+          for k, v in pairs(props) do
+            if type(k) == "number" then
+              v.Parent = inst                 -- child
+            elseif k == "Parent" then
+              parent = v                      -- defer
             else
-              local a = disabled and theme.Opacity.disabled or 0
-              for _, p in ipairs(DIM) do p[1][p[2]] = a end
+              inst[k] = v
             end
           end
-
-          local function apply(v) color = toColor(v); Safe.mutate(function() swatch.BackgroundColor3 = color end) end
-          local commit = Flag.bind(opts, toArr(color), apply)
-
-          local api = { Frame = btn }
-          function api.GetColor() return color end
-          function api.SetColor(c) commit(toArr(c)); if onChanged then onChanged(color) end end
-
-          function api.Open()
-            if disabled or popover then return end
-            local om = Maid.new()
-            openMaid = om
-            -- The window's UI scale reaches overlay children through Overlay.scale() (2.22): the UIScale
-            -- goes on the popover root, and the placement maths gets the ON-SCREEN size so the flip and
-            -- the clamp stay right. placePopover also gives the dropdown's flip/clamp to this popover,
-            -- which used to sit blindly 36px below the control.
-            local scale = Overlay.scale()
-            popScale = scale
-            local x, y, openUp = Overlay.placePopover(btn.AbsolutePosition, btn.AbsoluteSize, POP_W * scale, POP_H * scale)
-            popover = Create("Frame", { Name = "ColorPopover", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
-              Position = UDim2.new(0, x, 0, y), Size = UDim2.new(0, POP_W, 0, POP_H),
-              ZIndex = Overlay.Z.popover, Create.corner(theme.Radius.md), Create.padding({ all = pad }),
-              Create("UIScale", { Scale = scale }) })
-            Create.stroke(theme.Colors.border, 1, theme.Stroke.floating).Parent = popover -- floating surface: opaque hairline (1.5)
-            -- Frost: the same material as the dropdown. padInset = the host UIPadding, so the noise/sheen
-            -- layers grow back over it and still reach the rounded edge instead of stopping 8px short.
-            Acrylic.decorate(popover, theme, { transparency = frostAlpha(theme), edge = true,
-              radius = theme.Radius.md, padInset = pad, strokeAlpha = theme.Stroke.floating })
-            -- Depth: a SIBLING in the overlay root under the popover layer (a child would render above
-            -- the popover's own fill). posConn closes the popover as soon as the control scrolls, so one
-            -- Effects.place before mounting is enough — the layer never has to follow.
-            local overlayRoot = Overlay.peek()
-            shadow = overlayRoot and Effects.shadow(overlayRoot, theme,
-              { name = "ColorPopoverShadow", level = "popover", zIndex = Overlay.Z.catcher }) or nil
-            Effects.place(shadow, x, y, POP_W * scale, POP_H * scale, "popover", theme)
-
-            -- SV square: hue-colored base + white(sat) overlay + black(value) overlay
-            local sv = Create("ImageButton", { Name = "SV", AutoButtonColor = false,
-              BackgroundColor3 = Color3.fromHSV(hsvH, 1, 1), ZIndex = 1002, Size = UDim2.new(1, 0, 0, 110),
-              Parent = popover, Create.corner(theme.Radius.sm), ClipsDescendants = true })
-            local satOverlay = Create("Frame", { Name = "Sat", BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-              Size = UDim2.new(1, 0, 1, 0), ZIndex = 1003, Parent = sv,
-              Create("UIGradient", { Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }) }) })
-            local valOverlay = Create("Frame", { Name = "Val", BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-              Size = UDim2.new(1, 0, 1, 0), ZIndex = 1004, Parent = sv,
-              Create("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) }) }) })
-            local svDot = Create("Frame", { Name = "Dot", BackgroundColor3 = Color3.fromRGB(255, 255, 255), ZIndex = 1005,
-              Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(0.5, 0.5), Parent = sv, Create.corner(4) })
-            -- Ring on both markers: a white dot vanishes over a pale corner of the SV square / the yellow
-            -- band of the hue strip, so each one carries a hairline in the shell colour (2.11).
-            local svRing = Create.stroke(theme.Colors.background, 1, theme.Acrylic.strokeAlpha); svRing.Parent = svDot
-
-            -- hue slider with rainbow gradient
-            local hue = Create("ImageButton", { Name = "Hue", AutoButtonColor = false, ZIndex = 1002,
-              BackgroundColor3 = Color3.fromRGB(255, 255, 255), Size = UDim2.new(1, 0, 0, 16),
-              Position = UDim2.new(0, 0, 0, 120), Parent = popover, Create.corner(theme.Radius.sm) })
-            Create("UIGradient", { Parent = hue, Color = ColorSequence.new({
-              ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)), ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
-              ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)), ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
-              ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)), ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
-              ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0)),
-            }) })
-            local hueDot = Create("Frame", { Name = "HueDot", BackgroundColor3 = Color3.fromRGB(255, 255, 255), ZIndex = 1003,
-              Size = UDim2.new(0, 4, 1, 4), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(hsvH, 0, 0.5, 0), Parent = hue, Create.corner(2) })
-            local hueRing = Create.stroke(theme.Colors.background, 1, theme.Acrylic.strokeAlpha); hueRing.Parent = hueDot
-
-            local function refreshUI()
-              sv.BackgroundColor3 = Color3.fromHSV(hsvH, 1, 1)
-              svDot.Position = UDim2.new(hsvS, 0, 1 - hsvV, 0)
-              hueDot.Position = UDim2.new(hsvH, 0, 0.5, 0)
-              api.SetColor(Color3.fromHSV(hsvH, hsvS, hsvV))
-            end
-            refreshUI()
-
-            local dragTarget
-            stopDrag = function() dragTarget = nil end
-            local function updateFromSV(px, py)
-              local p, sz = sv.AbsolutePosition, sv.AbsoluteSize
-              hsvS = clamp01(((px - (p and p.X or 0)) / ((sz and sz.X) or 1)))
-              hsvV = 1 - clamp01(((py - (p and p.Y or 0)) / ((sz and sz.Y) or 1)))
-              refreshUI()
-            end
-            local function updateFromHue(px)
-              local p, sz = hue.AbsolutePosition, hue.AbsoluteSize
-              hsvH = clamp01(((px - (p and p.X or 0)) / ((sz and sz.X) or 1)))
-              refreshUI()
-            end
-            -- Every listener below goes to the PER-OPEN maid: the popover is rebuilt on each Open, so
-            -- giving them to the component maid leaked one InputChanged/InputEnded pair per open.
-            om:Give(sv.InputBegan:Connect(function(input)
-              if disabled then return end
-              if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragTarget = "sv"; updateFromSV(input.Position.X, input.Position.Y)
-              end
-            end))
-            om:Give(hue.InputBegan:Connect(function(input)
-              if disabled then return end
-              if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragTarget = "hue"; updateFromHue(input.Position.X)
-              end
-            end))
-            om:Give(UserInputService.InputChanged:Connect(function(input)
-              if not dragTarget or disabled then return end
-              if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-                if dragTarget == "sv" then updateFromSV(input.Position.X, input.Position.Y) else updateFromHue(input.Position.X) end
-              end
-            end))
-            om:Give(UserInputService.InputEnded:Connect(function(input)
-              if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragTarget = nil end
-            end))
-            om:Give(function() stopDrag = nil end)
-
-            -- close on scroll: the screen-space popover would otherwise detach or float
-            -- outside the window once the control leaves the content viewport.
-            posConn = btn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function() Safe.mutate(api.Close) end)
-            Overlay.mount(popover)
-            Overlay.trackPopover(api.Close)
-            -- 2.11: while it is open the popover holds a themer registration of its OWN. The control's
-            -- closure below only knows the swatch row, so a SetMode/SetAccent landing mid-open would
-            -- otherwise leave the popover (fill, hairline, rim, frost stack, shadow alpha, marker rings)
-            -- wearing the palette it was born with. Instant writes -- a re-skin replays state, it is not
-            -- a transition. Owned by the per-open maid, which api.Close drains synchronously before the
-            -- fold starts, so nothing can paint a frame that is being destroyed.
-            local popFrame, popShadow = popover, shadow
-            local unreg = opts.AccentReg and opts.AccentReg(function()
-              Acrylic.reskin(popFrame, theme, { transparency = frostAlpha(theme), edge = true,
-                radius = theme.Radius.md, padInset = pad, strokeAlpha = theme.Stroke.floating })
-              Effects.reskin(popShadow, theme, "shadow")   -- nil-tolerant: Effect.shadowId is '' by default
-              svRing.Color = theme.Colors.background
-              hueRing.Color = theme.Colors.background
-            end)
-            if unreg then om:Give(unreg) end
-            -- Grows out of the swatch row; the final Position is the computed one, so layout code
-            -- reading popover.Position right after Open still sees it.
-            popOpen(popover, theme, openUp and "up" or "down", scale)
-          end
-
-          -- Synchronous for the CALLER: the reference is dropped, the per-open connections are cut and
-          -- the popover untracked before any motion starts, so a catcher click, a scroll or a second
-          -- Close sees no popover while the DETACHED frame is still folding away.
-          function api.Close()
-            local pv, sh, om = popover, shadow, openMaid
-            popover, shadow, openMaid = nil, nil, nil
-            if posConn then posConn:Disconnect(); posConn = nil end
-            if om then om:DoCleanup() end
-            Overlay.untrackPopover(api.Close)
-            if not pv then return end
-            popShut(pv, theme, popScale, function() pv:Destroy(); if sh then sh:Destroy() end end)
-          end
-          function api.Destroy() api.Close(); maid:DoCleanup() end
-
-          -- Disabled dims the swatch + label and blocks Open; an in-flight drag is ended rather than
-          -- frozen mid-gesture, and the last value is kept (2.8b).
-          local function setDisabled(b)
-            disabled = b and true or false
-            Safe.mutate(function()
-              if disabled and stopDrag then stopDrag() end
-              paintDisabled(true)
-            end)
-          end
-          function api.SetDisabled(b) setDisabled(b) end
-
-          maid:Give(btn.MouseButton1Click:Connect(function()
-            if disabled then return end
-            if popover then api.Close() else api.Open() end
-          end))
-          maid:Give(btn)
-          maid:Give(function() api.Close() end)
-          if opts.Disabled then setDisabled(true) end
-
-          if opts.AccentReg then maid:Give(opts.AccentReg(function()
-            btn.BackgroundColor3 = theme.Colors.surface
-            local lab = btn:FindFirstChild("Label"); if lab then lab.TextColor3 = theme.Colors.foreground end
-            local de = btn:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
-            local st = swatch:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
-            paintDisabled()
-          end)) end
-
-          return api
+          if parent then inst.Parent = parent end
+          return inst
         end
 
-        return ColorPicker
+        setmetatable(Create, { __call = function(_, className, props) return build(className, props) end })
 
-    end
-
-    -- Module: components/resizable
-    EmbeddedModules["components/resizable"] = function()
-        -- Deps injected via Init(R). shadcn-style resizable split panes with draggable handles.
-        local Resizable = {}
-        local Create, DefaultTheme, Maid, Icons, Host, REG, Drag, Device, Animate, Recipes
-
-        function Resizable.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Icons = R.Icons; Host = R.Host; REG = R
-          Drag = R.Drag; Device = R.Device; Animate = R.Animate; Recipes = R.Recipes
+        function Create.corner(radius)
+          return Create("UICorner", { CornerRadius = UDim.new(0, radius) })
         end
 
-        function Resizable.new(opts)
+        function Create.padding(t)
+          t = t or {}
+          return Create("UIPadding", {
+            PaddingTop = UDim.new(0, t.top or t.all or 0),
+            PaddingBottom = UDim.new(0, t.bottom or t.all or 0),
+            PaddingLeft = UDim.new(0, t.left or t.all or 0),
+            PaddingRight = UDim.new(0, t.right or t.all or 0),
+          })
+        end
+
+        function Create.listLayout(opts)
           opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local maid = Maid.new()
-          local horizontal = (opts.Direction or "Horizontal") == "Horizontal"
-          local defs = opts.Panes or { {}, {} }
-          local n = #defs
-          local fr, total = {}, 0
-          for i = 1, n do fr[i] = defs[i].Default or (1 / n); total = total + fr[i] end
-          for i = 1, n do fr[i] = fr[i] / total end
+          return Create("UIListLayout", {
+            Padding = UDim.new(0, opts.Padding or 0),
+            FillDirection = opts.FillDirection or Enum.FillDirection.Vertical,
+            SortOrder = opts.SortOrder or Enum.SortOrder.LayoutOrder,
+          })
+        end
 
-          local container = Create("Frame", { Name = "Resizable", BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, opts.Height or (horizontal and 160 or 200)),
-            LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
+        -- Transparency is passed through the constructor table: a nil value never becomes a key, so
+        -- callers that omit it leave the UIStroke default (0) untouched and existing stroke assertions
+        -- keep their shape.
+        function Create.stroke(color, thickness, transparency)
+          return Create("UIStroke", { Color = color, Thickness = thickness or 1, Transparency = transparency })
+        end
 
-          -- The GAP between panes is fixed (panes must not drift apart on a phone), but the HANDLE that
-          -- sits in it is finger-sized on touch: it overhangs the gap symmetrically, so the Line and Grip
-          -- (AnchorPoint 0.5) stay centred on the seam whatever the hit width is.
-          local GAP = theme.Sizes.splitGap
-          local handleW = Device.IsTouch() and theme.Sizes.touchHit or GAP
-
-          local paneFrames, panes, handles, gripPaint = {}, {}, {}, {}
-
-          local function applyLayout()
-            local cum = 0
-            for i = 1, n do
-              local f = paneFrames[i]
-              if horizontal then
-                f.Position = UDim2.new(cum, (i > 1) and GAP / 2 or 0, 0, 0)
-                f.Size = UDim2.new(fr[i], (n > 1) and -GAP or 0, 1, 0)
-              else
-                f.Position = UDim2.new(0, 0, cum, (i > 1) and GAP / 2 or 0)
-                f.Size = UDim2.new(1, 0, fr[i], (n > 1) and -GAP or 0)
-              end
-              cum = cum + fr[i]
-              if i < n and handles[i] then
-                if horizontal then
-                  handles[i].Position = UDim2.new(cum, -handleW / 2, 0, 0); handles[i].Size = UDim2.new(0, handleW, 1, 0)
-                else
-                  handles[i].Position = UDim2.new(0, 0, cum, -handleW / 2); handles[i].Size = UDim2.new(1, 0, 0, handleW)
-                end
-              end
-            end
+        -- Keypoint array from { {t, value}, ... } pairs. Always an array literal (never the single-value
+        -- or two-value Sequence overloads) so the mock exposes Color.color[1] (window_test reads it) and
+        -- Roblox takes the same multi-keypoint constructor path headless and in Studio. Fails fast here
+        -- instead of at Roblox's opaque "keypoint" error inside Sequence.new.
+        local function keypoints(stops, ctor, what)
+          if type(stops) ~= "table" or #stops == 0 then
+            error("Create." .. what .. ": stops = { {t, value}, ... } required", 3)
           end
-
-          for i = 1, n do
-            local pane = Create("Frame", { Name = "Pane", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
-              ClipsDescendants = true, Parent = container, Create.corner(theme.Radius.md), Create.padding({ all = 8 }),
-              Create.listLayout({ Padding = theme.Spacing.gap }) })
-            -- a pane is a card surface like Accordion/Card, so it gets the same 1px border rather than
-            -- floating as an unbounded slab of `card` against the panel
-            Create.stroke(theme.Colors.border, 1, theme.Stroke.control).Parent = pane
-            paneFrames[i] = pane
-            local order = 0
-            local paneApi = { Frame = pane }
-            -- The full host context (not just the theme): controls nested in a pane get Flag persistence,
-            -- tab search and LockAll exactly like controls mounted straight on a Tab or an Accordion.
-            Host.attach(paneApi, { R = REG, content = pane, theme = theme, config = opts.Config, window = opts.Window,
-              registerSearchable = opts.RegisterSearchable, accentThemer = opts.AccentThemer,
-              registerControl = opts.RegisterControl,
-              nextOrder = function() order = order + 1; return order end })
-            panes[i] = paneApi
-          end
-
-          for k = 1, n - 1 do
-            local handle = Create("ImageButton", { Name = "Handle", AutoButtonColor = false,
-              BackgroundTransparency = 1, ZIndex = 5, Parent = container })
-            Create("Frame", { Name = "Line", BackgroundColor3 = theme.Colors.border, BorderSizePixel = 0, ZIndex = 5,
-              Parent = handle,
-              Size = horizontal and UDim2.new(0, 1, 1, 0) or UDim2.new(1, 0, 0, 1),
-              Position = horizontal and UDim2.new(0.5, 0, 0, 0) or UDim2.new(0, 0, 0.5, 0),
-              AnchorPoint = horizontal and Vector2.new(0.5, 0) or Vector2.new(0, 0.5) })
-            local grip = Create("Frame", { Name = "Grip", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
-              ZIndex = 6, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
-              Size = horizontal and UDim2.new(0, 8, 0, 16) or UDim2.new(0, 16, 0, 8),
-              Parent = handle, Create.corner(theme.Radius.sm) })
-            Create.stroke(theme.Colors.border, 1).Parent = grip
-            -- the grip grows while the seam is being dragged; a UIScale keeps the pill's corner radius
-            -- and its glyph in proportion, which a Size tween on the frame alone would not
-            local gripScale = Create("UIScale", { Scale = 1, Parent = grip })
-            local gi = Create("ImageLabel", { BackgroundTransparency = 1, Size = UDim2.new(0, 8, 0, 8),
-              Position = UDim2.new(0.5, -4, 0.5, -4), Parent = grip })
-            local glyph = horizontal and "grip-vertical" or "grip-horizontal"
-            Icons.apply(gi, glyph, theme.Colors[theme.Icon.structural])
-            -- structural glyph: rests muted, lifts to foreground while the pointer is on the handle (and
-            -- while it is held, which is what a drag looks like to the recipe). The recipe owns
-            -- ImageColor3 from here on; reskin() re-derives the current state after SetMode/SetAccent.
-            local hover = Recipes.hover(handle, { theme = theme, kind = "text", icon = gi,
-              rest = theme.Icon.structural, hover = theme.Icon.structuralActive })
-            maid:Give(hover.disconnect)
-            local function paintGrip()
-              Icons.apply(gi, glyph, theme.Colors[theme.Icon.structural])
-              hover.reskin()
-            end
-            gripPaint[k] = paintGrip
-            handles[k] = handle
-
-            -- Drag.bind, not a hand-rolled InputBegan/InputChanged pair: the old handler reacted to EVERY
-            -- Touch InputChanged, so a second finger anywhere on screen dragged this seam. Deltas come
-            -- from the fractions captured at onBegin (dx/dy are measured from the drag start), so a
-            -- dropped frame or a clamped step never accumulates drift.
-            local fr0L, fr0R
-            Drag.bind(handle, {
-              onBegin = function()
-                fr0L, fr0R = fr[k], fr[k + 1]
-                Animate.to(gripScale, "fast", { Scale = theme.Motion.handleGrow })
-              end,
-              onChange = function(dx, dy)
-                if not fr0L then return end
-                local sz = container.AbsoluteSize
-                local span = (sz and (horizontal and sz.X or sz.Y)) or 1
-                if span <= 0 then span = 1 end
-                local d = (horizontal and dx or dy) / span
-                local minL, minR = (defs[k].Min or 0.1), (defs[k + 1].Min or 0.1)
-                local nl, nr = fr0L + d, fr0R - d
-                if nl >= minL and nr >= minR then fr[k] = nl; fr[k + 1] = nr; applyLayout() end
-              end,
-              onEnd = function()
-                fr0L, fr0R = nil, nil
-                Animate.springTo(gripScale, "release", { Scale = 1 })
-              end,
-            }, maid)
-          end
-
-          applyLayout()
-
-          if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function()
-            for _, f in ipairs(paneFrames) do
-              f.BackgroundColor3 = theme.Colors.card
-              local ps = f:FindFirstChildOfClass("UIStroke"); if ps then ps.Color = theme.Colors.border end
-            end
-            for k, hd in ipairs(handles) do
-              local line = hd:FindFirstChild("Line"); if line then line.BackgroundColor3 = theme.Colors.border end
-              local grip = hd:FindFirstChild("Grip")
-              if grip then
-                grip.BackgroundColor3 = theme.Colors.surface
-                local st = grip:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
-              end
-              if gripPaint[k] then gripPaint[k]() end
-            end
-          end)) end
-
-          maid:Give(container)
-          return { Frame = container, Panes = panes, Destroy = function() maid:DoCleanup() end }
-        end
-
-        return Resizable
-
-    end
-
-    -- Module: core/theme
-    EmbeddedModules["core/theme"] = function()
-        local Theme = {}
-
-        local function rgb(r, g, b) return Color3.fromRGB(r, g, b) end
-
-        -- Every number a component used to hardcode lives here (durations, alphas, sizes, offsets),
-        -- with TODAY'S literal as the default so adding a token never moves a pixel on its own. Groups
-        -- are named-field tables only (no arrays): deepMerge recurses into named fields, so a window
-        -- override like { Sizes = { fab = { size = 48 } } } replaces one leaf and inherits the rest.
-        local DEFAULT = {
-          Colors = {
-            background = rgb(9, 9, 11),
-            card = rgb(24, 24, 27),
-            surface = rgb(39, 39, 42),
-            border = rgb(63, 63, 70),
-            input = rgb(39, 39, 42),
-            ring = rgb(212, 212, 216),
-            mutedForeground = rgb(161, 161, 170),
-            foreground = rgb(250, 250, 250),
-            primary = rgb(250, 250, 250),
-            primaryForeground = rgb(24, 24, 27),
-            destructive = rgb(239, 68, 68),
-            success = rgb(34, 197, 94),
-            warning = rgb(234, 179, 8),
-            info = rgb(59, 130, 246),
-            -- OFF track sits one step above surface (39) so the pill reads against its own row (plan 2.9)
-            switchTrackOff = rgb(63, 63, 70),
-          },
-          Radius = { sm = 6, md = 8, lg = 10, xl = 14, window = 12, input = 6, xs = 2 },
-          Spacing = { pad = 16, padLg = 24, inputX = 12, inputY = 8, gap = 8, section = 16, major = 24, icon = 8 },
-          Font = {
-            title = { Weight = Enum.FontWeight.Bold, Size = 18 },
-            header = { Weight = Enum.FontWeight.Medium, Size = 16 },
-            label = { Weight = Enum.FontWeight.Medium, Size = 14 },
-            body = { Weight = Enum.FontWeight.Regular, Size = 14, LineHeight = 1.25 },
-            muted = { Weight = Enum.FontWeight.Regular, Size = 12 },
-            overline = { Weight = Enum.FontWeight.Medium, Size = 11 },
-          },
-          -- fast/base/slow are pinned by animate_test; the rest is the motion grammar (unfold in, fold out)
-          Motion = {
-            fast = 0.12, base = 0.18, slow = 0.28,
-            enter = 0.28, exit = 0.14, hover = 0.12, press = 0.08, release = 0.22, stagger = 0.035,
-            enterScale = 0.94, exitScale = 0.96, pressScale = 0.97, hoverScale = 1.06, popFrom = 0.9,
-            knobStretch = 1.2, handleGrow = 1.3, handleHover = 1.15, spin = 0.8, snap = 0.3, hideDrift = 12,
-            popSlide = 6, dialogRise = 12, dialogDrop = 8, bumpPx = 2, copyRevert = 1.2, pulse = 0.4,
-            shake = { amp = 3, steps = 4, step = 0.04 },
-            cascade = { x = 6, y = 8 },
-          },
-          -- shadowId = the uploaded assets/shadow-9slice.png; set it to '' to switch every depth layer
-          -- off (Effects.shadow/glow then return nil and each call site skips the layer).
-          -- slice must match that sprite: 499 square with a 49px falloff border. controlGlow 'auto' = off on mobile
-          Effect = {
-            shadowId = "rbxassetid://91077512535886", slice = { x0 = 49, y0 = 49, x1 = 450, y1 = 450 },
-            window = { spread = 28, offsetY = 6 }, dialog = { spread = 32, offsetY = 10 }, popover = { spread = 18, offsetY = 4 },
-            toast = { spread = 16, offsetY = 4 }, tooltip = { spread = 10, offsetY = 2 }, control = { spread = 6, offsetY = 0 },
-            lift = { spreadDelta = 8, alphaDelta = -0.12 }, controlGlow = "auto",
-            skeleton = { period = 1.1, rotation = 15 },   -- shimmer sweep period (s) and band angle (deg)
-          },
-          -- UIStroke transparencies; panel/search are per-mode (read through Theme.modeVal)
-          Stroke = {
-            window = 0.3, floating = 0, control = 0, divider = 0.4, focusThickness = 2,
-            panel = { dark = 0.6, light = 0 }, search = { dark = 0.8, light = 0.5 },
-            -- track = progress/slider rail hairline; knob = rim that keeps a white knob readable on a
-            -- white track; pulse = the alphas a listening keybind chip breathes between.
-            track = 0.5, knob = 0.7, pulse = { low = 0.2, high = 0.7 },
-          },
-          Opacity = {
-            hoverWash = 0.94, pressWash = 0.9, hoverFill = 0.12, pressFill = 0.2, ghostHover = 0.4, ghostPress = 0.25,
-            tabHover = 0.92, tabPress = 0.88, optionHover = 0.6, rowHover = 0.94, disabled = 0.5, scrim = 0.45,
-            dialogScrim = { dark = 0.5, light = 0.6 }, glowHover = 0.7,
-            flash = 0.35,   -- lift a progress fill starts from when it completes, fading back to opaque
-          },
-          -- frost = default host transparency behind the sheen; glintFade = fade band at each end of the top glint line
-          -- popoverFrost = a popover is frosted one step LIGHTER than the shell: content behind it must stay readable
-          Acrylic = { noiseId = "rbxassetid://9968344105", tileSize = 128, strokeAlpha = 0.3, highlightBand = 0.45, frost = 0.12, glintFade = 0.25, popoverFrost = 0.04 },
-          Scrollbar = { imageId = "", alpha = 0.35 },
-          Sizes = {
-            icon = 16, iconSm = 14, iconButton = 26, touchHit = 44, scrollbar = 4, progress = 8, sliderHit = 24, chip = 22,
-            knob = 20, tagMeasureFudge = 1.08, dragKeep = 40, dragThreshold = 6,
-            titleBar = 40, titleBarTall = 56, -- window.lua TITLE_H / TITLE_H_TALL (title image or subtitle)
-            resizeGrip = 12, resizeGripInset = 4, splitGap = 12,
-            indicator = { w = 3, h = 18, stretch = 26, radius = 2, haloW = 9, haloH = 26, haloAlpha = 0.85 },
-            grip = { w = 2, h = 24 },
-            fab = { size = 44, simple = 50, peek = 15, hoverPeek = 7, margin = 16, radius = 12, popFrom = 0.6 },
-          },
-          -- icon tint roles: names of Colors tokens, resolved at paint time so SetMode/SetAccent re-tint
-          Icon = { structural = "mutedForeground", structuralActive = "foreground", accent = "primary" },
-          Tooltip = { delay = 0.35, gap = 6, padX = 8, height = 24 },
-          Toast = {
-            width = 300, inset = 16, gap = 8, peek = 10, maxVisible = 3, peekScale = 0.05, peekFade = 0.18, barHeight = 3,
-            padX = 12, padY = 8, progressInset = 0, slide = 48, exitSlide = 32, exitScale = 0.95, typeTint = 0.35,
-            badgeAlpha = 0.85, staggerCap = 5,
-          },
-        }
-
-        Theme.PALETTES = {
-          dark = DEFAULT.Colors,
-          -- Tonal ladder: chrome 240 -> surface 244 -> input 250 -> card 255 must stay four distinct steps so
-          -- window shell, rows, fields and panels separate without relying on strokes (plan 1.13).
-          light = {
-            background = rgb(240, 240, 243), card = rgb(255, 255, 255), surface = rgb(244, 244, 245),
-            border = rgb(228, 228, 231), input = rgb(250, 250, 250), ring = rgb(24, 24, 27),
-            mutedForeground = rgb(113, 113, 122), foreground = rgb(24, 24, 27),
-            primary = rgb(24, 24, 27), primaryForeground = rgb(250, 250, 250),
-            destructive = rgb(239, 68, 68), success = rgb(34, 197, 94), warning = rgb(234, 179, 8),
-            info = rgb(59, 130, 246), switchTrackOff = rgb(212, 212, 216), -- OFF track darker than surface 244 (plan 2.9)
-          },
-        }
-
-        -- Per-mode effect values live OUTSIDE DEFAULT: applyMode only swaps Colors, so anything that
-        -- must flip with the mode is looked up through Theme.fx(theme) at paint time instead of being
-        -- copied into the instance. light.sheenTop is nil on purpose: the acrylic sheen then falls back
-        -- to theme.Colors.card (an identity multiplier), keeping the light gradient tests green.
-        Theme.MODE_EFFECTS = {
-          dark = {
-            sheenTop = rgb(255, 255, 255), sheenBottom = rgb(214, 214, 222), highlight = 0.93,
-            grain = 0.92, grainTint = rgb(255, 255, 255), edgeTop = 0.0, edgeBottom = 0.65, glint = 0.86,
-            inset = rgb(196, 196, 206), shadow = 0.5, glow = 0.72,
-          },
-          light = {
-            sheenTop = nil, sheenBottom = rgb(240, 240, 243), highlight = 1,
-            grain = 0.97, grainTint = rgb(0, 0, 0), edgeTop = 0.2, edgeBottom = 0.7, glint = 1,
-            inset = rgb(236, 236, 240), shadow = 0.8, glow = 0.8,
-          },
-        }
-
-        -- swap base+semantic tokens in place, preserving the live accent (primary/primaryForeground)
-        function Theme.applyMode(theme, mode)
-          local p = Theme.PALETTES[mode] or Theme.PALETTES.dark
-          for k, v in pairs(p) do
-            if k ~= "primary" and k ~= "primaryForeground" then theme.Colors[k] = v end
-          end
-          theme.Mode = mode
-          return theme
-        end
-
-        -- Effect table for the theme's current mode; Mode unset (module default) or unknown reads as dark.
-        function Theme.fx(theme)
-          local mode = type(theme) == "table" and theme.Mode or nil
-          return Theme.MODE_EFFECTS[mode] or Theme.MODE_EFFECTS.dark
-        end
-
-        -- A token is per-mode when it is a { dark=, light= } table; anything else (numbers, strings,
-        -- nested groups like Motion.shake) passes through untouched. A per-mode table missing the
-        -- current mode falls back to its dark value so a partial override never yields nil.
-        function Theme.modeVal(theme, tok)
-          if type(tok) ~= "table" or (tok.dark == nil and tok.light == nil) then return tok end
-          local mode = type(theme) == "table" and theme.Mode or nil
-          local v = mode and tok[mode]
-          if v == nil then v = tok.dark end
-          return v
-        end
-
-        -- Manual lerp on .R/.G/.B only: real Color3 exposes nothing else that is safe here (verify_bundle's
-        -- faithful Color3 throws on R8/Lerp), and Color3.new keeps the result a plain Color3.
-        function Theme.mix(a, b, t)
-          -- nil guard only: a real Color3 is userdata, so a type()=="table" check would throw in Roblox
-          if a == nil or b == nil then error("Theme.mix(a, b, t): two Color3 values required", 2) end
-          t = tonumber(t) or 0
-          if t < 0 then t = 0 elseif t > 1 then t = 1 end
-          return Color3.new(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t)
-        end
-
-        local function deepMerge(base, over)
           local out = {}
-          for k, v in pairs(base) do
-            if type(v) == "table" then out[k] = deepMerge(v, (over and over[k]) or {}) else out[k] = v end
-          end
-          if over then for k, v in pairs(over) do if out[k] == nil then out[k] = v elseif type(v) ~= "table" then out[k] = v end end end
+          for i, s in ipairs(stops) do out[i] = ctor(s[1], s[2]) end
           return out
         end
 
-        -- expose defaults directly
-        for k, v in pairs(DEFAULT) do Theme[k] = v end
-
-        -- BuilderSans face for a Font role weight. Font.fromName is the only API that carries the weight
-        -- (Font.fromEnum takes ONE argument and would silently drop it); nil where the Font global is
-        -- absent so Create.text leaves FontFace alone and the label keeps Font = BuilderSans.
-        -- BuilderSans ships no 600, so a SemiBold request resolves to Bold rather than a missing face.
-        function Theme.FontFace(weight)
-          if not (Font and Font.fromName) then return nil end
-          if weight == nil then weight = Enum.FontWeight.Regular end
-          if weight == Enum.FontWeight.SemiBold then weight = Enum.FontWeight.Bold end
-          return Font.fromName("BuilderSans", weight)
+        -- Colour gradient: { rotation = deg, stops = { {0, Color3}, {1, Color3} } }
+        function Create.gradient(opts)
+          opts = opts or {}
+          return Create("UIGradient", {
+            Rotation = opts.rotation or 0,
+            Color = ColorSequence.new(keypoints(opts.stops, ColorSequenceKeypoint.new, "gradient")),
+          })
         end
 
-        function Theme.new(overrides)
-          overrides = overrides or {}
-          local t = deepMerge(DEFAULT, overrides)
-          -- helpers ride on the instance so a component holding only `theme` can call theme.fx(theme) etc.
-          t.FontFace = Theme.FontFace
-          t.fx = Theme.fx
-          t.modeVal = Theme.modeVal
-          t.mix = Theme.mix
-          t.new = Theme.new
-          return t
+        -- Transparency-only gradient (a "shade" over an existing fill): stops = { {t, alpha}, ... }.
+        -- Colour is left at the UIGradient default (white) so it multiplies the fill to itself.
+        function Create.shade(opts)
+          opts = opts or {}
+          return Create("UIGradient", {
+            Rotation = opts.rotation or 0,
+            Transparency = NumberSequence.new(keypoints(opts.stops, NumberSequenceKeypoint.new, "shade")),
+          })
         end
 
-        return Theme
+        -- Apply a theme Font role (title/header/label/body/muted) to a TextLabel/TextButton/TextBox.
+        -- Unknown roles degrade to body instead of a nil index so a typo still renders. FontFace is
+        -- written only when the theme resolves one (Theme.FontFace may return nil where Font.fromName
+        -- is unavailable); Font stays BuilderSans either way so the label never falls back to the
+        -- engine default face. LineHeight is written only for roles that declare it.
+        function Create.text(label, theme, role)
+          local fonts = type(theme) == "table" and theme.Font or nil
+          local spec = fonts and (fonts[role] or fonts.body)
+          if not spec then error("Create.text: theme.Font[" .. tostring(role) .. "] (or .body fallback) required", 2) end
+          label.Font = Enum.Font.BuilderSans
+          label.TextSize = spec.Size
+          if spec.LineHeight ~= nil then label.LineHeight = spec.LineHeight end
+          local face = type(theme.FontFace) == "function" and theme.FontFace(spec.Weight) or nil
+          if face ~= nil then label.FontFace = face end
+          return label
+        end
+
+        return Create
+
+    end
+
+    -- Module: core/safe
+    EmbeddedModules["core/safe"] = function()
+        -- Deps injected via Init(R). Runs GUI mutations in a capability-bearing context: inline when the
+        -- current thread already holds the GUI ("Plugin") capability, otherwise deferred to the next
+        -- RunService.Heartbeat (whose callback holds the capability). This is the Roblox-executor analogue
+        -- of runOnUiThread/Dispatcher.Invoke -- it marshals work to a privileged context; it is NOT state
+        -- management. See components/selectbox.lua runLoader for the original Heartbeat:Once pattern.
+        local Safe = {}
+        local Overlay
+        local RunService = game:GetService("RunService")
+
+        local queue = {}          -- FIFO of deferred jobs
+        local flushConn = nil
+
+        function Safe.Init(R) Overlay = R.Overlay end
+
+        -- Does the CURRENT thread hold the GUI capability? Probe with a harmless, signature-free,
+        -- idempotent same-value write to the protected overlay root. The write is capability-gated: it
+        -- succeeds on the main thread / a signal handler and throws on a task.spawn/coroutine thread.
+        -- No attribute/name is added, so no EzUI signature leaks. No protected root yet -> assume true
+        -- (runtime mutators are only reached once a window exists; init runs on the main thread anyway).
+        local function defaultHasCapability()
+          -- The whole probe runs inside ONE pcall: Overlay.peek() reads root.Parent, and READING a
+          -- protected Instance property ALSO throws "lacking capability" on a thread without it (not just
+          -- writes). So peek() must be inside the pcall too -- previously it ran outside, so its throw
+          -- escaped the probe and Safe.mutate never reached the Heartbeat fallback. Semantics preserved:
+          -- no root yet -> peek short-circuits and reads nothing -> no throw -> true (assume capability);
+          -- root + capability -> read+write succeed -> true; root + no capability -> read throws -> false.
+          return (pcall(function()
+            local root = Overlay and Overlay.peek and Overlay.peek()
+            if root then root.BackgroundTransparency = root.BackgroundTransparency end
+          end))
+        end
+
+        local hasCapability = defaultHasCapability
+        function Safe._setCapabilityCheck(fn) hasCapability = fn or defaultHasCapability end
+
+        local function flush()
+          flushConn = nil
+          -- Runs inside a Heartbeat callback => capability present. Drain FIFO; isolate each job so one
+          -- failure does not abort the drain.
+          local i = 1
+          while i <= #queue do local job = queue[i]; i = i + 1; pcall(job) end
+          for k = #queue, 1, -1 do queue[k] = nil end
+        end
+
+        -- Run fn in a capability-bearing context. Inline (synchronous) if the current thread has the
+        -- capability; otherwise enqueue and flush on the next Heartbeat (FIFO preserved).
+        function Safe.mutate(fn)
+          if hasCapability() then return fn() end
+          queue[#queue + 1] = fn
+          if not flushConn then flushConn = RunService.Heartbeat:Once(flush) end
+        end
+
+        return Safe
 
     end
 
@@ -4404,2208 +2895,247 @@ EmbeddedModules["../output/bundle"] = function()
 
     end
 
-    -- Module: core/acrylic
-    EmbeddedModules["core/acrylic"] = function()
-        -- Deps injected via Init(R). Never call other modules from Init (pairs()-ordered).
-        local Acrylic = {}
-        local Create, Theme, Effects
+    -- Module: core/numfmt
+    EmbeddedModules["core/numfmt"] = function()
+        -- Pure number formatting/parsing. No Roblox/UI/theme dependencies.
+        local Numfmt = {}
 
-        function Acrylic.Init(R) Create = R.Create; Theme = R.Theme; Effects = R.Effects end
+        local UNITS = { { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "k" } }
 
-        -- 2D frosted paint stack (NO Lighting/Workspace mutation): translucent fill + tiled noise grain
-        -- (clipped by a UICorner) + colour sheen + top highlight band + 1px stroke, all readable over any
-        -- background. Two rendering facts drive the shape of this file:
-        --   * UIGradient.Color MULTIPLIES BackgroundColor3. A card-over-background gradient crushed the
-        --     dark shell to ~black (9 * 24/255); the sheen therefore runs white-ish (fx.sheenTop) at the
-        --     top so the multiply LIFTS the fill, and light mode (sheenTop nil) uses theme.Colors.card
-        --     as an identity multiplier. A Transparency gradient on the host would multiply its
-        --     transparency and make the panel see-through, so the highlight is its own child Frame.
-        --   * ZIndexBehavior.Sibling renders children above the parent's fill, so noise/sheen/glint are
-        --     ZIndex 0 children and the rim is a UIGradient on the UIStroke (never a second UIStroke or
-        --     a second direct-child UIGradient: window_test/acrylic_test look those up by class).
-        -- opts (F10 signature, shared by decorate and reskin):
-        --   solid        opaque, no frost layers (dialog card: its UIListLayout would lay them out)
-        --   transparency host BackgroundTransparency (decorate default FROST; reskin leaves it alone)
-        --   base         fill Color3 (default theme.Colors.card); pass the LIVE token each call
-        --   strokeAlpha  UIStroke.Transparency (default theme.Acrylic.strokeAlpha)
-        --   radius       UICorner radius of the noise/sheen layers + glint inset (default Radius.window)
-        --   edge         Effects.rim on the stroke + 'AcrylicGlint' hairline (non-solid hosts only)
-        --   padInset     host UIPadding in px: layers are sized (1,2p,1,2p) at (0,-p,0,-p) so they still
-        --                reach the rounded edge that the padding pushes every child away from
-        -- Today's values; a theme that defines Acrylic.frost / Acrylic.glintFade overrides them.
-        local FROST = 0.12       -- default host BackgroundTransparency
-        local GLINT_FADE = 0.25  -- glint fades out over this fraction at each end
-        local HAIRLINE = 1       -- stroke + glint thickness (px)
+        -- round to `dec` decimals, strip trailing zeros and a trailing dot
+        local function trim(n, dec)
+          dec = dec or 0
+          local s = string.format("%." .. dec .. "f", n)
+          if dec > 0 then
+            s = s:gsub("0+$", "")
+            s = s:gsub("%.$", "")
+          end
+          if s == "-0" then s = "0" end
+          return s
+        end
 
-        -- Non-colour opts remembered per host (weak) so a later reskin(frame, theme, { base = ... })
-        -- keeps the stroke alpha / radius / inset / edge the host was decorated with instead of
-        -- silently reverting to the defaults. Colours are never stored: applyMode re-assigns the
-        -- theme.Colors tokens, so a stored Color3 would be stale after a mode switch.
-        local meta = setmetatable({}, { __mode = "k" })
+        local function compact(n, dec)
+          local a = math.abs(n)
+          if a < 1e3 then return trim(n, dec) end
+          for _, u in ipairs(UNITS) do
+            if a >= u[1] then return trim(n / u[1], dec) .. u[2] end
+          end
+          return trim(n, dec)
+        end
 
-        local function tokens(theme) return theme.Acrylic or Theme.Acrylic end
-        local function white() return Color3.new(1, 1, 1) end
+        local function comma(n, dec)
+          local neg = n < 0
+          local a = math.abs(n)
+          local intpart = math.floor(a)
+          local frac = ""
+          if dec > 0 then
+            local f = trim(a - intpart, dec)            -- "0.5" or "0"
+            local dot = f:find("%.")
+            if dot then frac = f:sub(dot) end           -- ".5"
+          end
+          local s = tostring(intpart)
+          s = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+          s = s:gsub("^,", "")
+          return (neg and "-" or "") .. s .. frac
+        end
 
-        local function resolve(frame, theme, opts)
+        function Numfmt.format(n, opts)
           opts = opts or {}
-          local A, m = tokens(theme), meta[frame] or {}
-          local function pick(k, default)
-            local v = opts[k]
-            if v == nil then v = m[k] end
-            if v == nil then v = default end
-            return v
+          n = tonumber(n) or 0
+          local body
+          if opts.Format == "compact" then body = compact(n, opts.Decimals or 1)
+          elseif opts.Format == "comma" then body = comma(n, opts.Decimals or 1)
+          elseif opts.Decimals ~= nil then body = trim(n, opts.Decimals)
+          else body = tostring(n) end
+          return (opts.Prefix or "") .. body .. (opts.Suffix or "")
+        end
+
+        local MULT = { k = 1e3, m = 1e6, b = 1e9, t = 1e12 }
+
+        function Numfmt.parse(s, opts)
+          opts = opts or {}
+          s = tostring(s or "")
+          if opts.Prefix and opts.Prefix ~= "" and s:sub(1, #opts.Prefix) == opts.Prefix then
+            s = s:sub(#opts.Prefix + 1)
           end
-          local o = {
-            solid = pick("solid", false) and true or false,
-            strokeAlpha = pick("strokeAlpha", A.strokeAlpha),
-            radius = pick("radius", theme.Radius.window),
-            edge = pick("edge", false) and true or false,
-            padInset = pick("padInset", 0),
-            base = opts.base or theme.Colors.card,
-            transparency = opts.transparency,
-          }
-          meta[frame] = { solid = o.solid, strokeAlpha = o.strokeAlpha, radius = o.radius, edge = o.edge, padInset = o.padInset }
-          return o
-        end
-
-        -- ---- sequences --------------------------------------------------------------------------------
-        local function colorSeq(stops)
-          local kps = {}
-          for i, s in ipairs(stops) do kps[i] = ColorSequenceKeypoint.new(s[1], s[2]) end
-          return ColorSequence.new(kps)
-        end
-
-        local function numberSeq(stops)
-          local kps = {}
-          for i, s in ipairs(stops) do kps[i] = NumberSequenceKeypoint.new(s[1], s[2]) end
-          return NumberSequence.new(kps)
-        end
-
-        local function sheenStops(theme, fx)
-          return { { 0, fx.sheenTop or theme.Colors.card }, { 1, fx.sheenBottom } }
-        end
-
-        -- Highlight band: fx.highlight at the top fading to nothing by Acrylic.highlightBand. The top
-        -- alpha is scaled by the host's own (1 - transparency) so a Transparency 0.6 window is not
-        -- over-bright; highlight 1 (light mode) yields a fully transparent band and the layer hides.
-        local function highlightStops(theme, fx, transparency)
-          local top = 1 - (1 - fx.highlight) * (1 - transparency)
-          return { { 0, top }, { tokens(theme).highlightBand, 1 }, { 1, 1 } }
-        end
-
-        local function glintStops(theme)
-          local fade = tokens(theme).glintFade or GLINT_FADE
-          return { { 0, 1 }, { fade, 0 }, { 1 - fade, 0 }, { 1, 1 } }
-        end
-
-        -- ---- geometry ---------------------------------------------------------------------------------
-        local function layerGeometry(inst, p)
-          inst.Position = UDim2.new(0, -p, 0, -p)
-          inst.Size = UDim2.new(1, 2 * p, 1, 2 * p)
-        end
-
-        -- Hairline inside the top radius: starts r px in from the left edge, spans the width minus both
-        -- radii; -p pulls it out of the host padding like the other layers.
-        local function glintGeometry(inst, r, p)
-          inst.Position = UDim2.new(0, r - p, 0, -p)
-          inst.Size = UDim2.new(1, 2 * p - 2 * r, 0, HAIRLINE)
-        end
-
-        -- ---- creation (idempotent by Name/class) ------------------------------------------------------
-        local function ensureStroke(frame, theme, o)
-          if frame:FindFirstChildOfClass("UIStroke") then return end
-          Create.stroke(theme.Colors.border, HAIRLINE, o.strokeAlpha).Parent = frame
-        end
-
-        local function ensureNoise(frame, theme, o, fx)
-          local A = tokens(theme)
-          if A.noiseId == "" or frame:FindFirstChild("AcrylicNoise") then return end
-          local noise = Create("ImageLabel", {
-            Name = "AcrylicNoise", BackgroundTransparency = 1, Image = A.noiseId, ScaleType = Enum.ScaleType.Tile,
-            TileSize = UDim2.new(0, A.tileSize, 0, A.tileSize), ImageColor3 = fx.grainTint, ImageTransparency = fx.grain,
-            ZIndex = 0, Active = false, Parent = frame, Create.corner(o.radius),
-          })
-          layerGeometry(noise, o.padInset)
-        end
-
-        local function ensureGradient(frame, theme, fx)
-          if frame:FindFirstChildOfClass("UIGradient") then return end
-          Create.gradient({ rotation = 90, stops = sheenStops(theme, fx) }).Parent = frame
-        end
-
-        local function ensureSheen(frame, theme, o, fx, transparency)
-          if frame:FindFirstChild("AcrylicSheen") then return end
-          local sheen = Create("Frame", {
-            Name = "AcrylicSheen", BackgroundColor3 = white(), BackgroundTransparency = 0, BorderSizePixel = 0,
-            Visible = fx.highlight < 1, ZIndex = 0, Active = false, Parent = frame, Create.corner(o.radius),
-            Create.shade({ rotation = 90, stops = highlightStops(theme, fx, transparency) }),
-          })
-          layerGeometry(sheen, o.padInset)
-        end
-
-        local function ensureGlint(frame, theme, o, fx)
-          if frame:FindFirstChild("AcrylicGlint") then return end
-          local glint = Create("Frame", {
-            Name = "AcrylicGlint", BackgroundColor3 = white(), BorderSizePixel = 0, BackgroundTransparency = fx.glint,
-            Visible = fx.glint < 1, ZIndex = 0, Active = false, Parent = frame,
-            Create.shade({ rotation = 0, stops = glintStops(theme) }),
-          })
-          glintGeometry(glint, o.radius, o.padInset)
-        end
-
-        -- ---- paint (re-apply everything that exists) --------------------------------------------------
-        local function paintStroke(frame, theme, o)
-          local stroke = frame:FindFirstChildOfClass("UIStroke")
-          if not stroke then return end
-          stroke.Color = theme.Colors.border
-          stroke.Transparency = o.strokeAlpha
-          -- rim on opt-in, and re-painted whenever one already exists (reskin without the edge opt)
-          if Effects and (o.edge or stroke:FindFirstChildOfClass("UIGradient")) then Effects.rim(stroke, theme) end
-        end
-
-        local function paintFrost(frame, theme, fx, transparency)
-          local grad = frame:FindFirstChildOfClass("UIGradient")
-          if grad then grad.Color = colorSeq(sheenStops(theme, fx)) end
-          local noise = frame:FindFirstChild("AcrylicNoise")
-          if noise then noise.ImageColor3 = fx.grainTint; noise.ImageTransparency = fx.grain end
-          local sheen = frame:FindFirstChild("AcrylicSheen")
-          if sheen then
-            local g = sheen:FindFirstChildOfClass("UIGradient")
-            if g then g.Transparency = numberSeq(highlightStops(theme, fx, transparency)) end
-            sheen.Visible = fx.highlight < 1
+          if opts.Suffix and opts.Suffix ~= "" and s:sub(-#opts.Suffix) == opts.Suffix then
+            s = s:sub(1, #s - #opts.Suffix)
           end
-          local glint = frame:FindFirstChild("AcrylicGlint")
-          if glint then glint.BackgroundTransparency = fx.glint; glint.Visible = fx.glint < 1 end
+          s = s:gsub(",", "")
+          s = s:gsub("%s", "")
+          s = s:gsub("^%+", "")
+          local mult = 1
+          local low = s:sub(-1):lower()
+          if MULT[low] then mult = MULT[low]; s = s:sub(1, #s - 1) end
+          local num = tonumber(s)
+          if num == nil then return nil end
+          return num * mult
         end
 
-        -- Fill + every existing layer. Creates nothing except the glint on edge opt-in, and only on a
-        -- host that already carries the frost stack, so a solid card never grows layers from a reskin.
-        local function paint(frame, theme, o)
-          local fx = Theme.fx(theme)
-          frame.BackgroundColor3 = o.base
-          if o.solid then frame.BackgroundTransparency = 0
-          elseif o.transparency ~= nil then frame.BackgroundTransparency = o.transparency end
-          paintStroke(frame, theme, o)
-          if o.edge and not o.solid and frame:FindFirstChildOfClass("UIGradient") then ensureGlint(frame, theme, o, fx) end
-          paintFrost(frame, theme, fx, frame.BackgroundTransparency or 0)
-          return frame
-        end
-
-        function Acrylic.decorate(frame, theme, opts)
-          local o = resolve(frame, theme, opts)
-          if o.transparency == nil then o.transparency = tokens(theme).frost or FROST end
-          ensureStroke(frame, theme, o)
-          if not o.solid then
-            local fx = Theme.fx(theme)
-            ensureNoise(frame, theme, o, fx)
-            ensureGradient(frame, theme, fx)
-            ensureSheen(frame, theme, o, fx, o.transparency)
-          end
-          return paint(frame, theme, o)
-        end
-
-        -- Live re-skin after SetMode/SetAccent: fill, sheen keypoints, stroke colour + alpha, grain
-        -- alpha + tint, highlight band, rim and glint. The host's BackgroundTransparency is left as the
-        -- owner set it (window SetTransparency writes Main directly) unless opts.transparency is given.
-        function Acrylic.reskin(frame, theme, opts)
-          return paint(frame, theme, resolve(frame, theme, opts))
-        end
-
-        return Acrylic
+        return Numfmt
 
     end
 
-    -- Module: core/recipes
-    EmbeddedModules["core/recipes"] = function()
-        -- Deps injected via Init(R). State kit: one recipe per interaction state (hover wash, press
-        -- scale, focus ring, disabled dim, empty state, scrollbar) so every control answers input the
-        -- same way. Stateless per call (the module is cached across tests): each recipe returns a handle
-        -- whose disconnect() drops every connection it made, so callers maid:Give(handle.disconnect).
-        -- Handlers run inside signal callbacks (capability present), so they write GUI state directly.
-        local Recipes = {}
-        local Create, Theme, Animate, Icons, Safe, Device
+    -- Module: core/themer
+    EmbeddedModules["core/themer"] = function()
+        -- Deps injected via Init(R) (none needed). A per-window registry of accent
+        -- re-appliers. Accent-using components register a closure that recolors their
+        -- accent parts reading theme.Colors live; Window:SetAccent/SetMode fire them all with a
+        -- reason ('accent' | 'mode') so closures with mode-only work (acrylic grain, light
+        -- hairlines) can branch on it. Legacy closures simply ignore the extra argument.
+        local Themer = {}
+        function Themer.Init(_) end
 
-        function Recipes.Init(R)
-          Create = R.Create; Theme = R.Theme; Animate = R.Animate; Icons = R.Icons; Safe = R.Safe; Device = R.Device
+        Themer.ACCENTS = {
+          { Name = "Adaptive", Primary = Color3.fromRGB(250, 250, 250), Foreground = Color3.fromRGB(24, 24, 27) },
+          { Name = "Indigo",  Primary = Color3.fromRGB(99, 102, 241),  Foreground = Color3.fromRGB(250, 250, 250) },
+          { Name = "Violet",  Primary = Color3.fromRGB(139, 92, 246),  Foreground = Color3.fromRGB(250, 250, 250) },
+          { Name = "Emerald", Primary = Color3.fromRGB(16, 185, 129),  Foreground = Color3.fromRGB(250, 250, 250) },
+          { Name = "Sky",     Primary = Color3.fromRGB(56, 189, 248),  Foreground = Color3.fromRGB(24, 24, 27) },
+          { Name = "Rose",    Primary = Color3.fromRGB(244, 63, 94),   Foreground = Color3.fromRGB(250, 250, 250) },
+        }
+
+        function Themer.accent(name)
+          for _, a in ipairs(Themer.ACCENTS) do if a.Name == name then return a end end
+          return nil
         end
 
-        local function noop() end
-        local NOOP_HANDLE = { reskin = noop, disconnect = noop }
-
-        -- Module defaults stand in when a caller has no window theme yet (Theme exposes DEFAULT groups).
-        local function themeOf(opts) return (opts and opts.theme) or Theme end
-
-        local function disconnectAll(conns)
-          return function()
-            for i = #conns, 1, -1 do
-              local c = conns[i]
-              if c and c.Disconnect then c:Disconnect() end
-              conns[i] = nil
-            end
-          end
-        end
-
-        -- A colour option is a Colors token NAME (resolved live so SetMode/SetAccent reskin by name) or
-        -- a Color3 the caller owns; `default` is the token name used when the option is absent.
-        local function colorOf(theme, c, default)
-          if type(c) == "string" then return theme.Colors[c] or theme.Colors[default] end
-          if c ~= nil then return c end
-          return theme.Colors[default]
-        end
-
-        -- MouseButton1Down/Up exist on GuiButton only; a plain Frame (table Row, kind='fill') presses
-        -- through InputBegan/InputEnded instead, filtered to primary click and touch.
-        local function isButton(inst)
-          local cls = inst.ClassName
-          return cls == "TextButton" or cls == "ImageButton"
-        end
-        local function isPress(input)
-          local t = input and input.UserInputType
-          return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
-        end
-        local function onPress(conns, src, down, up)
-          if isButton(src) then
-            conns[#conns + 1] = src.MouseButton1Down:Connect(down)
-            conns[#conns + 1] = src.MouseButton1Up:Connect(up)
-          else
-            conns[#conns + 1] = src.InputBegan:Connect(function(i) if isPress(i) then down() end end)
-            conns[#conns + 1] = src.InputEnded:Connect(function(i) if isPress(i) then up() end end)
-          end
-        end
-
-        -- Pointer hover persists after a click, but a touch tap fires Enter/Down/Up with no Leave, so a
-        -- release under touch must fall back to rest or the wash sticks (device.lua rationale).
-        local function pointerHover() return Device.SupportsHover() and Device.GetInput() ~= "Touch" end
-
-        -- ---- hover ------------------------------------------------------------------------------------
-        local function pick(state, rest, hover, press)
-          if state == "press" then return press elseif state == "hover" then return hover end
-          return rest
-        end
-
-        -- The visual parts one hover kind drives: { {inst, prop, valueOf}, ... } where valueOf(state)
-        -- resolves the goal for "rest" | "hover" | "press" at paint time. Returns parts plus the wash
-        -- Frame (wash kind only).
-        local function hoverParts(kind, host, opts, theme)
-          if kind == "wash" then
-            local inset = opts.inset or {}
-            local ix, iy = inset.x or inset[1] or 0, inset.y or inset[2] or 0
-            -- ZIndex 0: above the host fill, below its content (Sibling behaviour); the negative inset
-            -- cancels the row's UIPadding so the wash covers the whole row.
-            local wash = Create("Frame", {
-              Name = "Hover", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1, BorderSizePixel = 0,
-              Size = UDim2.new(1, 2 * ix, 1, 2 * iy), Position = UDim2.new(0, -ix, 0, -iy),
-              ZIndex = 0, Active = false, Parent = host,
-            })
-            if opts.corner then Create.corner(opts.corner).Parent = wash end
-            local hoverA, pressA = opts.hoverAlpha or theme.Opacity.hoverWash, opts.pressAlpha or theme.Opacity.pressWash
-            return { { wash, "BackgroundTransparency", function(s) return pick(s, 1, hoverA, pressA) end } }, wash
-          elseif kind == "fill" then
-            -- No new Frame (host has a UIListLayout): the host's own transparency carries the state and
-            -- returns to whatever it rested at; BackgroundColor3 is never touched (identity tests).
-            local restA = host.BackgroundTransparency or 1
-            local hoverA = opts.hoverAlpha or theme.Opacity.rowHover
-            local pressA = opts.pressAlpha or hoverA
-            return { { host, "BackgroundTransparency", function(s) return pick(s, restA, hoverA, pressA) end } }, nil
-          elseif kind == "text" then
-            local function tint(s)
-              if s == "rest" then return colorOf(theme, opts.rest, "mutedForeground") end
-              return colorOf(theme, opts.hover, "foreground")
-            end
-            local parts = {}
-            if opts.label then parts[#parts + 1] = { opts.label, "TextColor3", tint } end
-            if opts.icon then parts[#parts + 1] = { opts.icon, "ImageColor3", tint } end
-            return parts, nil
-          end
-          error("Recipes.hover: kind must be 'wash' | 'text' | 'fill', got " .. tostring(kind), 3)
-        end
-
-        -- Shared core: `sources` are the instances whose Enter/Leave/Down/Up drive one visual state
-        -- (iconButton feeds the glyph button AND its hit target).
-        local function bindHover(sources, opts)
-          opts = opts or {}
-          local theme = themeOf(opts)
-          if not Device.SupportsHover() then return NOOP_HANDLE end
-          local kind = opts.kind or "wash"
-          local parts, wash = hoverParts(kind, opts.host or sources[1], opts, theme)
-
-          local state, hovering, pressed = "rest", false, false
-          local function paint(next, instant)
-            state = next
-            local dur = (next == "press") and "press" or "hover"
-            for _, p in ipairs(parts) do
-              local inst, prop, v = p[1], p[2], p[3](next)
-              if instant then inst[prop] = v else Animate.to(inst, dur, { [prop] = v }) end
-            end
-          end
-          local function enter() hovering = true; paint(pressed and "press" or "hover") end
-          local function leave() hovering = false; pressed = false; paint("rest") end
-          local function down() pressed = true; paint("press") end
-          local function up()
-            pressed = false
-            if hovering and pointerHover() then paint("hover") else hovering = false; paint("rest") end
-          end
-
-          local conns = {}
-          for _, src in ipairs(sources) do
-            conns[#conns + 1] = src.MouseEnter:Connect(enter)
-            conns[#conns + 1] = src.MouseLeave:Connect(leave)
-            onPress(conns, src, down, up)
-          end
-          return {
-            Frame = wash,
-            -- re-read tokens by name after SetMode/SetAccent; the wash colour is the only owned colour,
-            -- text parts repaint their current state instantly (no tween inside a themer closure)
-            reskin = function()
-              if wash then wash.BackgroundColor3 = theme.Colors.foreground end
-              if kind == "text" then paint(state, true) end
-            end,
-            disconnect = disconnectAll(conns),
-          }
-        end
-
-        -- Recipes.hover(hit, { theme, host, corner, inset = {x,y}, kind = 'wash'|'text'|'fill', label, icon,
-        --   rest, hover, hoverAlpha, pressAlpha }) -> { Frame, reskin, disconnect }
-        -- wash: child Frame 'Hover' in host (never 'Active'); fill: host transparency only; text: label /
-        -- icon tint. Skipped entirely (no Frame, no handlers) when the device has no pointer.
-        function Recipes.hover(hit, opts) return bindHover({ hit }, opts) end
-
-        -- ---- press ------------------------------------------------------------------------------------
-        -- UIScale lives in scaleHost (the inner content), never the row itself: a UIScale on a
-        -- UIListLayout item reflows its siblings. scaleHost nil = no scale at all; the press feedback is
-        -- then just the wash/fill dip the hover recipe already applies on Down.
-        function Recipes.press(hit, scaleHost, opts)
-          if scaleHost == nil then return { disconnect = noop } end
-          local theme = themeOf(opts)
-          local us = scaleHost:FindFirstChildOfClass("UIScale") or Create("UIScale", { Scale = 1, Parent = scaleHost })
-          local pressed = false
-          local function down() pressed = true; Animate.to(us, "press", { Scale = theme.Motion.pressScale }) end
-          -- release only from a pressed state so a plain mouse-out does not spend a tween going 1 -> 1
-          local function up() if pressed then pressed = false; Animate.springTo(us, "release", { Scale = 1 }) end end
-          local conns = {}
-          onPress(conns, hit, down, up)
-          conns[#conns + 1] = hit.MouseLeave:Connect(up)
-          return { Scale = us, disconnect = disconnectAll(conns) }
-        end
-
-        -- ---- iconButton -------------------------------------------------------------------------------
-        -- Centre of a GuiObject in its parent's UDim2 space, honouring AnchorPoint (default 0,0).
-        local function centreOf(inst)
-          local p, s, a = inst.Position, inst.Size, inst.AnchorPoint
-          if not p or not s then return UDim2.new(0.5, 0, 0.5, 0) end
-          local ax, ay = a and a.X or 0, a and a.Y or 0
-          return UDim2.new(p.X.Scale + s.X.Scale * (0.5 - ax), p.X.Offset + s.X.Offset * (0.5 - ax),
-            p.Y.Scale + s.Y.Scale * (0.5 - ay), p.Y.Offset + s.Y.Offset * (0.5 - ay))
-        end
-
-        -- Recipes.iconButton(btn, { theme, icon, rest, hover, hitSize, parent, onClick }) -> { Hit, reskin, disconnect }
-        -- The glyph button keeps its own size (an ImageButton renders its Image at full Size, so the
-        -- glyph IS the button); a transparent sibling '<Name>Hit' supplies the comfortable target
-        -- (Sizes.iconButton, Sizes.touchHit on touch). Handlers are bound to BOTH so existing tests that
-        -- fire on the button keep working and pointer input landing on the hit behaves the same.
-        function Recipes.iconButton(btn, opts)
-          opts = opts or {}
-          local theme = themeOf(opts)
-          local size = opts.hitSize or (Device.IsTouch() and theme.Sizes.touchHit or theme.Sizes.iconButton)
-          local hit = Create("ImageButton", {
-            Name = (btn.Name or btn.ClassName) .. "Hit", BackgroundTransparency = 1, ImageTransparency = 1, BorderSizePixel = 0,
-            AutoButtonColor = false, Active = true, AnchorPoint = Vector2.new(0.5, 0.5), Position = centreOf(btn),
-            Size = UDim2.new(0, size, 0, size), ZIndex = (btn.ZIndex or 1) + 1, Parent = opts.parent or btn.Parent,
-          })
-          local sources = { btn, hit }
-          local function restC() return colorOf(theme, opts.rest, "mutedForeground") end
-          local function hoverC() return colorOf(theme, opts.hover, "foreground") end
-          if opts.icon then Icons.apply(btn, opts.icon, restC()) end
-
-          local wash = bindHover(sources, { theme = theme, host = hit, corner = theme.Radius.sm, kind = "wash" })
-          local conns, hovering = {}, false
-          if Device.SupportsHover() then
-            local function enter() hovering = true; Icons.tint(btn, hoverC()) end
-            local function leave() hovering = false; Icons.tint(btn, restC()) end
-            local function up() if not pointerHover() then leave() end end
-            for _, src in ipairs(sources) do
-              conns[#conns + 1] = src.MouseEnter:Connect(enter)
-              conns[#conns + 1] = src.MouseLeave:Connect(leave)
-              conns[#conns + 1] = src.MouseButton1Up:Connect(up)
-            end
-          end
-          if opts.onClick then
-            for _, src in ipairs(sources) do conns[#conns + 1] = src.MouseButton1Click:Connect(opts.onClick) end
-          end
-          local disconnectOwn = disconnectAll(conns)
-          return {
-            Hit = hit,
-            reskin = function()
-              local c = hovering and hoverC() or restC()
-              if opts.icon then Icons.apply(btn, opts.icon, c) else btn.ImageColor3 = c end
-              wash.reskin()
-            end,
-            disconnect = function() disconnectOwn(); wash.disconnect() end,
-          }
-        end
-
-        -- ---- focus ------------------------------------------------------------------------------------
-        -- Recipes.focus(stroke, host, getColor, { theme }) -> { set, disconnect }
-        -- getColor(focused) stays the caller's single source of stroke colour (precedence such as
-        -- invalid > focused > border lives there); the recipe only owns Thickness. Focused/FocusLost are
-        -- TextBox-only and SelectionGained/Lost are gamepad selection, so each is bound only when the
-        -- host exposes it (read under pcall: Roblox throws on a missing member). set(focused) covers
-        -- hosts with no focus event of their own (SelectBox field open, Keybind chip listening).
-        function Recipes.focus(stroke, host, getColor, opts)
-          opts = opts or {}
-          local theme = themeOf(opts)
-          local restThickness = stroke.Thickness or 1
-          -- A hairline host (the sidebar/dropdown search rest at Stroke.search: 0.8 dark, 0.5 light) would
-          -- draw its ring at that same alpha and read as almost nothing, so a translucent rest fades to
-          -- opaque while focused and back on blur. opts.restAlpha (number or function) is re-read on every
-          -- paint so a SetMode mid-focus still restores the right hairline; a stroke that already rests
-          -- opaque (TextBox/NumberBox/Keybind) gets no Transparency goal at all.
-          local restAlphaOpt = opts.restAlpha
-          local capturedAlpha = stroke.Transparency or 0
-          local function restAlpha()
-            if type(restAlphaOpt) == "function" then return restAlphaOpt() or 0 end
-            if type(restAlphaOpt) == "number" then return restAlphaOpt end
-            return capturedAlpha
-          end
-          local function apply(focused)
-            focused = focused and true or false
-            local goal = { Thickness = focused and theme.Stroke.focusThickness or restThickness }
-            local rest = restAlpha()
-            if rest > 0 then goal.Transparency = focused and theme.Stroke.control or rest end
-            if getColor then goal.Color = getColor(focused) end
-            Animate.to(stroke, "fast", goal)
-          end
-          local function on() apply(true) end
-          local function off() apply(false) end
-          local conns = {}
-          local function bind(name, fn)
-            local ok, sig = pcall(function() return host[name] end)
-            if ok and sig ~= nil then conns[#conns + 1] = sig:Connect(fn) end
-          end
-          bind("Focused", on); bind("FocusLost", off)
-          bind("SelectionGained", on); bind("SelectionLost", off)
-          -- Gamepad selection: the stroke IS the ring, so the engine's default adornment is replaced by
-          -- an invisible, unparented Frame. Written blind under pcall: nil is the default in Roblox and
-          -- in the mock alike, so reading it back could never tell "unset" from "unsupported".
-          pcall(function()
-            host.SelectionImageObject = Create("Frame", { Name = "SelectionImage", BackgroundTransparency = 1, BorderSizePixel = 0 })
-          end)
-          return { set = apply, disconnect = disconnectAll(conns) }
-        end
-
-        -- ---- disabled ---------------------------------------------------------------------------------
-        -- Recipes.disabled(parts, on, theme) with parts = { {inst, prop, rest}, ... }: every part tweens
-        -- to Opacity.disabled when on, back to its own rest (the value it had while enabled) when off.
-        -- rest omitted = the engine default 0 for *Transparency; a nil inst (optional stroke) is skipped.
-        function Recipes.disabled(parts, on, theme)
-          theme = theme or Theme
-          local alpha = theme.Opacity.disabled
-          for _, p in ipairs(parts or {}) do
-            local inst, prop, rest = p[1], p[2], p[3]
-            if inst and prop then
-              if rest == nil then rest = 0 end
-              Animate.to(inst, "fast", { [prop] = on and alpha or rest })
-            end
-          end
-        end
-
-        -- ---- empty ------------------------------------------------------------------------------------
-        -- Recipes.empty(parent, { theme, text, icon, zIndex }) -> { Frame, SetVisible, reskin }
-        -- Hidden until the owner says the list is empty (its SetVisible already runs inside the owner's
-        -- Safe.mutate toggle). Parent must be layout-free: the frame fills it and centres its stack.
-        function Recipes.empty(parent, opts)
-          opts = opts or {}
-          local theme = themeOf(opts)
-          local z = opts.zIndex
-          local frame = Create("Frame", {
-            Name = "Empty", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 1, 0),
-            Visible = false, Active = false, ZIndex = z, Parent = parent,
-            Create("UIListLayout", {
-              FillDirection = Enum.FillDirection.Vertical, SortOrder = Enum.SortOrder.LayoutOrder,
-              HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center,
-              Padding = UDim.new(0, theme.Spacing.gap),
-            }),
-          })
-          local icon
-          if opts.icon then
-            icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, LayoutOrder = 1, ZIndex = z,
-              Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), Parent = frame })
-            Icons.apply(icon, opts.icon, theme.Colors.mutedForeground)
-          end
-          local label = Create("TextLabel", { Name = "Text", BackgroundTransparency = 1, Text = opts.text or "",
-            TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Center, TextWrapped = true,
-            AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), LayoutOrder = 2, ZIndex = z, Parent = frame })
-          Create.text(label, theme, "muted")
-          return {
-            Frame = frame,
-            SetVisible = function(b) frame.Visible = b and true or false end,
-            reskin = function()
-              label.TextColor3 = theme.Colors.mutedForeground
-              if icon then Icons.apply(icon, opts.icon, theme.Colors.mutedForeground) end
-            end,
-          }
-        end
-
-        -- ---- scrollbar --------------------------------------------------------------------------------
-        -- Idempotent, so a themer closure simply calls it again to re-tint. Top/Mid/BottomImage stay at
-        -- the engine default until Scrollbar.imageId names a verified flat asset.
-        function Recipes.scrollbar(sf, theme)
-          theme = theme or Theme
-          sf.ScrollBarThickness = theme.Sizes.scrollbar
-          sf.ScrollBarImageColor3 = theme.Colors.border
-          sf.ScrollBarImageTransparency = theme.Scrollbar.alpha
-          local id = theme.Scrollbar.imageId
-          if id and id ~= "" then sf.TopImage = id; sf.MidImage = id; sf.BottomImage = id end
-          return sf
-        end
-
-        return Recipes
-
-    end
-
-    -- Module: core/config
-    EmbeddedModules["core/config"] = function()
-        local HttpService = game:GetService("HttpService")
-
-        local Config = {}
-        Config.__index = Config
-
-        local function hasFS()
-          return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
-        end
-
-        function Config.new(opts)
-          opts = opts or {}
-          local self = setmetatable({
-            folder = opts.FolderName or "EzUI",
-            file = opts.FileName or "Settings",
-            autoSave = opts.AutoSave ~= false,
-            autoLoad = opts.AutoLoad ~= false,
-            profile = "Default",
-            values = {},
-            defaults = {},
-            setters = {},
-          }, Config)
-          -- AutoLoad (the documented default) reads the saved file on startup so flags
-          -- restore their values as controls register against this config.
-          if self.autoLoad then self:Load() end
-          return self
-        end
-
-        function Config:_dir() return self.folder .. "/" .. self.file end
-        -- The Default profile is the saved file itself: <FolderName>/<FileName>.json. Named
-        -- profiles live in a <FolderName>/<FileName>/ subfolder so FileName stays a file name.
-        function Config:_pathFor(name)
-          if name == "Default" then return self.folder .. "/" .. self.file .. ".json" end
-          return self:_dir() .. "/" .. name .. ".json"
-        end
-        function Config:_path() return self:_pathFor(self.profile) end
-
-        function Config:ActiveProfile() return self.profile end
-
-        function Config:SwitchProfile(name)
-          self.profile = name or "Default"
-          self:Load()
-          return self.profile
-        end
-
-        function Config:ListProfiles()
-          local names = { Default = true }
-          if type(listfiles) == "function" then
-            local ok, files = pcall(listfiles, self:_dir())
-            if ok and type(files) == "table" then
-              for _, f in ipairs(files) do
-                local n = tostring(f):match("([^/\\]+)%.json$")
-                if n then names[n] = true end
-              end
-            end
-          end
+        function Themer.names()
           local out = {}
-          for n in pairs(names) do out[#out + 1] = n end
+          for _, a in ipairs(Themer.ACCENTS) do out[#out + 1] = a.Name end
           return out
         end
 
-        function Config:DeleteProfile(name)
-          if type(delfile) == "function" and type(isfile) == "function" then
-            local p = self:_pathFor(name)
-            if isfile(p) then pcall(delfile, p) end
+        function Themer.new()
+          local fns = {}
+          local self = {}
+          function self.register(fn)
+            fns[fn] = true
+            return function() fns[fn] = nil end
           end
-        end
-
-        function Config:Register(flag, default, setValue)
-          self.defaults[flag] = default
-          self.setters[flag] = setValue
-          if self.values[flag] == nil then self.values[flag] = default end
-        end
-
-        function Config:Get(flag) return self.values[flag] end
-
-        function Config:Set(flag, value)
-          self.values[flag] = value
-          if self.autoSave then self:Save() end
-        end
-
-        function Config:GetAllKeys()
-          local keys = {}
-          for k in pairs(self.values) do keys[#keys + 1] = k end
-          return keys
-        end
-
-        function Config:Save()
-          if not hasFS() then return false end
-          local ok, encoded = pcall(function() return HttpService:JSONEncode(self.values) end)
-          if not ok then return false end
-          if type(makefolder) == "function" then
-            pcall(makefolder, self.folder)
-            -- only named profiles need the <FolderName>/<FileName>/ subfolder; the Default
-            -- profile is written straight to <FolderName>/<FileName>.json
-            if self.profile ~= "Default" then pcall(makefolder, self:_dir()) end
+          -- pcall isolates a broken closure so one component cannot leave the rest of the window
+          -- half-reskinned; reason is nil for callers that predate it.
+          function self.reskin(reason)
+            for fn in pairs(fns) do pcall(fn, reason) end
           end
-          return pcall(writefile, self:_path(), encoded)
+          function self.setAccent(primary, foreground)
+            self.reskin("accent") -- closures read theme.Colors live; caller mutated it before calling
+          end
+          return self
         end
 
-        function Config:Load()
-          if not hasFS() then return false end
-          local path = self:_path()
-          -- migrate from the older multi-profile layout where Default lived at
-          -- <FolderName>/<FileName>/Default.json instead of <FolderName>/<FileName>.json
-          if not isfile(path) and self.profile == "Default" then
-            local nested = self:_dir() .. "/Default.json"
-            if isfile(nested) then path = nested end
-          end
-          if not isfile(path) then return false end
-          local ok, content = pcall(readfile, path)
-          if not ok then return false end
-          local ok2, decoded = pcall(function() return HttpService:JSONDecode(content) end)
-          if not ok2 or type(decoded) ~= "table" then return false end
-          for flag, value in pairs(decoded) do
-            self.values[flag] = value
-            if self.setters[flag] then pcall(self.setters[flag], value) end
-          end
-          return true
-        end
-
-        function Config:ResetFlag(flag)
-          local d = self.defaults[flag]
-          self.values[flag] = d
-          if self.setters[flag] then pcall(self.setters[flag], d) end
-          if self.autoSave then self:Save() end
-        end
-
-        function Config:Reset(opts)
-          opts = opts or {}
-          for flag, d in pairs(self.defaults) do
-            self.values[flag] = d
-            if self.setters[flag] then pcall(self.setters[flag], d) end
-          end
-          if opts.ClearFile and type(delfile) == "function" and hasFS() and isfile(self:_path()) then
-            pcall(delfile, self:_path())
-          else
-            self:Save()
-          end
-        end
-
-        return Config
+        return Themer
 
     end
 
-    -- Module: components/image
-    EmbeddedModules["components/image"] = function()
-        -- Deps injected via Init(R).
-        local Image = {}
-        local Create, DefaultTheme, Icons, Safe
-        function Image.Init(R) Create = R.Create; DefaultTheme = R.Theme; Icons = R.Icons; Safe = R.Safe end
-        function Image.new(opts)
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local img = Create("ImageLabel", {
-            Name = "Image", BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
-            Image = opts.Image or "", ImageColor3 = opts.Color or Color3.fromRGB(255, 255, 255),
-            Size = UDim2.new(1, 0, 0, opts.Height or 80), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
-          })
-          -- A Lucide glyph without an explicit Color follows the foreground token, so it must re-tint on
-          -- SetMode; a caller-owned Color3 is left alone. Plain images never register.
-          local glyphColor = function() return opts.Color or theme.Colors.foreground end
-          if opts.Lucide then Icons.apply(img, opts.Lucide, glyphColor()) end
-          local unreg = (opts.Lucide and not opts.Color and opts.AccentReg) and opts.AccentReg(function()
-            Icons.apply(img, opts.Lucide, glyphColor())
-          end)
-          return {
-            Frame = img,
-            SetImage = function(v) Safe.mutate(function() img.Image = v end) end,
-            Destroy = function() if unreg then unreg() end; img:Destroy() end,
-          }
-        end
-        return Image
-
-    end
-
-    -- Module: components/keybind
-    EmbeddedModules["components/keybind"] = function()
-        -- Deps injected via Init(R).
-        local Keybind = {}
-        local Create, DefaultTheme, Maid, Flag, Safe, Recipes, Animate
-        local UserInputService = game:GetService("UserInputService")
-        function Keybind.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe; Recipes = R.Recipes
-          Animate = R.Animate
-        end
-
-        -- Prompt shown on the chip while it waits for a key (a kbd chip has no placeholder of its own).
-        local LISTEN_TEXT = "Press a key"
-
-        -- Listening pulse alphas + period. theme.Stroke.pulse = { low, high } and theme.Motion.pulse are
-        -- the tokens these belong in (reported as a deviation); until core/theme.lua carries them this
-        -- FALLBACK holds the values, the way core/animate.lua covers tokens that may not exist yet.
-        local FALLBACK = { low = 0.2, high = 0.7, period = 0.4 }
-        local function pulseTok(theme, k)
-          local v
-          if k == "period" then v = theme.Motion and theme.Motion.pulse
-          else v = theme.Stroke and theme.Stroke.pulse and theme.Stroke.pulse[k] end
-          if type(v) == "number" then return v end
-          return FALLBACK[k]
-        end
-
-        -- Escape cancels listening. Resolved ONCE through a pcall (indexing an absent member throws in
-        -- Roblox) so an exotic client degrades to nil instead of erroring on every keypress; the nil
-        -- guard at the comparison is what stops an InputBegan with no KeyCode from reading as Escape.
-        local ESCAPE = (function()
-          local ok, kc = pcall(function() return Enum.KeyCode.Escape end)
-          if ok then return kc end
-          return nil
-        end)()
-
-        -- A real Enum.KeyCode is an EnumItem (userdata), NOT a table — so type(k)=="table"
-        -- is false in Roblox and the key would always read as "Unknown". Read .Name directly
-        -- (works for EnumItem userdata, the mock's enum tables, and plain strings).
-        local function keyName(k)
-          if type(k) == "string" then return k end
-          if k ~= nil then
-            local ok, name = pcall(function() return k.Name end)
-            if ok and type(name) == "string" then return name end
-          end
-          return "Unknown"
-        end
-
-        -- Indexing Enum.KeyCode with an invalid/free-form string THROWS in real Roblox
-        -- ("X is not a valid member of Enum.KeyCode") — and this runs on every keypress.
-        -- Resolve once through a pcall so a bad name degrades to Unknown instead of erroring.
-        local function toKeyCode(name)
-          local ok, kc = pcall(function() return Enum.KeyCode[name] end)
-          if ok and kc then return kc end
-          return Enum.KeyCode.Unknown
-        end
-
-        function Keybind.new(opts)
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local maid = Maid.new()
-          local listening = false
-          local enabled = true                 -- SetEnabled: blocks the click that arms listening
-          local keyCode = "Unknown"
-          local onPressed
-
-          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-          local btn = Create("TextButton", { Name = "Keybind", AutoButtonColor = false, Text = "",
-            BackgroundColor3 = theme.Colors.surface, Size = UDim2.new(1, 0, 0, hasDesc and 50 or 34), LayoutOrder = opts.LayoutOrder or 0,
-            Parent = opts.Parent, Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
-          Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Keybind",
-            TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-            Position = UDim2.new(0, 0, 0, hasDesc and 8 or 0), Size = UDim2.new(1, -80, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn }),
-            theme, "label")
-          if hasDesc then
-            Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
-              TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-              TextYAlignment = Enum.TextYAlignment.Top,
-              Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, -80, 0, 18), Parent = btn }), theme, "muted")
-          end
-          -- kbd-style chip: a recessed `background` fill with a border stroke, sized to its own text
-          -- (AutomaticSize.X + padding) but never narrower than a comfortable target. AnchorPoint (1,0.5)
-          -- pins its RIGHT edge to the row, so a long key name grows leftwards instead of overflowing.
-          local keyBox = Create.text(Create("TextLabel", { Name = "Key", BackgroundColor3 = theme.Colors.background,
-            Text = "...", TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Center,
-            AutomaticSize = Enum.AutomaticSize.X, AnchorPoint = Vector2.new(1, 0.5),
-            Size = UDim2.new(0, 0, 0, theme.Sizes.chip), Position = UDim2.new(1, 0, 0.5, 0), Parent = btn,
-            Create.corner(theme.Radius.sm),
-            Create.padding({ left = theme.Spacing.gap, right = theme.Spacing.gap }),
-            Create("UISizeConstraint", { MinSize = Vector2.new(theme.Sizes.touchHit, theme.Sizes.chip) }) }),
-            theme, "muted")
-          -- The chip's only UIStroke doubles as its focus ring (1.7): border/1 at rest, ring at
-          -- Stroke.focusThickness while listening. A TextLabel has no Focused event, so the recipe is
-          -- driven through set(); chipColor() is the single source of the colour for the themer too.
-          local chipStroke = Create.stroke(theme.Colors.border, 1); chipStroke.Parent = keyBox
-          local function chipColor(on) return on and theme.Colors.ring or theme.Colors.border end
-          local ring = Recipes.focus(chipStroke, keyBox, chipColor, { theme = theme })
-          maid:Give(ring.disconnect)
-          -- Row hover + press (2.7): the wash cancels the row's UIPadding so it covers the whole row, and
-          -- the press scale lives on the CHIP -- a UIScale on the row itself would reflow its siblings.
-          local hover = Recipes.hover(btn, { theme = theme, host = btn, corner = theme.Radius.md,
-            inset = { x = theme.Spacing.inputX, y = 0 } })
-          maid:Give(hover.disconnect)
-          maid:Give(Recipes.press(btn, keyBox, { theme = theme }).disconnect)
-
-          -- One source for the chip's text and tint, re-derived from `listening` (so the themer closure
-          -- and a mid-listen SetMode both paint the state that is actually current).
-          local function chipText() return listening and LISTEN_TEXT or keyCode end
-          local function chipTint() return listening and theme.Colors.mutedForeground or theme.Colors.foreground end
-          local function paintChip() keyBox.Text = chipText(); keyBox.TextColor3 = chipTint() end
-
-          -- While listening the stroke breathes between two alphas; the handle is { Cancel }, so it
-          -- reaches the maid wrapped in a function. Reduced motion skips the loop entirely (the ring
-          -- thickness alone says "listening") rather than parking the stroke at the low alpha.
-          local pulse
-          local function stopPulse()
-            if pulse then pulse.Cancel(); pulse = nil end
-            chipStroke.Transparency = theme.Stroke.control
-          end
-          local function startPulse()
-            stopPulse()
-            if not Animate.isEnabled() then return end
-            chipStroke.Transparency = pulseTok(theme, "low")
-            pulse = Animate.pulse(chipStroke, pulseTok(theme, "period"),
-              { Transparency = pulseTok(theme, "high") }, Enum.EasingStyle.Sine)
-          end
-          maid:Give(stopPulse)
-
-          -- InputBegan arrives from UserInputService, so the stroke write rides Safe.mutate like the text.
-          -- ring.set() runs LAST so the focus tween is the one a caller reads back as the latest.
-          local function setListening(on)
-            listening = on and true or false
-            Safe.mutate(function()
-              paintChip()
-              if listening then startPulse() else stopPulse() end
-              ring.set(listening)
-            end)
-          end
-
-          -- Capture: the chip pops and the stroke flashes accent -> border, so a rebind registers even
-          -- though the ring is leaving at the same moment.
-          -- MUST run BEFORE setListening(false): two tweens on one UIStroke that share a property make
-          -- Roblox cancel the older one WHOLE, so if this played last it would kill the focus recipe's
-          -- {Thickness, Color} tween and strand the chip at Stroke.focusThickness forever. Played first,
-          -- it writes the accent synchronously and the ring's own tween cancels IT instead -- picking the
-          -- live accent Color up as its start value, so the flash is still seen and Thickness lands at 1.
-          local function flashCapture()
-            Safe.mutate(function()
-              Animate.pop(keyBox, "fast")
-              chipStroke.Color = theme.Colors.primary
-              Animate.to(chipStroke, "base", { Color = chipColor(false), Transparency = theme.Stroke.control })
-            end)
-          end
-
-          local function apply(name)
-            keyCode = keyName(name)
-            Safe.mutate(paintChip)
-          end
-          local commit = Flag.bind(opts, keyName(opts.Default or "Unknown"), apply)
-
-          -- Rebind the key and notify via OnChanged. Use this (not opts.Callback) to react to
-          -- the user *choosing a different key* — e.g. driving Window:SetToggleKey so the window's
-          -- built-in toggle handler stays the single source of truth instead of adding a second one.
-          local function setKey(k)
-            commit(keyName(k))
-            if opts.OnChanged then opts.OnChanged(toKeyCode(keyCode)) end
-          end
-
-          -- SetEnabled dims the chip and blocks the click that starts listening; SetLocked (the host's
-          -- scrim) stays independent. Disabling mid-listen disarms it instead of leaving the row armed.
-          local function setEnabled(b)
-            b = b and true or false
-            if enabled == b then return end
-            enabled = b
-            if not b and listening then setListening(false) end
-            Safe.mutate(function()
-              Recipes.disabled({ { keyBox, "BackgroundTransparency", 0 }, { keyBox, "TextTransparency", 0 } }, not b, theme)
-            end)
-          end
-          if opts.Disabled then setEnabled(false) end
-
-          local api = { Frame = btn }
-          function api.GetKey() return toKeyCode(keyCode) end
-          function api.SetKey(k) setKey(k) end
-          function api.OnPressed(fn) onPressed = fn end
-          function api.SetEnabled(b) setEnabled(b) end
-          function api.Destroy() maid:DoCleanup() end
-
-          maid:Give(btn.MouseButton1Click:Connect(function()
-            if not enabled then return end
-            setListening(true)
-          end))
-          maid:Give(UserInputService.InputBegan:Connect(function(input, gameProcessed)
-            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-            if listening then
-              -- Escape cancels and keeps the current binding. ESCAPE may be nil on a client without the
-              -- member, and an InputBegan can arrive with no KeyCode at all, so both sides are guarded --
-              -- otherwise nil == nil would swallow a real capture.
-              if ESCAPE ~= nil and input.KeyCode == ESCAPE then setListening(false); return end
-              flashCapture()                                -- first: see the comment on flashCapture
-              setListening(false)                           -- last: its ring tween must outlive the flash
-              setKey(input.KeyCode)
-            elseif not gameProcessed and input.KeyCode == toKeyCode(keyCode) then
-              if opts.Callback then opts.Callback() end
-              if onPressed then onPressed() end
-            end
-          end))
-          maid:Give(btn)
-
-          if opts.AccentReg then maid:Give(opts.AccentReg(function()
-            btn.BackgroundColor3 = theme.Colors.surface
-            local lab = btn:FindFirstChild("Label"); if lab then lab.TextColor3 = theme.Colors.foreground end
-            local de = btn:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
-            keyBox.BackgroundColor3 = theme.Colors.background
-            paintChip()                                   -- re-derives text + tint from `listening`
-            chipStroke.Color = chipColor(listening)
-            hover.reskin()
-          end)) end
-
-          return api
-        end
-        return Keybind
-
-    end
-
-    -- Module: components/dialog
-    EmbeddedModules["components/dialog"] = function()
-        -- Deps injected via Init(R). Dialog.open(opts) builds a modal alert dialog in the overlay.
-        -- Mirrors shadcn AlertDialog: modal, non-dismissible by backdrop click (no X button) -- the user
-        -- picks a footer button, presses Escape/B (close) or Return/A (the primary button). Optional
-        -- header icon (inline / badge), a device-aware footer, and open/close motion are layered on below.
-        local Dialog = {}
-        local Create, DefaultTheme, Maid, Overlay, Button, Acrylic, Animate, Icons, Device, Effects, Theme
-        local UserInputService = game:GetService("UserInputService")
-        local KC = Enum.KeyCode
-        -- Open dialogs, innermost last. Only the top one answers the keyboard. Kept here (not just as an
-        -- Overlay depth) so a torn-down harness generation can never answer a key aimed at a live dialog.
-        local stack = {}
-        -- The input object a dialog has already acted on. Every open dialog listens to the same signal and
-        -- they all run in ONE dispatch, so without this an Escape that closes the inner dialog would still
-        -- be seen by the outer one (now the top of the stack) and close it in the same frame.
-        local handledInput = nil
-
-        function Dialog.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Button = R.Button; Acrylic = R.Acrylic
-          Animate = R.Animate; Icons = R.Icons; Device = R.Device; Effects = R.Effects; Theme = R.Theme
-          for i = #stack, 1, -1 do stack[i] = nil end
-          handledInput = nil
-        end
-
-        local MARGIN = 24     -- min gap between the card and the edge of its container when clamping width
-        local CLOSE_SCALE = 0.92  -- close zoom; no Motion token holds it (enterScale 0.94 / exitScale 0.96)
-        local BADGE_TINT = 0.15   -- surface mixed this far toward the icon colour; no theme token yet
-
-        -- Card 1501, content 1502, badge glyph 1503 -- all relative to the shared modal layer.
-        local function zOf(n) return Overlay.Z.modal + n end
-        local function mix(theme, a, b, t) return (theme.mix or Theme.mix)(a, b, t) end
-        local function modeVal(theme, tok) return (theme.modeVal or Theme.modeVal)(theme, tok) end
-        -- A destructive dialog must read before the button row does: the badge carries a little of the
-        -- icon's colour instead of the neutral surface.
-        local function badgeColor(theme, icon) return mix(theme, theme.Colors.surface, icon, BADGE_TINT) end
-
-        -- Card width: opts.Width (default 320), clamped to the container width minus margins when known.
-        local function resolveWidth(opts)
-          local want = opts.Width or 320
-          local avail
-          if opts.Window and opts.Window.Main then
-            local s = opts.Window.Main.AbsoluteSize; avail = s and s.X
-          else
-            local vp = Overlay.viewport(); avail = vp and vp.X
-          end
-          if avail and avail > 0 then
-            local max = avail - MARGIN * 2
-            if max > 0 and want > max then want = max end
-          end
-          return want
-        end
-
-        -- Card surface opts shared by decorate (build) and reskin (SetMode/SetAccent): opaque, with the
-        -- floating hairline alpha rather than the acrylic default so the card reads as a solid sheet.
-        local function cardSkin(theme) return { solid = true, strokeAlpha = theme.Stroke.floating } end
-
-        -- Header title: one TextLabel in every header shape, differing only in alignment + geometry.
-        local function titleLabel(parent, theme, opts, xAlign, props)
-          local lbl = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "Dialog",
-            TextColor3 = theme.Colors.foreground, TextXAlignment = xAlign, ZIndex = zOf(2), Parent = parent })
-          for k, v in pairs(props) do lbl[k] = v end
-          return Create.text(lbl, theme, "title")
-        end
-
-        -- Header: one of three shapes -- badge (icon square above a centred title), inline (small icon left
-        -- of the title), or a plain left-aligned title. Returns whether the header is centred so the
-        -- message can match its alignment, plus the coloured parts the reskin closure repaints.
-        local function buildHeader(card, theme, opts)
-          -- IconColor is a caller override; without one the tint follows theme.Colors.foreground live
-          local function iconColor() return opts.IconColor or theme.Colors.foreground end
-          local parts = { iconColor = iconColor }
-          if opts.Icon and opts.IconBadge then
-            local header = Create("Frame", { Name = "Header", BackgroundTransparency = 1,
-              Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 1, ZIndex = zOf(2), Parent = card })
-            Create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, theme.Spacing.gap),
-              HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = header })
-            parts.badge = Create("Frame", { Name = "IconBadge", BackgroundColor3 = badgeColor(theme, iconColor()),
-              Size = UDim2.new(0, 40, 0, 40), LayoutOrder = 1, ZIndex = zOf(2), Parent = header, Create.corner(theme.Radius.md) })
-            parts.icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5),
-              Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(0, 20, 0, 20), ZIndex = zOf(3), Parent = parts.badge })
-            Icons.apply(parts.icon, opts.Icon, iconColor())
-            parts.title = titleLabel(header, theme, opts, Enum.TextXAlignment.Center,
-              { Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 2 })
-            return true, parts
-          elseif opts.Icon then
-            local gap = theme.Spacing.icon
-            local header = Create("Frame", { Name = "Header", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22),
-              LayoutOrder = 1, ZIndex = zOf(2), Parent = card })
-            parts.icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5),
-              Position = UDim2.new(0, 0, 0.5, 0), Size = UDim2.new(0, 16, 0, 16), ZIndex = zOf(2), Parent = header })
-            Icons.apply(parts.icon, opts.Icon, iconColor())
-            parts.title = titleLabel(header, theme, opts, Enum.TextXAlignment.Left,
-              { Position = UDim2.new(0, 16 + gap, 0, 0), Size = UDim2.new(1, -(16 + gap), 1, 0) })
-            return false, parts
-          else
-            parts.title = titleLabel(card, theme, opts, Enum.TextXAlignment.Left,
-              { Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 1 })
-            return false, parts
-          end
-        end
-
-        -- Footer: non-touch -> right-aligned, content-width buttons (Action rightmost). Touch -> full-width
-        -- buttons stacked vertically and reversed, so the primary Action sits on top (shadcn flex-col-reverse).
-        -- Buttons own their themer registration (AccentReg) and release it through the dialog maid.
-        local function buildFooter(card, theme, buttons, touch, fire, maid, accentReg)
-          local n = #buttons
-          local row = Create("Frame", { Name = "Buttons", BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, touch and 0 or 34),
-            AutomaticSize = touch and Enum.AutomaticSize.Y or Enum.AutomaticSize.None,
-            LayoutOrder = 4, ZIndex = zOf(2), Parent = card })
-          Create("UIListLayout", {
-            FillDirection = touch and Enum.FillDirection.Vertical or Enum.FillDirection.Horizontal,
-            HorizontalAlignment = touch and Enum.HorizontalAlignment.Center or Enum.HorizontalAlignment.Right,
-            SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, theme.Spacing.gap), Parent = row })
-          for i, b in ipairs(buttons) do
-            local order = touch and (n - i + 1) or i
-            local btn = Button.new({ Parent = row, LayoutOrder = order, Theme = theme, Text = b.Text or "OK",
-              Variant = b.Variant, Icon = b.Icon, AutoWidth = not touch, AccentReg = accentReg,
-              Callback = function() fire(b) end })
-            maid:Give(btn)
-          end
-        end
-
-        function Dialog.open(opts)
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local maid = Maid.new()
-          local buttons = opts.Buttons or { { Text = "OK" } }
-          local handle = {}
-          local touch = Device and Device.IsTouch() or false
-          local width = resolveWidth(opts)
-          local modal = opts.Modal ~= false
-          -- A dialog takes the screen: a dropdown left open underneath would float over the scrim.
-          Overlay.closeAll()
-          -- Stacked dialogs: only the FIRST paints a scrim (0.5 over 0.5 would read as 0.75) and only the
-          -- innermost answers the keyboard.
-          local depth = Overlay.pushDialog()
-          local function scrimAlpha() return modeVal(theme, theme.Opacity.dialogScrim) end
-          local scrimGoal = (modal and depth == 1) and scrimAlpha() or 1
-
-          local dim = Create("TextButton", { Name = "Dialog", AutoButtonColor = false, Text = "",
-            BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 1, 0), ZIndex = Overlay.Z.modal, Modal = modal })
-          -- CanvasGroup so the whole card (fill, stroke, text, buttons) fades as ONE piece instead of a
-          -- dozen independently tweened transparencies.
-          local card = Create("CanvasGroup", { Name = "Card", Size = UDim2.new(0, width, 0, 0),
-            AutomaticSize = Enum.AutomaticSize.Y, GroupTransparency = 1,
-            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), ZIndex = zOf(1), Parent = dim,
-            Create.corner(theme.Radius.lg), Create.padding({ all = theme.Spacing.pad }),
-            Create.listLayout({ Padding = theme.Spacing.gap }) })
-          -- ONE UIScale carries both jobs: the UI scale (2.22 -- standalone only, a window-scoped dialog
-          -- already lives inside Main and must not scale twice) and the enter/exit zoom on top of it.
-          local base = opts.Window and 1 or Overlay.scale()
-          local us = Create("UIScale", { Scale = base * theme.Motion.enterScale, Parent = card })
-          Acrylic.decorate(card, theme, cardSkin(theme))
-          local stroke = card:FindFirstChildOfClass("UIStroke")
-          Effects.rim(stroke, theme)
-          -- Shadow is a SIBLING of the card at the modal layer (card is +1), so it never covers it. The
-          -- card is AutomaticSize, so its geometry is tracked through the Absolute* signals.
-          local shadow = Effects.shadow(dim, theme, { name = "DialogShadow", level = "dialog", zIndex = Overlay.Z.modal })
-          if shadow then shadow.ImageTransparency = 1 end
-
-          local centered, parts = buildHeader(card, theme, opts)
-          local message
-          if opts.Message then
-            message = Create("TextLabel", { Name = "Message", BackgroundTransparency = 1, Text = opts.Message,
-              TextColor3 = theme.Colors.mutedForeground,
-              TextXAlignment = centered and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left, TextWrapped = true,
-              TextYAlignment = Enum.TextYAlignment.Top,
-              Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, ZIndex = zOf(2), Parent = card })
-            Create.text(message, theme, "body")
-          end
-
-          -- Hairline between the body and the footer (pointer UIs only: the touch footer is a full-width
-          -- stack where a rule reads as clutter). A row of the card's UIListLayout, hence LayoutOrder 3.
-          local rule
-          if not touch then
-            rule = Create("Frame", { Name = "FooterRule", BackgroundColor3 = theme.Colors.border,
-              BackgroundTransparency = theme.Stroke.divider, BorderSizePixel = 0,
-              Size = UDim2.new(1, 0, 0, 1), LayoutOrder = 3, ZIndex = zOf(2), Parent = card })
-          end
-
-          local closing = false
-          -- Live re-skin (SetMode/SetAccent) while the dialog is open: card fill + stroke through the
-          -- acrylic painter, then every text/icon part from the live palette. Released with the maid on Close.
-          if opts.AccentReg then maid:Give(opts.AccentReg(function()
-            Acrylic.reskin(card, theme, cardSkin(theme))
-            Effects.rim(stroke, theme)                 -- per-mode edge alphas
-            Effects.reskin(shadow, theme, "shadow")    -- nil-tolerant
-            if modal and depth == 1 and not closing then dim.BackgroundTransparency = scrimAlpha() end
-            if rule then rule.BackgroundColor3 = theme.Colors.border end
-            parts.title.TextColor3 = theme.Colors.foreground
-            if message then message.TextColor3 = theme.Colors.mutedForeground end
-            if parts.badge then parts.badge.BackgroundColor3 = badgeColor(theme, parts.iconColor()) end
-            if parts.icon then Icons.apply(parts.icon, opts.Icon, parts.iconColor()) end
-          end)) end
-
-          local function popSelf()
-            for i = #stack, 1, -1 do if stack[i] == handle then table.remove(stack, i); break end end
-          end
-
-          function handle.Close()
-            if closing then return end
-            closing = true
-            popSelf()
-            Overlay.popDialog()
-            dim.Modal = false
-            dim.Active = false
-            -- Fold out: shrink + fade + drop, scrim last so the card is gone before the room lights up.
-            Animate.to(us, "exit", { Scale = base * CLOSE_SCALE }, Animate.EASING.exit, Animate.DIR.In)
-            Animate.to(card, "exit", { GroupTransparency = 1, Position = UDim2.new(0.5, 0, 0.5, theme.Motion.dialogDrop) },
-              Animate.EASING.exit, Animate.DIR.In)
-            if shadow then Animate.to(shadow, "exit", { ImageTransparency = 1 }, Animate.EASING.exit, Animate.DIR.In) end
-            Animate.toThen(dim, "exit", { BackgroundTransparency = 1 }, function() maid:DoCleanup(); dim:Destroy() end,
-              Animate.EASING.exit, Animate.DIR.In)
-          end
-
-          -- A footer button (and Return/A) runs its callback and then closes.
-          local function fire(b)
-            if b and b.Callback then b.Callback() end
-            handle.Close()
-          end
-          buildFooter(card, theme, buttons, touch, fire, maid, opts.AccentReg)
-
-          maid:Give(dim)
-          -- Scope the backdrop to the owning window when one is given (its api exposes .Main), so the
-          -- scrim covers only the window frame (rounded to match it). Standalone dialogs fall back to the
-          -- global screen overlay, shared with dropdowns/colorpickers that want the full screen.
-          local winFrame = opts.Window and opts.Window.Main
-          if winFrame then
-            Create.corner(theme.Radius.window).Parent = dim
-            dim.Parent = winFrame
-          else
-            Overlay.mount(dim)
-          end
-          if shadow then Effects.follow(shadow, card, "dialog", theme, maid) end
-
-          -- Escape / gamepad B closes; Return / gamepad A fires the LAST (primary) button. gameProcessed
-          -- input (chat, a focused TextBox) is ignored, and only the innermost dialog reacts.
-          stack[#stack + 1] = handle
-          maid:Give(UserInputService.InputBegan:Connect(function(input, gameProcessed)
-            if gameProcessed or closing then return end
-            if handledInput ~= nil and handledInput == input then return end
-            -- Torn down by its owner rather than by Close() (a window Close destroys the whole Main
-            -- subtree): release the slot -- without this the dead dialog would sit on top of the stack and
-            -- swallow every later Escape. Roblox-safe liveness check: a destroyed Instance has Parent nil.
-            if dim.Parent == nil then handle.Close(); return end
-            -- The stack alone answers "am I the innermost LIVE dialog". `depth` is captured once at open
-            -- and never moves, while Overlay.dialogDepth() falls every time ANY dialog closes -- so
-            -- comparing them would deafen a nested dialog forever as soon as its opener closed first
-            -- (a footer button whose callback opens a confirm: fire() runs the callback, THEN closes).
-            if stack[#stack] ~= handle then return end
-            local k = input and input.KeyCode
-            if k == nil then return end
-            if k == KC.Escape or k == KC.ButtonB then
-              handledInput = input; handle.Close()
-            elseif k == KC.Return or k == KC.ButtonA then
-              handledInput = input; fire(buttons[#buttons])
-            end
-          end))
-
-          -- Unfold: fade + zoom from Motion.enterScale + a rise of Motion.dialogRise (shadcn fade-zoom-95).
-          card.Position = UDim2.new(0.5, 0, 0.5, theme.Motion.dialogRise)
-          Animate.to(dim, "base", { BackgroundTransparency = scrimGoal })
-          Animate.to(card, "base", { GroupTransparency = 0, Position = UDim2.new(0.5, 0, 0.5, 0) }, Animate.EASING.smooth)
-          Animate.springTo(us, "enter", { Scale = base })
-          if shadow then Animate.to(shadow, "base", { ImageTransparency = (theme.fx or Theme.fx)(theme).shadow }) end
-          return handle
-        end
-
-        return Dialog
-
-    end
-
-    -- Module: components/notification
-    EmbeddedModules["components/notification"] = function()
-        -- Deps injected via Init(R). Sonner-style toasts: slide in from the anchored edge, stack
-        -- bottom-right (newest in front), older ones peek behind (scaled + faded); hover the stack to
-        -- expand into a full list. Each toast is a CanvasGroup so it fades -- and exits -- as one piece.
-        local Notification = {}
-        local Create, DefaultTheme, Maid, Overlay, Animate, Icons, Safe, Effects, Recipes
-        local RunService = game:GetService("RunService")
-        local container
-        local stackShadow  -- ONE shadow under the front toast (sibling of the toasts, ZIndex 0)
-        local order = {}   -- array of entries (oldest first, newest last)
-        local seq = 0
-        local expanded = false
-        local stepConn
-        local pinnedScale  -- Notification.setScale(n); nil = follow the process-wide Overlay.scale()
-
-        -- Pre-measure fallbacks: AbsoluteSize / AbsoluteContentSize are nil headless and on the first
-        -- frame, so the stack still lays out (and the hover hit-area still exists) before any measure.
-        local FALLBACK_H = 60
-        -- Icon badge square. No Sizes token holds 20 today (icon 16 / iconSm 14 / iconButton 26), so the
-        -- one number the badge needs lives here rather than being faked out of an unrelated token.
-        local BADGE = 20
-
-        function Notification.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Animate = R.Animate; Icons = R.Icons
-          Safe = R.Safe; Effects = R.Effects; Recipes = R.Recipes
-          container = nil
-          stackShadow = nil
-          -- Init is re-entrant (the test harness re-runs it per loadLib): drop the previous Heartbeat
-          -- countdown so a fresh container never runs two tickers over the same `order`.
-          if stepConn then stepConn:Disconnect() end
-          stepConn = nil
-          expanded = false
-          pinnedScale = nil
-        end
-
-        local enabled = true
-        function Notification.setEnabled(b) enabled = b ~= false end
-
-        local TYPE_COLOR = { info = "info", success = "success", warning = "warning", error = "destructive", loading = "info" }
-        local TYPE_ICON = { info = "info", success = "circle-check", warning = "triangle-alert", error = "circle-alert", loading = "loader" }
-
-        local position = "bottom-right"
-        local POS = {
-          ["top-left"]      = { ax = 0,   ay = 0 },
-          ["top-center"]    = { ax = 0.5, ay = 0 },
-          ["top-right"]     = { ax = 1,   ay = 0 },
-          ["bottom-left"]   = { ax = 0,   ay = 1 },
-          ["bottom-center"] = { ax = 0.5, ay = 1 },
-          ["bottom-right"]  = { ax = 1,   ay = 1 },
-        }
-
-        -- The container is process-wide, so there is no single owning window: layout tokens are read
-        -- from the theme of the toast currently in front, and from the module defaults when empty.
-        local function frontTheme()
-          local e = order[#order]
-          return (e and e.theme) or DefaultTheme
-        end
-        -- theme.mix rides on Theme.new instances and on the module itself; a bare table theme falls back.
-        local function mix(theme, a, b, t) return (theme.mix or DefaultTheme.mix)(a, b, t) end
-        -- Border tinted toward the type colour: an error toast reads as an error before its icon does.
-        local function edgeColor(theme, accent) return mix(theme, theme.Colors.border, accent, theme.Toast.typeTint) end
-
-        local function containerPosition(cfg, TK)
-          local cx = (cfg.ax == 0 and UDim.new(0, TK.inset)) or (cfg.ax == 1 and UDim.new(1, -TK.inset)) or UDim.new(0.5, 0)
-          local cy = (cfg.ay == 0) and UDim.new(0, TK.inset) or UDim.new(1, -TK.inset)
-          return UDim2.new(cx.Scale, cx.Offset, cy.Scale, cy.Offset)
-        end
-
-        -- Window:SetUIScale forwards through Notification.setScale; when nothing pinned a value we follow
-        -- the process-wide Overlay scale, so a window that only reached Overlay.setScale still scales.
-        local function currentScale()
-          if pinnedScale then return pinnedScale end
-          local s = Overlay.scale and Overlay.scale()
-          return (type(s) == "number" and s > 0) and s or 1
-        end
-
-        -- ---- countdown ticker ---------------------------------------------------------------------
-        -- One Heartbeat handler for the whole stack, connected lazily by show() and dropped the moment
-        -- the stack empties. Before this it ran forever -- even after Overlay.reset() tore the container
-        -- down -- and a re-Init left the stale one ticking over the same `order`.
-        local function stopTicker()
-          if stepConn then stepConn:Disconnect(); stepConn = nil end
-        end
-
-        local function tick(dt)
-          for i = #order, 1, -1 do
-            local e = order[i]
-            if e.frame and e.total and not e.paused then
-              e.remaining = e.remaining - dt
-              -- Heartbeat handlers lack the GUI capability on strict executors, so a raw write throws.
-              -- pcall (not Safe.mutate) because this is a per-frame cosmetic write -- skip it cleanly when
-              -- there's no capability rather than deferring 60 writes/sec. The countdown + dismiss below
-              -- run on plain Lua state / Safe.mutate, so the toast still expires correctly.
-              if e.bar then
-                local bh = ((e.theme or DefaultTheme).Toast).barHeight
-                pcall(function() e.bar.Size = UDim2.new(math.max(0, e.remaining / e.total), 0, 0, bh) end)
-              end
-              if e.remaining <= 0 then Notification.dismiss(e.id) end
-            end
-          end
-          if #order == 0 then stopTicker() end
-        end
-
-        local function ensureTicker()
-          if not stepConn then stepConn = RunService.Heartbeat:Connect(tick) end
-        end
-
-        -- ---- container ------------------------------------------------------------------------------
-        local function ensureContainer(theme)
-          if container and container.Parent ~= nil then return container end
-          local TK = theme.Toast
-          stackShadow = nil                    -- belonged to the previous container
-          local cfg = POS[position] or POS["bottom-right"]
-          container = Create("Frame", {
-            -- Height starts at 0 and is grown by relayout to wrap the actual toast stack. The container
-            -- IS the MouseEnter/Leave hover hit-area, so it must NOT span the full screen height -- a tall
-            -- strip would falsely trigger hover/expand whenever the pointer sits in that column (most
-            -- visible at top-center/bottom-center, where the column runs down the middle of the screen).
-            Name = "ToastContainer", BackgroundTransparency = 1, ZIndex = Overlay.Z.toast,
-            AnchorPoint = Vector2.new(cfg.ax, cfg.ay), Position = containerPosition(cfg, TK),
-            Size = UDim2.new(0, TK.width, 0, 0),
-          })
-          -- UI scale lives HERE, never on the overlay root (the click catcher's (1,0,1,0) would stop
-          -- covering the screen). Toast.width stays logical px; this multiplies the whole stack.
-          Create("UIScale", { Name = "ContainerScale", Scale = currentScale(), Parent = container })
-          container.MouseEnter:Connect(function()
-            expanded = true
-            for _, e in ipairs(order) do e.paused = true end
-            Notification.relayout("expand")   -- the one pass that fans the rows out on a stagger
-          end)
-          container.MouseLeave:Connect(function()
-            expanded = false
-            for _, e in ipairs(order) do e.paused = false end
-            Notification.relayout()
-          end)
-          Overlay.mount(container)
-          return container
-        end
-
-        -- One 9-slice layer for the whole stack rather than one per toast. nil while Effect.shadowId is
-        -- '' (the default), so every use below is nil-tolerant.
-        local function ensureStackShadow(theme)
-          if stackShadow and stackShadow.Parent ~= nil then return stackShadow end
-          stackShadow = Effects.shadow(container, theme, { name = "StackShadow", level = "toast", zIndex = 0 })
-          if stackShadow then stackShadow.Visible = false end
-          return stackShadow
-        end
-
-        -- Park the shadow under the FRONT toast. Toasts render at the default ZIndex 1, so the layer sits
-        -- at 0; it is a sibling (a child would render above the toast's own fill). Absolute* is nil
-        -- headless and before the first engine measure, so the layer simply stays hidden until measured.
-        local function syncStackShadow(theme)
-          if not stackShadow then return end
-          local e = order[#order]
-          local f = e and e.frame
-          local ap, as = f and f.AbsolutePosition, f and f.AbsoluteSize
-          local cp = container and container.AbsolutePosition
-          if not (ap and as and cp and (as.Y or 0) > 0) then stackShadow.Visible = false; return end
-          stackShadow.Visible = true
-          -- Absolute* are SCREEN pixels, but the shadow lives inside the container's own UIScale, whose
-          -- children are laid out in logical pixels. Feeding screen px straight in mis-sized and
-          -- mis-placed the layer by exactly the UI scale, so divide it back out first.
-          local s = currentScale()
-          Effects.place(stackShadow, (ap.X - cp.X) / s, (ap.Y - cp.Y) / s, as.X / s, as.Y / s, "toast", theme)
-          Effects.reskin(stackShadow, theme, "shadow")   -- per-mode alpha; nil-tolerant, cheap, idempotent
-        end
-
-        -- Intrinsic (scale-independent) height of a toast: UIListLayout content + its own vertical
-        -- padding. Reading AbsoluteSize mid-animation gives the SCALED height and makes the expanded
-        -- gaps jitter, so the measured value is only a fallback.
-        local function toastHeight(e)
-          local lay = e.frame:FindFirstChildOfClass("UIListLayout")
-          local acs = lay and lay.AbsoluteContentSize
-          local pad = 0
-          if e.padding then pad = e.padding.PaddingTop.Offset + e.padding.PaddingBottom.Offset end
-          if acs and acs.Y and acs.Y > 0 then return acs.Y + pad end
-          return (e.frame.AbsoluteSize and e.frame.AbsoluteSize.Y) or FALLBACK_H
-        end
-
-        -- position/scale/fade each toast based on its index from the front (newest = 0).
-        -- `reason` is 'expand' for the hover fan-out -- the ONLY pass allowed to carry the stagger delay --
-        -- and nil / 'measure' for everything else. The engine fires AbsoluteSize on every frame of the
-        -- entrance (AbsoluteSize includes the UIScale), so a measurement-driven pass that re-armed the
-        -- stagger would stall the back rows instead of fanning them out; one that re-issued the steady
-        -- tweens would cancel the entrance's Back/Out overshoot from a partial value. Hence both the
-        -- reason gate and the per-entry `laid` cache: a MEASUREMENT that changes nothing writes no tween.
-        function Notification.relayout(reason)
-          local theme = frontTheme()
-          local TK, M = theme.Toast, theme.Motion
-          local n = #order
-          local cfg = POS[position] or POS["bottom-right"]
-          local vdir = (cfg.ay == 0) and 1 or -1
-          local y = 0
-          for idx = n, 1, -1 do
-            local e = order[idx]
-            if not e.frame then
-              -- GUI deferred to a later Heartbeat; skip until built (it relayouts itself when ready)
-            else
-              local i = n - idx -- 0 = newest (front)
-              local scale, transp, visible, yoff
-              if expanded then
-                visible, scale, transp, yoff = true, 1, 0, y
-                y = y + toastHeight(e) + TK.gap
-              else
-                visible = i < TK.maxVisible
-                scale = 1 - i * TK.peekScale
-                transp = i * TK.peekFade
-                yoff = i * TK.peek
-              end
-              e.frame.Visible = visible
-              e.frame.AnchorPoint = Vector2.new(cfg.ax, cfg.ay)
-              local target = UDim2.new(cfg.ax, 0, cfg.ay, vdir * yoff)
-              -- The layout this entry was last given. A measurement re-runs relayout with identical
-              -- numbers, and re-tweening then would both cost 2n tween objects per measured frame and
-              -- replace the in-flight entrance with a steady tween from its partial value. Only a
-              -- measurement is allowed to skip: every other caller asked for a fresh pass.
-              local last = e.laid
-              local moved = not last or last.yoff ~= yoff or last.scale ~= scale or last.transp ~= transp
-                or last.ax ~= cfg.ax or last.ay ~= cfg.ay
-              e.laid = { yoff = yoff, scale = scale, transp = transp, ax = cfg.ax, ay = cfg.ay }
-              if e.entering then
-                -- The entrance OWNS position + scale for exactly one pass. A steady tween fired in the
-                -- same frame used to fight the pop for the UIScale and flatten the Back/Out overshoot,
-                -- which is why the entrance never actually overshot.
-                e.entering = false
-                Animate.springTo(e.frame, "enter", { Position = target })
-                Animate.to(e.frame, "base", { GroupTransparency = transp }, Animate.EASING.enter)
-                Animate.springTo(e.scale, "enter", { Scale = scale })
-              elseif moved or reason ~= "measure" then
-                -- Expanding the stack fans the rows open: each one further back waits an extra
-                -- Motion.stagger, capped at Toast.staggerCap so a tall stack still opens promptly. Only
-                -- the expand pass itself: a reflow that happens to land while expanded (a measurement, an
-                -- update that regrew a toast) must move at delay 0 or it re-arms the whole fan.
-                local d = (expanded and reason == "expand") and math.min(i, TK.staggerCap) * M.stagger or 0
-                Animate.to(e.frame, "base", { Position = target, GroupTransparency = transp }, Animate.EASING.smooth, nil, d)
-                Animate.to(e.scale, "base", { Scale = scale }, Animate.EASING.smooth, nil, d)
-              end
-            end
-          end
-          -- Size the container (the hover hit-area) to wrap the visible stack so MouseEnter only fires over
-          -- the toasts, never the empty column above/below them. Set directly (not animated) so the hit-area
-          -- never lags the pointer. Anchored at the edge, so growing height extends toward screen centre.
-          if container then
-            local h = 0
-            if n > 0 then
-              if expanded then
-                h = math.max(0, y - TK.gap)         -- y accumulated a trailing gap per toast
-              else
-                local front = order[n]              -- newest = front of the collapsed stack
-                local fh = front and front.frame and front.frame.AbsoluteSize and front.frame.AbsoluteSize.Y or 0
-                if fh <= 0 then fh = FALLBACK_H end -- fallback before first engine measure (and headless tests)
-                h = fh + math.min(n - 1, TK.maxVisible - 1) * TK.peek
-              end
-            end
-            container.Size = UDim2.new(0, TK.width, 0, h)
-          end
-          syncStackShadow(theme)
-        end
-
-        local function indexOf(id) for i, e in ipairs(order) do if e.id == id then return i end end end
-
-        -- Semantic accent for a toast type, read from the LIVE palette so a reskin picks up the mode's
-        -- colour (the four type tokens are mode-invariant today, but a theme override may change them).
-        local function accentFor(theme, ty) return theme.Colors[TYPE_COLOR[ty]] or theme.Colors.info end
-
-        -- The bar hugs the bottom edge, so a toast WITH a countdown drops its bottom padding to
-        -- Toast.progressInset and gets it back when the bar goes away (morph to a persistent type).
-        local function setProgressPad(entry, hasBar)
-          if not entry.padding then return end
-          local TK = (entry.theme or DefaultTheme).Toast
-          entry.padding.PaddingBottom = UDim.new(0, hasBar and TK.progressInset or TK.padY)
-        end
-
-        local function startCountdown(entry, total, accent, theme)
-          -- 'Progress' is a DIRECT child of the toast: no track wrapper (a parent would shadow the
-          -- lookup) and no sibling track (the toast has a UIListLayout, so it would become a second row).
-          local bar = Create("Frame", { Name = "Progress", BackgroundColor3 = accent, BorderSizePixel = 0,
-            Size = UDim2.new(1, 0, 0, theme.Toast.barHeight), LayoutOrder = 99, Parent = entry.frame,
-            Create.corner(theme.Radius.xs) })
-          entry.total = total; entry.remaining = total; entry.paused = false; entry.bar = bar
-          setProgressPad(entry, true)
-        end
-
-        local function createMsgLabel(text, theme, parent)
-          local lbl = Create("TextLabel", { Name = "Message", BackgroundTransparency = 1, Text = text,
-            TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-            TextYAlignment = Enum.TextYAlignment.Top,
-            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, Parent = parent })
-          return Create.text(lbl, theme, "muted")
-        end
-
-        -- Stop the loader spin (if any); Animate.spin's Cancel rests the glyph at Rotation 0.
-        local function stopSpin(entry)
-          if entry.spin then entry.spin.Cancel(); entry.spin = nil end
-        end
-
-        -- Type motion: success lands with a pop on its glyph, an error shakes its head. The pop scales a
-        -- UIScale UNDER the glyph (never the glyph itself, whose Rotation belongs to the spinner), and
-        -- the shake rotates the whole card by Motion.shake.amp degrees and ends exactly at 0.
-        local function typeFeedback(entry)
-          local theme = entry.theme
-          if entry.type == "success" then
-            if entry.icon then Animate.pop(entry.icon, "enter") end
-          elseif entry.type == "error" and entry.frame and Animate.isEnabled() then
-            local sh = theme.Motion.shake
-            Animate.chain({
-              { entry.frame, sh.step, { Rotation = -sh.amp }, Enum.EasingStyle.Sine },
-              { entry.frame, sh.step, { Rotation = sh.amp }, Enum.EasingStyle.Sine },
-              { entry.frame, sh.step, { Rotation = 0 }, Enum.EasingStyle.Sine },
-            })
-          end
-        end
-
-        -- Live re-skin (SetMode/SetAccent): every coloured part re-reads theme.Colors. Parts that
-        -- applyUpdate creates or replaces later (Message, Progress) are read off the entry at call time.
-        local function reskin(entry)
-          local theme = entry.theme
-          local accent = accentFor(theme, entry.type)
-          entry.accent = accent
-          entry.frame.BackgroundColor3 = theme.Colors.card
-          if entry.stroke then entry.stroke.Color = edgeColor(theme, accent) end
-          if entry.badge then entry.badge.BackgroundColor3 = accent end
-          entry.titleLabel.TextColor3 = theme.Colors.foreground
-          if entry.msgLabel then entry.msgLabel.TextColor3 = theme.Colors.mutedForeground end
-          -- the icon-button recipe owns the Close glyph tint (it must keep a hovered glyph lifted)
-          if entry.closeHandle then entry.closeHandle.reskin() end
-          if entry.actionHover then entry.actionHover.reskin() end
-          if entry.actionBtn then
-            entry.actionBtn.BackgroundColor3 = theme.Colors.surface
-            entry.actionBtn.TextColor3 = theme.Colors.foreground
-          end
-          if entry.bar then entry.bar.BackgroundColor3 = accent end
-          -- Icons.apply only rewrites ImageColor3 when the glyph is unchanged, so a spinning loader is
-          -- retinted without touching its Rotation.
-          if entry.icon then Icons.apply(entry.icon, TYPE_ICON[entry.type] or "info", accent) end
-        end
-
-        -- Everything the build attached (themer registration, recipe handlers, property signals) is
-        -- released exactly once, on dismiss.
-        local function releaseEntry(entry)
-          if entry.unreg then entry.unreg(); entry.unreg = nil end
-          local rel = entry.releases
-          if not rel then return end
-          for i = #rel, 1, -1 do local fn = rel[i]; rel[i] = nil; pcall(fn) end
-        end
-
-        local function msgText(v, arg)
-          if type(v) == "function" then local ok, r = pcall(v, arg); return ok and r or nil end
-          if type(v) == "string" then return v end
-          return nil
-        end
-
-        local applyUpdate  -- forward declaration; applyUpdate is assigned after Notification.loading, show's pendingUpdate hook closes over it
-
-        function Notification.show(opts)
-          if not enabled then return nil end
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          seq = seq + 1
-          local id = seq
-          local entry = { id = id, onDismiss = opts.OnDismiss, releases = {} }
-          order[#order + 1] = entry           -- reserve FIFO slot synchronously
-          Safe.mutate(function()
-            local TK = theme.Toast
-            local ty = opts.Type or "info"
-            local accent = accentFor(theme, ty)
-            ensureContainer(theme)
-            ensureStackShadow(theme)
-            ensureTicker()
-            local pcfg = POS[position] or POS["bottom-right"]
-            -- Enter from outside the anchored edge; relayout's entering branch springs it home.
-            local sx = (pcfg.ax == 1 and UDim.new(1, TK.slide)) or (pcfg.ax == 0 and UDim.new(0, -TK.slide)) or UDim.new(0.5, 0)
-            -- center toasts slide in vertically from the nearest edge: top-center from above, bottom-center from below
-            local sy = (pcfg.ax == 0.5) and UDim.new(pcfg.ay, ((pcfg.ay == 0) and -1 or 1) * TK.slide) or UDim.new(pcfg.ay, 0)
-            local hasBar = (ty ~= "loading") and ((opts.Duration or 4000) > 0)
-            local padding = Create.padding({ left = TK.padX, right = TK.padX, top = TK.padY,
-              bottom = hasBar and TK.progressInset or TK.padY })
-            local toast = Create("CanvasGroup", {
-              Name = "Toast", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0, GroupTransparency = 1,
-              AnchorPoint = Vector2.new(pcfg.ax, pcfg.ay), Position = UDim2.new(sx.Scale, sx.Offset, sy.Scale, sy.Offset),
-              Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Parent = container,
-              Create.corner(theme.Radius.md), padding,
-              Create.listLayout({ Padding = 4 }),
-            })
-            -- floating surface: opaque hairline (Stroke.floating) tinted Toast.typeTint toward the type
-            local stroke = Create.stroke(edgeColor(theme, accent), 1, theme.Stroke.floating)
-            stroke.Parent = toast
-            -- Entrance state: off-edge, fully faded, shrunk. relayout (entering branch) animates all three.
-            local scale = Create("UIScale", { Scale = theme.Motion.enterScale, Parent = toast })
-            entry.entering = true
-            local sizeConn = toast:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-              -- property-changed handler -> engine thread without GUI capability on strict executors; relayout
-              -- reads AbsoluteContentSize/AbsoluteSize raw, so marshal it through Safe.mutate. Always relayout
-              -- (not only when expanded): the collapsed container height tracks the front toast's measured
-              -- height, so the hover hit-area must update once the engine measures the toast. 'measure'
-              -- keeps it cheap and harmless -- the engine fires this on every frame of the entrance, so the
-              -- pass must not re-arm the stagger nor re-tween a row that has not actually moved.
-              Safe.mutate(function() Notification.relayout("measure") end)
-            end)
-            entry.releases[#entry.releases + 1] = function() sizeConn:Disconnect() end
-            local titleRow = Create("Frame", { Name = "TitleRow", BackgroundTransparency = 1,
-              Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 1, Parent = toast })
-            -- Badge behind the glyph. TitleRow has no layout, so a decorative child is safe here (the
-            -- toast itself has a UIListLayout and could not take one). ZIndex 0 = under its sibling Icon.
-            local badge = Create("Frame", { Name = "IconBadge", BackgroundColor3 = accent,
-              BackgroundTransparency = TK.badgeAlpha, BorderSizePixel = 0, ZIndex = 0, Active = false,
-              Size = UDim2.new(0, BADGE, 0, BADGE), Position = UDim2.new(0, -2, 0.5, -BADGE / 2),
-              Parent = titleRow, Create.corner(theme.Radius.sm) })
-            local tIcon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
-              Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon),
-              Position = UDim2.new(0, 0, 0.5, -theme.Sizes.icon / 2), Parent = titleRow })
-            Icons.apply(tIcon, TYPE_ICON[ty] or "info", accent)
-            local titleX = BADGE + theme.Spacing.icon   -- clears the badge, not just the 16px glyph
-            local titleLabel = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "",
-              TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-              TextTruncate = Enum.TextTruncate.AtEnd,
-              Size = UDim2.new(1, -(titleX + theme.Sizes.icon), 1, 0), Position = UDim2.new(0, titleX, 0, 0), Parent = titleRow })
-            Create.text(titleLabel, theme, "label")
-            local closeBtn = Create("ImageButton", { Name = "Close", AutoButtonColor = false, BackgroundTransparency = 1,
-              Size = UDim2.new(0, theme.Sizes.iconSm, 0, theme.Sizes.iconSm),
-              Position = UDim2.new(1, -theme.Sizes.iconSm, 0, 0), Parent = titleRow })
-            -- Comfortable hit target + hover wash + glyph lift; the glyph itself stays 14px. 'primary'
-            -- rest keeps the close affordance as bright as the rest of the chrome.
-            local closeHandle = Recipes.iconButton(closeBtn, { theme = theme, icon = "x", rest = "primary",
-              hover = "foreground", parent = titleRow, onClick = function() Notification.dismiss(id) end })
-            entry.releases[#entry.releases + 1] = closeHandle.disconnect
-            local msgLabel
-            if opts.Message then
-              msgLabel = createMsgLabel(opts.Message, theme, toast)
-            end
-            local aBtn, actionHover
-            if opts.Action then
-              local act = opts.Action
-              aBtn = Create("TextButton", { Name = "Action", AutoButtonColor = false,
-                BackgroundColor3 = theme.Colors.surface, Text = act.Text or act.Label or "Action",
-                TextColor3 = theme.Colors.foreground,
-                Size = UDim2.new(0, 96, 0, 24), LayoutOrder = 3, Parent = toast, Create.corner(theme.Radius.sm) })
-              Create.text(aBtn, theme, "muted")
-              -- wash only: a UIScale on the Action would reflow the toast's UIListLayout rows
-              actionHover = Recipes.hover(aBtn, { theme = theme, corner = theme.Radius.sm, kind = "wash" })
-              entry.releases[#entry.releases + 1] = actionHover.disconnect
-              aBtn.MouseButton1Click:Connect(function() if act.Callback then pcall(act.Callback) end; Notification.dismiss(id) end)
-            end
-            entry.frame = toast; entry.scale = scale; entry.stroke = stroke; entry.padding = padding
-            entry.icon = tIcon; entry.badge = badge; entry.titleLabel = titleLabel
-            entry.closeBtn = closeBtn; entry.closeHandle = closeHandle
-            entry.actionBtn = aBtn; entry.actionHover = actionHover
-            entry.theme = theme
-            entry.type = ty; entry.accent = accent
-            entry.msgLabel = msgLabel
-            if entry.type == "loading" then entry.spin = Animate.spin(tIcon) end
-            if hasBar then startCountdown(entry, (opts.Duration or 4000) / 1000, accent, theme) end
-            -- A live toast follows SetMode/SetAccent through the window's themer; released in dismiss.
-            -- Registered after the build so the closure never sees a half-built toast.
-            if opts.AccentReg then entry.unreg = opts.AccentReg(function() reskin(entry) end) end
-            Notification.relayout()
-            typeFeedback(entry)
-            if entry.pendingUpdate then applyUpdate(entry, entry.pendingUpdate); entry.pendingUpdate = nil end
-          end)
-          return id
-        end
-
-        function Notification.loading(opts)
-          opts = opts or {}
-          opts.Type = "loading"; opts.Duration = 0
-          return Notification.show(opts)
-        end
-
-        applyUpdate = function(entry, opts)
-          local theme = entry.theme
-          local newType = opts.Type or entry.type
-          local accent = accentFor(theme, newType)
-          local morphed = newType ~= entry.type
-          entry.type = newType; entry.accent = accent
-          -- Cancel BEFORE re-applying the glyph: Cancel rests Rotation at 0 so the new (static) icon
-          -- never lands mid-spin. A morph back to 'loading' restarts the spin.
-          stopSpin(entry)
-          if entry.stroke then entry.stroke.Color = edgeColor(theme, accent) end
-          if entry.badge then entry.badge.BackgroundColor3 = accent end
-          if entry.icon then
-            Icons.apply(entry.icon, TYPE_ICON[newType] or "info", accent)
-            if newType == "loading" then entry.spin = Animate.spin(entry.icon) end
-          end
-          if opts.Title ~= nil and entry.titleLabel then entry.titleLabel.Text = opts.Title end
-          if opts.Message ~= nil then
-            if entry.msgLabel then
-              entry.msgLabel.Text = opts.Message
-            else
-              entry.msgLabel = createMsgLabel(opts.Message, theme, entry.frame)
-            end
-          end
-          if opts.Duration and opts.Duration > 0 then
-            if entry.bar then entry.bar:Destroy(); entry.bar = nil end
-            startCountdown(entry, opts.Duration / 1000, accent, theme)
-          elseif opts.Duration == 0 then
-            if entry.bar then entry.bar:Destroy(); entry.bar = nil end
-            entry.total = nil; entry.remaining = nil; entry.bar = nil
-            setProgressPad(entry, false)
-          end
-          if morphed then typeFeedback(entry) end
-          Notification.relayout()
-        end
-
-        function Notification.update(id, opts)
-          local i = indexOf(id); if not i then return end
-          local entry = order[i]
-          opts = opts or {}
-          Safe.mutate(function()
-            if not entry.frame then entry.pendingUpdate = opts; return end
-            applyUpdate(entry, opts)
-          end)
-        end
-
-        function Notification.promise(runner, opts)
-          opts = opts or {}
-          -- Register the runner Heartbeat:Once BEFORE calling loading() so that, when capability is absent,
-          -- this handler is snapshotted first and fires before Safe's flush handler. The runner's
-          -- Notification.update call then lands in the same Safe queue as the loading build, so the flush
-          -- drains both in FIFO order: build frame first, then applyUpdate -- no extra Heartbeat needed.
-          -- `pendingId` is set synchronously (before any Heartbeat fires) so the closure sees the real id.
-          local pendingId
-          RunService.Heartbeat:Once(function()
-            local ok, res = pcall(runner)
-            local dur = opts.Duration or 4000
-            if ok then
-              Notification.update(pendingId, { Type = "success", Title = msgText(opts.Success, res) or "Success", Duration = dur })
-            else
-              Notification.update(pendingId, { Type = "error", Title = msgText(opts.Error, res) or "Error", Duration = dur })
-            end
-            if opts.Finally then pcall(opts.Finally) end
-          end)
-          local id = Notification.loading({
-            Title = msgText(opts.Loading) or "Loading…", Message = opts.Message, Theme = opts.Theme, AccentReg = opts.AccentReg })
-          pendingId = id
-          return id
-        end
-
-        -- Outward exit vector: away from the anchored edge (right stack slides right, a centred stack
-        -- slides back out through the edge it came from).
-        local function exitOffset(cfg, TK)
-          if cfg.ax == 1 then return TK.exitSlide, 0 end
-          if cfg.ax == 0 then return -TK.exitSlide, 0 end
-          return 0, (cfg.ay == 0) and -TK.exitSlide or TK.exitSlide
-        end
-
-        function Notification.dismiss(id)
-          local i = indexOf(id)
-          if not i then return end
-          -- Removed from the order FIRST: count() drops in the same tick, and the relayout below never
-          -- touches a frame that is on its way out.
-          local entry = table.remove(order, i)
-          if #order == 0 then stopTicker() end
-          if entry.onDismiss then pcall(entry.onDismiss) end
-          -- Same Safe queue as the build, so a dismiss issued before a deferred build still runs after it
-          -- (FIFO) and releases the themer registration + spin the build created.
-          Safe.mutate(function()
-            stopSpin(entry)
-            releaseEntry(entry)
-            local frame = entry.frame
-            if not frame then Notification.relayout(); return end
-            local TK = (entry.theme or DefaultTheme).Toast
-            local cfg = POS[position] or POS["bottom-right"]
-            local dx, dy = exitOffset(cfg, TK)
-            local p = frame.Position
-            local goal = { GroupTransparency = 1 }
-            if p then goal.Position = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset + dy) end
-            -- A real exit (fade + slide out + shrink) instead of vanishing mid-frame; two tweens, and the
-            -- destroy hangs off the fade so the frame is gone the moment the fold-out finishes.
-            if entry.scale then
-              Animate.to(entry.scale, "exit", { Scale = TK.exitScale }, Animate.EASING.exit, Animate.DIR.In)
-            end
-            Animate.toThen(frame, "exit", goal, function()
-              frame:Destroy()
-              Notification.relayout()
-            end, Animate.EASING.exit, Animate.DIR.In)
-          end)
-        end
-
-        function Notification.clearAll()
-          for i = #order, 1, -1 do Notification.dismiss(order[i].id) end
-          -- Window:Close() calls this next to Overlay.reset(), so drop the pin with the stack: it belongs
-          -- to the window that set it, and a later window's toasts would otherwise inherit its UI scale.
-          -- currentScale() then follows Overlay.scale() again, which the next SetUIScale writes first.
-          pinnedScale = nil
-        end
-
-        function Notification.count() return #order end
-
-        -- UI scale forwarding (Window:SetUIScale). The UIScale lives on the toast container, NEVER on the
-        -- overlay root -- the click catcher's (1,0,1,0) size would stop covering the screen.
-        function Notification.setScale(n)
-          if type(n) ~= "number" or n ~= n or n <= 0 then return currentScale() end
-          pinnedScale = n
-          if container and container.Parent ~= nil then
-            Safe.mutate(function()
-              local us = container:FindFirstChild("ContainerScale")
-              if us then us.Scale = n end
-            end)
-          end
-          return n
-        end
-
-        function Notification.setPosition(p)
-          local key = tostring(p):lower():gsub("%s+", "-")
-          if not POS[key] then return position end
-          position = key
-          if container and container.Parent ~= nil then
-            Safe.mutate(function()
-              local cfg = POS[position]
-              container.AnchorPoint = Vector2.new(cfg.ax, cfg.ay)
-              container.Position = containerPosition(cfg, frontTheme().Toast)
-              Notification.relayout()
-            end)
-          end
-          return position
-        end
-
-        return Notification
-
-    end
-
-    -- Module: components/host
-    EmbeddedModules["components/host"] = function()
-        -- Mixin: adds AddX control methods to any container (Tab/Accordion) via the registry R.
-        -- No Init (mixin only); Host.attach(api, ctx) wires the methods.
-        local Host = {}
-
-        local SIMPLE = {
-          AddLabel = { mod = "Label" },
-          AddParagraph = { mod = "Label", preset = { Variant = "paragraph" } },
-          AddSection = { mod = "Label", preset = { Variant = "section" } },
-          AddSeparator = { mod = "Separator" },
-          AddButton = { mod = "Button" },
-          AddToggle = { mod = "Toggle" },
-          AddTextBox = { mod = "TextBox" },
-          AddNumberBox = { mod = "NumberBox" },
-          AddSelectBox = { mod = "SelectBox" },
-          AddSlider = { mod = "Slider" },
-          AddKeybind = { mod = "Keybind" },
-          AddColorPicker = { mod = "ColorPicker" },
-          AddImage = { mod = "Image" },
-          AddTable = { mod = "Table" },
-          AddProgressBar = { mod = "ProgressBar" },
-          AddResizable = { mod = "Resizable" },
-          AddCard = { mod = "Card" },
-        }
-
-        -- Tie a cleanup fn to a control's lifetime. Controls that expose a Maid (Tab/Accordion/Window)
-        -- take it directly; the rest (Button/Label/Image/ProgressBar/Separator/Card...) only have Destroy,
-        -- so it is wrapped to run fn FIRST and then the original. Used for per-control reskin
-        -- unregisters (LockScrim here; tooltip / disabled in later items) so a destroyed control never
-        -- leaves a closure behind in the window's themer.
-        function Host.own(control, fn)
-          if type(fn) ~= "function" then error("Host.own(control, fn): fn must be a function", 2) end
-          if control.Maid then control.Maid:Give(fn); return control end
-          local d = control.Destroy
-          control.Destroy = function(...)
-            fn()
-            if d then return d(...) end
-          end
-          return control
-        end
-
-        -- ctx = { R, content, theme, config, window, nextOrder }
-        function Host.attach(api, ctx)
-          for method, spec in pairs(SIMPLE) do
-            api[method] = function(_, arg)
-              local opts = {}
-              if type(arg) == "string" then
-                opts.Text = arg
-              elseif type(arg) == "function" then
-                opts.Text = arg                  -- reactive shorthand: AddLabel(function() return ... end)
-              elseif type(arg) == "table" then
-                for k, v in pairs(arg) do opts[k] = v end
-              end
-              if spec.preset then
-                for k, v in pairs(spec.preset) do if opts[k] == nil then opts[k] = v end end
-              end
-              opts.Parent = ctx.content
-              opts.LayoutOrder = ctx.nextOrder()
-              opts.Theme = ctx.theme
-              opts.Config = ctx.config
-              opts.Window = ctx.window
-              opts.AccentReg = ctx.accentThemer and ctx.accentThemer.register
-              opts.AccentThemer = ctx.accentThemer
-              local control = ctx.R[spec.mod].new(opts)
-              if opts.Tooltip and ctx.R.Tooltip and control and control.Frame then
-                -- Button/Label/Image/ProgressBar/Separator/Card expose no .Maid, so without Host.own the
-                -- tip's hover connections (and a chip still on screen) outlive the destroyed control.
-                local tip = ctx.R.Tooltip.attach(control.Frame, opts.Tooltip, ctx.theme)
-                if tip and tip.Destroy then Host.own(control, tip.Destroy) end
-              end
-              if ctx.registerSearchable and control and control.Frame then
-                -- opts.Text may be a function (reactive label); index a stable string only.
-                local searchText = (type(opts.Text) == "string" and opts.Text) or opts.Title or opts.Name or ""
-                ctx.registerSearchable(control.Frame, searchText)
-              end
-              if control and control.Frame then
-                local C = ctx.R.Create
-                local scrim = C("Frame", { Name = "LockScrim", BackgroundColor3 = ctx.theme.Colors.background,
-                  BackgroundTransparency = ctx.theme.Opacity.scrim, BorderSizePixel = 0, Visible = false, ZIndex = 50,
-                  Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame, C.corner(ctx.theme.Radius.md) })
-                local shield = C("ImageButton", { Name = "LockShield", AutoButtonColor = false, BackgroundTransparency = 1,
-                  Active = true, Visible = false, ZIndex = 51, Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame })
-                control.SetLocked = function(b) local v = b and true or false; ctx.R.Safe.mutate(function() scrim.Visible = v; shield.Visible = v end) end
-                -- the scrim is chrome-coloured, so it must follow SetMode; owned by the control so a
-                -- destroyed control takes its closure with it
-                if ctx.accentThemer then
-                  Host.own(control, ctx.accentThemer.register(function() scrim.BackgroundColor3 = ctx.theme.Colors.background end))
-                end
-                if opts.Locked then control.SetLocked(true) end
-                if ctx.registerControl then ctx.registerControl(control) end
-              end
-              return control
-            end
-          end
-        end
-
-        return Host
-
-    end
-
-    -- Module: components/accordion
-    EmbeddedModules["components/accordion"] = function()
+    -- Module: core/drag
+    EmbeddedModules["core/drag"] = function()
         -- Deps injected via Init(R) (bundler cannot rewrite require() inside embedded modules).
-        local Accordion = {}
-        local Create, DefaultTheme, Animate, Maid, Icons, Host, REG, Safe, Recipes
+        -- A single mouse+touch drag helper. The fix vs. the old copy-pasted pattern: it captures
+        -- the SPECIFIC InputObject that started a touch drag and only reacts to that object's
+        -- movement, so stray/secondary touches and other drag handlers can't cross-fire — the
+        -- root cause of the mobile "drag to shrink grows it instead" bug.
+        local UserInputService = game:GetService("UserInputService")
 
-        function Accordion.Init(R)
-          Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Icons = R.Icons
-          Host = R.Host; REG = R; Safe = R.Safe; Recipes = R.Recipes
+        local Drag = {}
+
+        -- Drag.bind(target, opts, maid)
+        --   target  : a GuiObject that receives InputBegan
+        --   opts.onBegin(input)             optional; drag started
+        --   opts.onChange(dx, dy, position) optional; delta from the start point + current position
+        --   opts.onEnd()                    optional; drag released
+        --   opts.isActive() -> boolean      optional; return false to ignore a begin
+        --   maid    : a Maid that owns the connections
+        function Drag.bind(target, opts, maid)
+          local mouseDown = false
+          local activeTouch = nil
+          local startPos = nil
+
+          local function begin(input)
+            if opts.isActive and not opts.isActive() then return end
+            local t = input.UserInputType
+            if t == Enum.UserInputType.MouseButton1 then
+              mouseDown = true; startPos = input.Position
+            elseif t == Enum.UserInputType.Touch then
+              activeTouch = input; startPos = input.Position
+            else
+              return
+            end
+            if opts.onBegin then opts.onBegin(input) end
+          end
+
+          local function change(input)
+            if not startPos then return end
+            local isMouse = mouseDown and input.UserInputType == Enum.UserInputType.MouseMovement
+            local isTouch = activeTouch ~= nil and input == activeTouch
+            if not (isMouse or isTouch) then return end
+            local p = input.Position
+            if opts.onChange then opts.onChange(p.X - startPos.X, p.Y - startPos.Y, p) end
+          end
+
+          local function finish(input)
+            local t = input.UserInputType
+            local relevant = (mouseDown and t == Enum.UserInputType.MouseButton1)
+              or (activeTouch ~= nil and input == activeTouch)
+            if not relevant then return end
+            mouseDown = false; activeTouch = nil; startPos = nil
+            if opts.onEnd then opts.onEnd() end
+          end
+
+          maid:Give(target.InputBegan:Connect(begin))
+          maid:Give(UserInputService.InputChanged:Connect(change))
+          maid:Give(UserInputService.InputEnded:Connect(finish))
+          maid:Give(target.InputEnded:Connect(finish))
         end
 
-        local HEADER_H = 34
+        return Drag
 
-        function Accordion.new(opts)
-          opts = opts or {}
-          local theme = opts.Theme or DefaultTheme
-          local maid = Maid.new()
-          local expanded = opts.Expanded == true
-          local order = 0
+    end
 
-          local container = Create("Frame", {
-            Name = "Accordion",
-            BackgroundColor3 = theme.Colors.card,
-            BackgroundTransparency = 0,
-            ClipsDescendants = true,
-            AutomaticSize = Enum.AutomaticSize.None,
-            Size = UDim2.new(1, 0, 0, HEADER_H),
-            LayoutOrder = opts.LayoutOrder or 0,
-            Parent = opts.Parent,
-          })
-          Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = container })
-          Create("UICorner", { CornerRadius = UDim.new(0, theme.Radius.md), Parent = container })
+    -- Module: core/maid
+    EmbeddedModules["core/maid"] = function()
+        local Maid = {}
+        Maid.__index = Maid
 
-          local header = Create("TextButton", {
-            Name = "Header",
-            Text = "",
-            AutoButtonColor = false,
-            BackgroundColor3 = theme.Colors.card,
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, HEADER_H),
-            Parent = container,
-            Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }),
-          })
-          -- The container clips SQUARE (ClipsDescendants), so the header cannot inherit the card's
-          -- rounded top corners: it carries its own radius, and the hover wash inside it matches.
-          Create.corner(theme.Radius.md).Parent = header
+        function Maid.new()
+          return setmetatable({ _tasks = {} }, Maid)
+        end
 
-          local caret = Create("ImageLabel", {
-            Name = "Caret",
-            BackgroundTransparency = 1,
-            Size = UDim2.new(0, 16, 0, 16),
-            Position = UDim2.new(0, 0, 0.5, -8),
-            Parent = header,
-          })
-          -- Structural glyph: Icon.structural (muted) collapsed, Icon.structuralActive (foreground) expanded;
-          -- resolved by token name at paint time so SetMode/SetAccent re-tint by name. Accent stays on the lead icon.
-          local function caretColor() return theme.Colors[expanded and theme.Icon.structuralActive or theme.Icon.structural] end
-          Icons.apply(caret, "chevron-right", caretColor())
-          caret.Rotation = expanded and 90 or 0
-          -- Pop on click: the glyph itself is 16px, so the acknowledgement is a scale dip, not a
-          -- rotation overshoot (a Back curve on a 16px chevron jitters -- see applyHeight).
-          local caretScale = Create("UIScale", { Scale = 1, Parent = caret })
+        function Maid:Give(task)
+          self._tasks[#self._tasks + 1] = task
+          return task
+        end
 
-          local leadIcon
-          if opts.Icon then
-            leadIcon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
-              Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(0, 24, 0.5, -8), Parent = header })
-            Icons.apply(leadIcon, opts.Icon, theme.Colors[theme.Icon.accent])
-          end
-          local titleX = opts.Icon and 46 or 24
-          local title = Create("TextLabel", {
-            Name = "Title",
-            BackgroundTransparency = 1,
-            Text = opts.Title or "Section",
-            TextColor3 = theme.Colors.foreground,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            Size = UDim2.new(1, -titleX, 1, 0),
-            Position = UDim2.new(0, titleX, 0, 0),
-            Parent = header,
-          })
-          Create.text(title, theme, "label")
-
-          local content = Create("Frame", {
-            Name = "Content",
-            BackgroundTransparency = 1,
-            AutomaticSize = Enum.AutomaticSize.Y,
-            Size = UDim2.new(1, 0, 0, 0),
-            Position = UDim2.new(0, 0, 0, HEADER_H + theme.Spacing.gap),
-            Visible = expanded,
-            Parent = container,
-            Create.listLayout({ Padding = theme.Spacing.gap }),
-            Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, bottom = theme.Spacing.inputY }),
-          })
-          local layout = content:FindFirstChildOfClass("UIListLayout")
-
-          local divider = Create("Frame", {
-            Name = "Divider", BackgroundColor3 = theme.Colors.border, BorderSizePixel = 0,
-            Size = UDim2.new(1, -theme.Spacing.inputX * 2, 0, 1), Position = UDim2.new(0, theme.Spacing.inputX, 0, HEADER_H),
-            Visible = expanded, ZIndex = 2, Parent = container,
-          })
-
-          local api = { Container = container, Header = header, Content = content, Maid = maid }
-
-          local GAP = theme.Spacing.gap
-          local REST_Y = HEADER_H + GAP          -- content's resting Y; expand starts (and collapse ends) one gap lower
-
-          -- contentHeight() adds the bottom padding, so it is never 0 even with no rows -- the RAW
-          -- AbsoluteContentSize is the only honest "is there anything to measure" signal (and it is nil
-          -- under the headless mock, where no layout ever runs).
-          local function hasContent()
-            local acs = layout.AbsoluteContentSize
-            return acs ~= nil and (acs.Y or 0) > 0
-          end
-
-          local function contentHeight()
-            -- real Roblox: UIListLayout.AbsoluteContentSize.Y; mock returns nil -> 0
-            local acs = layout.AbsoluteContentSize
-            local y = (acs and acs.Y) or 0
-            return y + theme.Spacing.inputY
-          end
-
-          -- Height is ENGINE-DRIVEN when expanded: the container uses AutomaticSize.Y so Roblox sizes it to
-          -- fit its content (incl. dynamic/reactive rows) WITHOUT any post-construction script write. That
-          -- matters because some executors deny the GUI capability to Heartbeat/property-changed handlers --
-          -- a script-driven re-measure there silently fails and ClipsDescendants then crops every row past
-          -- the first. Collapsed uses AutomaticSize.None + a fixed header height (so the collapse can tween
-          -- the Size down). Toggle animations run on the header-click handler, which keeps capability.
-          local function applyHeight(animated)
-            if animated then
-              -- Quint/Out, NOT the rotateTo default (Back/Out): a Back overshoot swings a 16px glyph past
-              -- its stop and back, which reads as a jitter rather than a flourish at that size. The pop
-              -- lives on the caret's UIScale instead, where an overshoot is invisible but felt.
-              Animate.rotateTo(caret, "base", expanded and 90 or 0, Animate.EASING.smooth, Animate.DIR.Out)
-              Icons.tint(caret, caretColor(), "fast")
-              caretScale.Scale = theme.Motion.popFrom
-              Animate.springTo(caretScale, "release", { Scale = 1 })
-              if expanded then
-                -- reveal: fade the divider in, slide the content up one gap into place, animate the height
-                -- open and then hand sizing to the engine (AutomaticSize.Y) so dynamic content keeps
-                -- fitting with no further script write. This runs on the header-click handler, which keeps
-                -- the GUI capability even where Heartbeat does not.
-                content.Visible = true
-                divider.Visible = true; divider.BackgroundTransparency = 1
-                Animate.to(divider, "fast", { BackgroundTransparency = 0 })
-                content.Position = UDim2.new(0, 0, 0, REST_Y + GAP)
-                Animate.to(content, "base", { Position = UDim2.new(0, 0, 0, REST_Y) })
-                if hasContent() then
-                  container.AutomaticSize = Enum.AutomaticSize.None
-                  local target = REST_Y + contentHeight()
-                  container.Size = UDim2.new(1, 0, 0, HEADER_H)
-                  Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, target) }, function()
-                    if expanded then container.AutomaticSize = Enum.AutomaticSize.Y end
-                  end)
-                else
-                  -- nothing to measure: contentHeight() would still report the bottom padding, so the
-                  -- tween would open to a slab of empty card and snap shut again. Hand the height straight
-                  -- to the engine; it grows the moment a row is mounted.
-                  container.AutomaticSize = Enum.AutomaticSize.Y
-                  container.Size = UDim2.new(1, 0, 0, HEADER_H)
-                end
-              else
-                -- collapse mirrors expand: the divider fades BEFORE it hides and the content slides back
-                -- down one gap (where the expand started) instead of snapping out with the height.
-                Animate.to(divider, "fast", { BackgroundTransparency = 1 })
-                Animate.to(content, "exit", { Position = UDim2.new(0, 0, 0, REST_Y + GAP) },
-                  Animate.EASING.exit, Animate.DIR.In)
-                -- freeze the current engine-fit height, switch AutomaticSize off, animate down
-                local sz = container.AbsoluteSize
-                local from = (sz and sz.Y and sz.Y > HEADER_H) and sz.Y or (REST_Y + contentHeight())
-                container.AutomaticSize = Enum.AutomaticSize.None
-                container.Size = UDim2.new(1, 0, 0, from)
-                Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, HEADER_H) }, function()
-                  if not expanded then content.Visible = false; divider.Visible = false end
-                end)
-              end
-            else
-              content.Position = UDim2.new(0, 0, 0, REST_Y)
-              divider.BackgroundTransparency = 0
-              if expanded then
-                content.Visible = true; divider.Visible = true
-                container.AutomaticSize = Enum.AutomaticSize.Y
-                container.Size = UDim2.new(1, 0, 0, HEADER_H)   -- min; the engine grows it to fit the content
-              else
-                content.Visible = false; divider.Visible = false
-                container.AutomaticSize = Enum.AutomaticSize.None
-                container.Size = UDim2.new(1, 0, 0, HEADER_H)
-              end
-              caret.Rotation = expanded and 90 or 0
-              caret.ImageColor3 = caretColor()
-              caretScale.Scale = 1
+        local function cleanupTask(t)
+          -- Roblox Instances and RBXScriptConnections are userdata (type()=="userdata"),
+          -- NOT tables — so type()-based branching silently skips them and leaks UI/connections.
+          -- Use typeof() (Roblox global; falls back to type() under the headless mock).
+          local kind = (typeof and typeof(t)) or type(t)
+          if kind == "function" then
+            t()
+          elseif kind == "Instance" then
+            t:Destroy()
+          elseif kind == "RBXScriptConnection" then
+            t:Disconnect()
+          elseif kind == "table" then
+            if type(t.Disconnect) == "function" then t:Disconnect()
+            elseif type(t.Destroy) == "function" then t:Destroy()
             end
           end
-
-          function api:Toggle() expanded = not expanded; applyHeight(true); return expanded end
-          function api:Expand() if not expanded then expanded = true; applyHeight(true) end end
-          function api:Collapse() if expanded then expanded = false; applyHeight(true) end end
-          function api:IsExpanded() return expanded end
-          function api:SetTitle(s) Safe.mutate(function() title.Text = s end) end
-          function api:SetIcon(name) if leadIcon then Safe.mutate(function() Icons.apply(leadIcon, name, theme.Colors[theme.Icon.accent]) end) end end
-
-          function api.MountRow(child)
-            order = order + 1
-            child.LayoutOrder = order
-            child.Parent = content              -- AutomaticSize.Y on the container fits it automatically
-            return order
-          end
-
-          -- AddX control methods (Label/Button/Toggle/TextBox/NumberBox/SelectBox/...)
-          Host.attach(api, {
-            R = REG, content = content, theme = theme, config = opts.Config, window = opts.Window,
-            registerSearchable = opts.RegisterSearchable, accentThemer = opts.AccentThemer,
-            registerControl = opts.RegisterControl,
-            nextOrder = function() order = order + 1; return order end,
-          })
-
-          -- Header hover wash (plan 2.7): the wash Frame lives INSIDE the header, so the container's own
-          -- card colour is never touched; its inset cancels the header's UIPadding so the wash covers the
-          -- full row, and its corner matches the one the header carries (the container clips square).
-          local hover = Recipes.hover(header, { theme = theme, host = header, kind = "wash",
-            corner = theme.Radius.md, inset = { x = theme.Spacing.inputX, y = 0 } })
-          maid:Give(hover.disconnect)
-
-          if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function()
-            container.BackgroundColor3 = theme.Colors.card
-            local st = container:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
-            title.TextColor3 = theme.Colors.foreground
-            Icons.apply(caret, "chevron-right", caretColor())
-            caret.Rotation = expanded and 90 or 0
-            if leadIcon then Icons.apply(leadIcon, opts.Icon, theme.Colors[theme.Icon.accent]) end
-            divider.BackgroundColor3 = theme.Colors.border
-            hover.reskin()                       -- the wash is foreground-tinted: re-read it by name
-          end)) end
-
-          maid:Give(header.MouseButton1Click:Connect(function() api:Toggle() end))
-          maid:Give(container)
-
-          function api.Destroy() maid:DoCleanup() end
-
-          applyHeight(false)
-          return api
         end
 
-        return Accordion
+        function Maid:DoCleanup()
+          local tasks = self._tasks
+          self._tasks = {}
+          for i = #tasks, 1, -1 do
+            local ok, err = pcall(cleanupTask, tasks[i])
+            if not ok and warn then warn("Maid task error: " .. tostring(err)) end
+          end
+        end
+
+        Maid.Destroy = Maid.DoCleanup
+
+        return Maid
 
     end
 
@@ -6953,111 +3483,6 @@ EmbeddedModules["../output/bundle"] = function()
 
     end
 
-    -- Module: core/mount
-    EmbeddedModules["core/mount"] = function()
-        -- Deps injected via Init(R). Resolves where/how to parent the root ScreenGui (robustness
-        -- fallback chain) and applies stealth (random name, cloneref, dedupe, protect).
-        -- Executor globals are read at CALL time so tests and late-injecting executors see current values.
-        local Mount = {}
-
-        function Mount.Init(R) end -- no deps
-
-        -- Feature-detected, GC-safe service getter. cloneref hides the reference from game traps.
-        function Mount.service(name)
-          local ok, s = pcall(function() return game:GetService(name) end)
-          if not ok or not s then return nil end
-          local okcr, cr = pcall(function() return cloneref or clonereference end)
-          if okcr and type(cr) == "function" then
-            local ok2, ref = pcall(cr, s)
-            if ok2 and ref then return ref end
-          end
-          return s
-        end
-
-        -- Resolve where/how to parent. Returns { parent, protect, studio }.
-        function Mount.resolve(config)
-          config = config or {}
-          if config.Parent ~= nil then return { parent = config.Parent } end
-
-          local studio = false
-          local rs = Mount.service("RunService")
-          if rs then local ok, v = pcall(function() return rs:IsStudio() end); studio = ok and v or false end
-
-          -- 1) gethui(): not enumerable via CoreGui/PlayerGui
-          local ok, hui = pcall(function() return gethui and gethui() end)
-          if ok and hui then return { parent = hui, studio = studio } end
-
-          -- 2) protect_gui family -> CoreGui (protect applied in finalize)
-          local protect = nil
-          if type(protectgui) == "function" then
-            protect = protectgui
-          elseif type(syn) == "table" and type(syn.protect_gui) == "function" then
-            protect = syn.protect_gui
-          end
-          local cg = Mount.service("CoreGui")
-          if cg then return { parent = cg, protect = protect, studio = studio } end
-
-          -- 3) PlayerGui: universal safety net (Studio & weak executors)
-          local players = Mount.service("Players")
-          local lp = players and players.LocalPlayer
-          if lp then
-            local pg = lp:FindFirstChildOfClass("PlayerGui")
-            if not pg then
-              local ok3, w = pcall(function() return lp:WaitForChild("PlayerGui", 5) end)
-              pg = ok3 and w or nil
-            end
-            if pg then return { parent = pg, studio = studio } end
-          end
-
-          return { parent = nil, studio = studio }
-        end
-
-        -- Readable in Studio / when overridden; random at runtime.
-        function Mount.guiName(config, studio)
-          config = config or {}
-          if type(config.GuiName) == "string" and config.GuiName ~= "" then return config.GuiName end
-          if config.Stealth == false or studio then return "EzUI" end
-          local hs = Mount.service("HttpService")
-          if hs then
-            local ok, guid = pcall(function() return hs:GenerateGUID(false) end)
-            if ok and guid then return guid end
-          end
-          return "_" .. tostring(math.random(100000, 999999999))
-        end
-
-        -- After the ScreenGui exists: dedupe prior EzUI roots (by attribute, since names may be
-        -- random) and apply protect. Studio skips protect (protect functions don't exist there).
-        -- Runs synchronously on the caller's thread to keep executor capability (do not defer).
-        function Mount.finalize(gui, ctx)
-          ctx = ctx or {}
-          gui:SetAttribute("__ezui", true)
-          local parent = gui.Parent
-          if parent then
-            for _, inst in ipairs(parent:GetChildren()) do
-              if inst ~= gui and inst:GetAttribute("__ezui") then inst:Destroy() end
-            end
-          end
-          if ctx.protect and not ctx.studio then pcall(ctx.protect, gui) end
-          return gui
-        end
-
-        -- A stealth name for an internal (non-root) instance: random GUID at runtime, the readable
-        -- label in Studio. Used for the overlay root/catcher so they don't carry the "EzUI" signature
-        -- into the GUI tree (the root ScreenGui is already anonymized via guiName).
-        function Mount.anonName(readable)
-          local rs = Mount.service("RunService")
-          local studio = false
-          if rs then local ok, v = pcall(function() return rs:IsStudio() end); studio = ok and v or false end
-          if studio then return readable end
-          local hs = Mount.service("HttpService")
-          if hs then local ok, g = pcall(function() return hs:GenerateGUID(false) end); if ok and g then return g end end
-          return "_" .. tostring(math.random(100000, 999999999))
-        end
-
-        return Mount
-
-    end
-
     -- Module: core/asset
     EmbeddedModules["core/asset"] = function()
         -- Deps injected via Init(R) (none needed). Resolves an Image value to a usable
@@ -7165,245 +3590,1867 @@ EmbeddedModules["../output/bundle"] = function()
 
     end
 
-    -- Module: core/numfmt
-    EmbeddedModules["core/numfmt"] = function()
-        -- Pure number formatting/parsing. No Roblox/UI/theme dependencies.
-        local Numfmt = {}
+    -- Module: components/card
+    EmbeddedModules["components/card"] = function()
+        -- Deps injected via Init(R). A rich content card: optional banner image, title,
+        -- body paragraph, and an optional row of action buttons. Built from primitives.
+        local Card = {}
+        local Create, DefaultTheme, Maid, Asset, Button, Safe
 
-        local UNITS = { { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "k" } }
-
-        -- round to `dec` decimals, strip trailing zeros and a trailing dot
-        local function trim(n, dec)
-          dec = dec or 0
-          local s = string.format("%." .. dec .. "f", n)
-          if dec > 0 then
-            s = s:gsub("0+$", "")
-            s = s:gsub("%.$", "")
-          end
-          if s == "-0" then s = "0" end
-          return s
+        function Card.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Asset = R.Asset; Button = R.Button; Safe = R.Safe
         end
 
-        local function compact(n, dec)
-          local a = math.abs(n)
-          if a < 1e3 then return trim(n, dec) end
-          for _, u in ipairs(UNITS) do
-            if a >= u[1] then return trim(n / u[1], dec) .. u[2] end
-          end
-          return trim(n, dec)
-        end
-
-        local function comma(n, dec)
-          local neg = n < 0
-          local a = math.abs(n)
-          local intpart = math.floor(a)
-          local frac = ""
-          if dec > 0 then
-            local f = trim(a - intpart, dec)            -- "0.5" or "0"
-            local dot = f:find("%.")
-            if dot then frac = f:sub(dot) end           -- ".5"
-          end
-          local s = tostring(intpart)
-          s = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
-          s = s:gsub("^,", "")
-          return (neg and "-" or "") .. s .. frac
-        end
-
-        function Numfmt.format(n, opts)
-          opts = opts or {}
-          n = tonumber(n) or 0
-          local body
-          if opts.Format == "compact" then body = compact(n, opts.Decimals or 1)
-          elseif opts.Format == "comma" then body = comma(n, opts.Decimals or 1)
-          elseif opts.Decimals ~= nil then body = trim(n, opts.Decimals)
-          else body = tostring(n) end
-          return (opts.Prefix or "") .. body .. (opts.Suffix or "")
-        end
-
-        local MULT = { k = 1e3, m = 1e6, b = 1e9, t = 1e12 }
-
-        function Numfmt.parse(s, opts)
-          opts = opts or {}
-          s = tostring(s or "")
-          if opts.Prefix and opts.Prefix ~= "" and s:sub(1, #opts.Prefix) == opts.Prefix then
-            s = s:sub(#opts.Prefix + 1)
-          end
-          if opts.Suffix and opts.Suffix ~= "" and s:sub(-#opts.Suffix) == opts.Suffix then
-            s = s:sub(1, #s - #opts.Suffix)
-          end
-          s = s:gsub(",", "")
-          s = s:gsub("%s", "")
-          s = s:gsub("^%+", "")
-          local mult = 1
-          local low = s:sub(-1):lower()
-          if MULT[low] then mult = MULT[low]; s = s:sub(1, #s - 1) end
-          local num = tonumber(s)
-          if num == nil then return nil end
-          return num * mult
-        end
-
-        return Numfmt
-
-    end
-
-    -- Module: components/label
-    EmbeddedModules["components/label"] = function()
-        -- Deps injected via Init(R).
-        local Label = {}
-        local Create, DefaultTheme, Safe
-        local RunService = game:GetService("RunService")
-        local warn = warn or function() end   -- Roblox global; no-op fallback under the headless test mock
-        -- Run a function on its OWN task-scheduler thread (never the caller's). Falls back to inline only if
-        -- `task` is missing. Used so a yielding label source never touches the construction/Heartbeat thread.
-        local spawn = (type(task) == "table" and task.spawn) or function(fn) return fn() end
-
-        function Label.Init(R) Create = R.Create; DefaultTheme = R.Theme; Safe = R.Safe end
-
-        -- ── Shared reactive scheduler ───────────────────────────────────────────────
-        -- ONE Heartbeat connection drives EVERY function-valued (reactive) label. It exists only while at
-        -- least one label is registered (zero idle cost) and is dropped when the last one deregisters, so
-        -- N reactive labels cost O(1) connections, not O(N). Per frame it only accumulates dt; the re-eval +
-        -- write happen at most once per label-interval. The poll's GUI access (reading frame.Parent, writing
-        -- frame.Text) is capability-gated and routed through Safe.mutate: NOT every executor grants the GUI
-        -- capability to a RunService.Heartbeat handler, and a raw access there throws "lacking capability
-        -- Plugin" every interval (and aborted the whole drain, killing every other reactive label). Safe.mutate
-        -- writes inline when the capability is present and defers/degrades quietly when it is not.
-        local entries = {}            -- list of { acc, interval, tick }; tick() returns false when dead
-        local conn = nil
-
-        local function stepAll(dt)
-          dt = dt or 0
-          local alive, n = {}, 0
-          for _, e in ipairs(entries) do
-            e.acc = e.acc + dt
-            local keep = true
-            if e.acc >= e.interval then e.acc = 0; keep = e.tick() end   -- re-eval+write at interval cadence
-            if keep then n = n + 1; alive[n] = e end
-          end
-          entries = alive
-          if n == 0 and conn then conn:Disconnect(); conn = nil end
-        end
-
-        local function register(entry)
-          entries[#entries + 1] = entry
-          if not conn then conn = RunService.Heartbeat:Connect(stepAll) end
-        end
-
-        local function unregister(entry)
-          for i = #entries, 1, -1 do if entries[i] == entry then table.remove(entries, i) end end
-          if #entries == 0 and conn then conn:Disconnect(); conn = nil end
-        end
-
-        function Label.new(opts)
+        function Card.new(opts)
           opts = opts or {}
           local theme = opts.Theme or DefaultTheme
-          local variant = opts.Variant or "default"
-          local source = opts.Text or ""          -- string OR function
-          local interval = opts.Interval or 1
+          local maid = Maid.new()
 
-          local color = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
-          -- section = overline role (Medium 11, uppercased below); everything else reads at body size
-          local role = (variant == "section") and "overline" or "body"
-          local size = theme.Font[role].Size
+          local card = Create("Frame", { Name = "Card", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
+            AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), LayoutOrder = opts.LayoutOrder or 0,
+            Parent = opts.Parent, Create.corner(theme.Radius.md),
+            Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = theme.Spacing.inputY, bottom = theme.Spacing.inputY }),
+            Create.listLayout({ Padding = theme.Spacing.gap }) })
+          Create.stroke(theme.Colors.border, 1).Parent = card
 
-          local frame = Create.text(Create("TextLabel", {
-            Name = "Label",
-            BackgroundTransparency = 1,
-            Text = "",                            -- set by setSource below (static value, or first eval)
-            TextColor3 = color,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Top,
-            TextWrapped = variant == "paragraph",
-            Size = UDim2.new(1, 0, 0, size + 6),
-            AutomaticSize = (variant == "paragraph") and Enum.AutomaticSize.Y or Enum.AutomaticSize.None,
-            LayoutOrder = opts.LayoutOrder or 0,
-            Parent = opts.Parent,
-          }), theme, role)
-
-          -- keep the unregister so Destroy drops the closure (one used to leak per destroyed label)
-          local unreg = opts.AccentReg and opts.AccentReg(function()
-            frame.TextColor3 = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
-          end)
-
-          local lastText, erroring, entry = nil, false, nil
-
-          -- Write a value to the label. direct=true writes inline (label creation runs on the main thread,
-          -- which holds the capability); otherwise routes through Safe.mutate so a caller that may lack the
-          -- GUI capability (a coroutine/task.spawn thread, OR the reactive poll's Heartbeat handler on
-          -- executors that don't grant it there) stays capability-safe. The lastText guard skips redundant
-          -- property writes (a value that hasn't changed costs nothing).
-          local function applyText(s, direct)
-            s = (variant == "section") and string.upper(tostring(s)) or tostring(s)
-            if s == lastText then return end
-            lastText = s
-            if direct then frame.Text = s else Safe.mutate(function() frame.Text = s end) end
+          local lo = 0
+          local banner
+          local function makeBanner(image)
+            lo = lo + 1
+            banner = Create("ImageLabel", { Name = "Banner", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
+              Image = image, ScaleType = Enum.ScaleType.Crop, Size = UDim2.new(1, 0, 0, 80), LayoutOrder = lo,
+              Parent = card, Create.corner(theme.Radius.sm) })
           end
-
-          -- Re-evaluate a function source on its OWN scheduler thread, never on the caller's. The caller is UI
-          -- construction (initial eval) or the shared Heartbeat tick. A source that yields (a
-          -- RemoteFunction:InvokeServer / task.wait getter) called inline would yield the caller -- and on a
-          -- capability-strict executor the caller resumes WITHOUT the GUI capability, after which the NEXT
-          -- control's write threw "lacking capability Plugin" and aborted the whole section. task.spawn isolates
-          -- the source completely, so construction never yields/degrades; the write is always capability-safe
-          -- (Safe.mutate). On error, keep the last good value (no per-tick flicker) and warn once per streak.
-          local function evaluate()
-            if type(source) ~= "function" then return end
-            local fn = source
-            spawn(function()
-              local ok, res = pcall(fn)
-              if fn ~= source then return end                   -- source swapped while we ran -> drop stale result
-              if ok then
-                erroring = false
-                applyText(res, false)
-              elseif not erroring then
-                erroring = true
-                warn("[EzUI] Label dynamic text error: " .. tostring(res))
-              end
-            end)
+          if Asset.resolvable(opts.Banner) then
+            -- Reserve the 80px slot now and let the image land when it resolves: asset ids call back
+            -- synchronously, URLs download off-thread (game:HttpGet yields) so construction never blocks.
+            -- The callback may run on a non-privileged thread, hence Safe.mutate.
+            makeBanner("")
+            Asset.imageAsync(opts.Banner, function(id) Safe.mutate(function() banner.Image = id end) end)
+          else
+            local resolved = Asset.image(opts.Banner)
+            if resolved then makeBanner(resolved) end
           end
-
-          local function startReactive()
-            if entry then return end
-            entry = { acc = 0, interval = interval, tick = function()
-              -- Reading frame.Parent and writing frame.Text both touch the protected GUI, which throws on a
-              -- Heartbeat thread that lacks the executor capability. pcall the destroyed-probe and route the
-              -- write through Safe.mutate so the poll never throws/spams -- it updates when the capability is
-              -- present and degrades quietly otherwise (instead of aborting the whole drain).
-              local ok, parent = pcall(function() return frame.Parent end)
-              if ok and parent == nil then return false end  -- destroyed -> drop from the scheduler
-              evaluate()                                      -- runs the source off-thread; write is capability-safe
-              return true
-            end }
-            register(entry)
+          if opts.Title then
+            lo = lo + 1
+            Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title,
+              TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+              TextTruncate = Enum.TextTruncate.AtEnd, Size = UDim2.new(1, 0, 0, 18), LayoutOrder = lo, Parent = card }),
+              theme, "label")
           end
-
-          local function stopReactive()
-            if entry then unregister(entry); entry = nil end
+          if opts.Body then
+            lo = lo + 1
+            Create.text(Create("TextLabel", { Name = "Body", BackgroundTransparency = 1, Text = opts.Body,
+              TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+              TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = Enum.AutomaticSize.Y,
+              Size = UDim2.new(1, 0, 0, 0), LayoutOrder = lo, Parent = card }), theme, "muted")
           end
-
-          -- Point the label at a new source. A function -> reactive (poll on the shared scheduler); a
-          -- string -> static (stop polling). Evaluates/writes immediately so the value shows at once.
-          local function setSource(v, direct)
-            source = v
-            if type(v) == "function" then
-              startReactive()
-              evaluate()                  -- function source: evaluated off-thread (a string never yields)
-            else
-              stopReactive()
-              applyText(v, direct)        -- static string: safe to write inline on the caller's thread
+          if opts.Buttons and #opts.Buttons > 0 then
+            lo = lo + 1
+            local row = Create("Frame", { Name = "Actions", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
+              LayoutOrder = lo, Parent = card,
+              Create.listLayout({ Padding = theme.Spacing.gap, FillDirection = Enum.FillDirection.Horizontal }) })
+            for i, b in ipairs(opts.Buttons) do
+              -- AutoWidth: the label sizes the button (a forced 96px used to clip longer captions). The
+              -- button owns its own reskin closure through AccentReg, so the whole control (not just its
+              -- Frame) goes to the maid to unregister it on Destroy.
+              local control = Button.new({ Parent = row, Text = b.Text, Variant = b.Variant, Callback = b.Callback,
+                Theme = theme, AccentReg = opts.AccentReg, AutoWidth = true, LayoutOrder = i })
+              maid:Give(control)
             end
           end
 
-          setSource(source, true)                 -- initial render (creation is on a capability-bearing thread)
+          if opts.AccentReg then maid:Give(opts.AccentReg(function()
+            card.BackgroundColor3 = theme.Colors.card
+            local st = card:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
+            if banner then banner.BackgroundColor3 = theme.Colors.surface end
+            local ti = card:FindFirstChild("Title"); if ti then ti.TextColor3 = theme.Colors.foreground end
+            local bo = card:FindFirstChild("Body"); if bo then bo.TextColor3 = theme.Colors.mutedForeground end
+          end)) end
 
-          return {
-            Frame = frame,
-            SetText = function(v) setSource(v, false) end,   -- a user call may arrive on a coroutine -> Safe path
-            Destroy = function() stopReactive(); if unreg then unreg() end; frame:Destroy() end,
-          }
+          maid:Give(card)
+          return { Frame = card, Destroy = function() maid:DoCleanup() end }
         end
 
-        return Label
+        return Card
+
+    end
+
+    -- Module: components/tooltip
+    EmbeddedModules["components/tooltip"] = function()
+        -- Deps injected via Init(R). Mixin-style: Tooltip.attach(target, text) wires hover.
+        -- An INVERTED chip (foreground fill, background text) with a soft shadow, shown only after
+        -- Tooltip.delay so a pointer sweeping a column of rows never strobes a trail of tips behind it.
+        local Tooltip = {}
+        local Create, DefaultTheme, Maid, Overlay, Animate, Device, Safe, Effects
+        local TextService = game:GetService("TextService")
+
+        function Tooltip.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Animate = R.Animate
+          Device = R.Device; Safe = R.Safe; Effects = R.Effects
+        end
+
+        -- Average glyph advance, used only when TextService is unavailable. The chip itself is
+        -- AutomaticSize.X: this width only drives the viewport clamp and the shadow rectangle.
+        local GLYPH_W = 0.55
+
+        local function measure(text, size)
+          local ok, v = pcall(function()
+            return TextService:GetTextSize(text, size, Enum.Font.BuilderSans, Vector2.new(10000, 10000))
+          end)
+          if ok and v and v.X then return v.X end
+          return #tostring(text) * size * GLYPH_W
+        end
+
+        function Tooltip.attach(target, text, themeArg)
+          local theme = themeArg or DefaultTheme
+          local maid = Maid.new()
+          local handle = { Destroy = function() maid:DoCleanup() end }
+          -- Touch has no hover: a tap would leave the chip stranded on screen with nothing to dismiss it,
+          -- so the whole mixin is a no-op there (no connections, no handle state).
+          if Device and Device.IsTouch() then return handle end
+
+          local tip, shadow, armed
+
+          -- Anchored bottom-centre above the target, clamped inside the viewport and flipped BELOW when
+          -- the chip would run off the top. Absolute* are nil headless / before the first layout pass, so
+          -- everything degrades to the top-left corner rather than erroring.
+          local function geometry(scale)
+            local T = theme.Tooltip
+            local ap, as = target.AbsolutePosition, target.AbsoluteSize
+            local tx, ty = (ap and ap.X or 0), (ap and ap.Y or 0)
+            local tw, th = (as and as.X or 0), (as and as.Y or 0)
+            local gap, hgt = T.gap * scale, T.height * scale
+            local w = (measure(text, theme.Font.muted.Size) + 2 * T.padX) * scale
+            local vp = Overlay.viewport()
+            local y = ty - gap                                     -- AnchorPoint (0.5, 1): y is the BOTTOM
+            if y - hgt < 0 then y = ty + th + gap + hgt end        -- no room above -> flip below
+            if y > vp.Y then y = vp.Y end
+            local half = w / 2
+            local x = math.max(half, math.min(tx + tw / 2, vp.X - half))
+            return x, y, w, hgt
+          end
+
+          local function build()
+            if tip then return end
+            local T = theme.Tooltip
+            local scale = Overlay.scale()                          -- 2.22: the tip owns its own UIScale
+            local x, y, w, hgt = geometry(scale)
+            -- Inverted: the chip is the foreground colour with background-coloured text, so it reads as a
+            -- label ABOUT the UI rather than another surface of it. No stroke -- the inversion is the edge.
+            tip = Create("TextLabel", {
+              Name = "Tooltip", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1,
+              BorderSizePixel = 0, Text = text, TextColor3 = theme.Colors.background, TextTransparency = 1,
+              AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0, x, 0, y),
+              Size = UDim2.new(0, 0, 0, T.height), AutomaticSize = Enum.AutomaticSize.X,
+              ZIndex = Overlay.Z.tooltip,
+              Create.corner(theme.Radius.sm), Create.padding({ left = T.padX, right = T.padX }),
+            })
+            Create.text(tip, theme, "muted")
+            -- ONE UIScale: the UI scale with the pop folded into it (Animate.pop would overwrite it with 1).
+            local us = Create("UIScale", { Scale = scale * theme.Motion.popFrom, Parent = tip })
+            Overlay.mount(tip)
+            -- Sibling shadow one layer below the chip; nil while Effect.shadowId is ''.
+            shadow = Effects.shadow(tip.Parent, theme, { name = "TooltipShadow", level = "tooltip",
+              zIndex = Overlay.Z.tooltip - 1 })
+            if shadow then
+              shadow.ImageTransparency = 1
+              Effects.place(shadow, x - w / 2, y - hgt, w, hgt, "tooltip", theme)
+              Animate.to(shadow, "fast", { ImageTransparency = (theme.fx or DefaultTheme.fx)(theme).shadow })
+            end
+            Animate.springTo(us, "fast", { Scale = scale })
+            Animate.to(tip, "fast", { BackgroundTransparency = 0, TextTransparency = 0 })
+          end
+
+          -- Fade out first, destroy on completion: the chip is cleared from `tip` immediately so a new
+          -- hover during the fade builds a fresh one instead of adopting the dying instance.
+          local function hide()
+            local t, s = tip, shadow
+            tip, shadow = nil, nil
+            if not t then return end
+            if s then Animate.to(s, "exit", { ImageTransparency = 1 }, Animate.EASING.exit, Animate.DIR.In) end
+            Animate.toThen(t, "exit", { BackgroundTransparency = 1, TextTransparency = 1 }, function()
+              t:Destroy()
+              if s then s:Destroy() end
+            end, Animate.EASING.exit, Animate.DIR.In)
+          end
+
+          -- Hover intent: arm a token, and only build if the SAME token is still armed when the delay
+          -- elapses -- a MouseLeave (or a second enter) in the meantime drops it. The callback runs on a
+          -- task.delay thread, which has no GUI capability on strict executors, hence Safe.mutate.
+          local function onEnter()
+            if tip then return end
+            local token = {}
+            armed = token
+            local function fire()
+              if armed == token and not tip then Safe.mutate(build) end
+            end
+            if type(task) == "table" and task.delay then task.delay(theme.Tooltip.delay, fire) else fire() end
+          end
+
+          local function onLeave()
+            armed = nil
+            hide()
+          end
+
+          maid:Give(target.MouseEnter:Connect(onEnter))
+          maid:Give(target.MouseLeave:Connect(onLeave))
+          maid:Give(function() onLeave() end)
+          return handle
+        end
+
+        return Tooltip
+
+    end
+
+    -- Module: components/colorpicker
+    EmbeddedModules["components/colorpicker"] = function()
+        -- Deps injected via Init(R). Swatch row + an overlay HSV picker (SV square + hue slider,
+        -- click/drag). Value persists as an {r,g,b} array (JSON-safe).
+        local ColorPicker = {}
+        local Create, DefaultTheme, Maid, Overlay, Flag, Animate, Safe, Recipes, Effects, Acrylic
+        local UserInputService = game:GetService("UserInputService")
+        function ColorPicker.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Flag = R.Flag
+          Animate = R.Animate; Safe = R.Safe; Recipes = R.Recipes; Effects = R.Effects; Acrylic = R.Acrylic
+        end
+
+        -- Popover box in logical px (the UIScale below turns it into on-screen px): SV square 110 + gap
+        -- + the 16px hue slider, inside the host padding.
+        local POP_W, POP_H = 180, 152
+        -- A popover is frosted one step LIGHTER than the window shell: the content behind it must stay
+        -- readable. theme.Acrylic.frost (0.12) is the window's value, so a theme may define
+        -- Acrylic.popoverFrost and this is the fallback until that token lands (reported as a deviation).
+        local POPOVER_FROST = 0.04
+
+        local function frostAlpha(theme)
+          local a = theme.Acrylic and theme.Acrylic.popoverFrost
+          return type(a) == "number" and a or POPOVER_FROST
+        end
+
+        -- Popover open/close motion. Animate.popIn/popOut rest a popover's UIScale at 1, which is right
+        -- until the window forwards a UI scale (2.22): a scaled popover must rest at Overlay.scale(), so
+        -- the scaled case runs the same curves and the same Motion tokens against `scale` instead.
+        local function popOpen(frame, theme, edge, scale)
+          if scale == 1 then return Animate.popIn(frame, edge) end
+          local us = frame:FindFirstChildOfClass("UIScale")
+          if not us then return nil end
+          if not Animate.isEnabled() then us.Scale = scale; return nil end
+          local target = frame.Position
+          us.Scale = scale * theme.Motion.exitScale
+          local dy = (edge == "up") and theme.Motion.popSlide or -theme.Motion.popSlide
+          frame.Position = UDim2.new(target.X.Scale, target.X.Offset, target.Y.Scale, target.Y.Offset + dy)
+          Animate.to(frame, "fast", { Position = target }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+          return Animate.springTo(us, "base", { Scale = scale })
+        end
+
+        local function popShut(frame, theme, scale, onDone)
+          if scale == 1 then return Animate.popOut(frame, onDone) end
+          local us = frame:FindFirstChildOfClass("UIScale")
+          if not us then if onDone then onDone() end; return nil end
+          return Animate.toThen(us, "exit", { Scale = scale * theme.Motion.exitScale }, onDone,
+            Animate.EASING.exit, Animate.DIR.In)
+        end
+
+        -- Color3 channels are .R/.G/.B (0-1 floats) in real Roblox.
+        local function toArr(c) return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) } end
+        local function toColor(v)
+          if type(v) == "table" and v[1] then return Color3.fromRGB(v[1], v[2], v[3]) end
+          return v
+        end
+        local function rgbToHsv(c)
+          local r, g, b = c.R, c.G, c.B
+          local mx, mn = math.max(r, g, b), math.min(r, g, b)
+          local d = mx - mn
+          local hh = 0
+          if d > 0 then
+            if mx == r then hh = ((g - b) / d) % 6
+            elseif mx == g then hh = (b - r) / d + 2
+            else hh = (r - g) / d + 4 end
+            hh = hh / 6
+          end
+          return hh, (mx == 0) and 0 or d / mx, mx
+        end
+        local function clamp01(n) if n < 0 then return 0 elseif n > 1 then return 1 end return n end
+
+        function ColorPicker.new(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local maid = Maid.new()
+          local pad = theme.Spacing.gap -- popover UIPadding; padInset pulls the frost layers back over it
+          local color = opts.Default or Color3.fromRGB(255, 255, 255)
+          local hsvH, hsvS, hsvV = rgbToHsv(color)
+          local popover
+          local shadow    -- overlay sibling under the open popover; nil while Effect.shadowId is ''
+          local popScale = 1 -- UI scale the popover was built with (Close folds back to IT, not to 1)
+          local openMaid  -- per-OPEN connections: the popover is rebuilt on every Open, and the
+                          -- UserInputService drag listeners used to pile up on the component maid
+          local stopDrag  -- ends an in-flight SV/Hue drag from outside (SetDisabled, 2.8b)
+          local posConn -- closes the popover when the control scrolls
+          local onChanged = opts.Callback
+
+          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
+          local btn = Create("TextButton", { Name = "ColorPicker", AutoButtonColor = false, Text = "",
+            BackgroundColor3 = theme.Colors.surface, Size = UDim2.new(1, 0, 0, hasDesc and 50 or 34), LayoutOrder = opts.LayoutOrder or 0,
+            Parent = opts.Parent, Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
+          -- TextTransparency is written explicitly: it is the rest value the disabled recipe returns to.
+          local label = Create("TextLabel", { Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Color",
+            TextColor3 = theme.Colors.foreground, TextTransparency = 0, TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+            Position = UDim2.new(0, 0, 0, hasDesc and 8 or 0), Size = UDim2.new(1, -40, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn })
+          Create.text(label, theme, "label")
+          if hasDesc then
+            Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+              TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+              TextYAlignment = Enum.TextYAlignment.Top,
+              Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, -40, 0, 18), Parent = btn }), theme, "muted")
+          end
+          local swatch = Create("Frame", { Name = "Swatch", BackgroundColor3 = color, BackgroundTransparency = 0, BorderSizePixel = 0,
+            Size = UDim2.new(0, 28, 0, 18), Position = UDim2.new(1, -28, 0.5, -9), Parent = btn, Create.corner(theme.Radius.sm) })
+          Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = swatch })
+
+          -- Parts the disabled state dims to Opacity.disabled, each with the value it rests at while
+          -- enabled (2.8d: Recipes.disabled restores exactly that rest, so re-enabling is lossless).
+          local DIM = { { swatch, "BackgroundTransparency", 0 }, { label, "TextTransparency", 0 } }
+          local disabled = false
+          -- `animated` = the state change (tweened through the recipe); instant = a themer replay, which
+          -- must not tween inside a re-skin.
+          local function paintDisabled(animated)
+            if animated then
+              Recipes.disabled(DIM, disabled, theme)
+            else
+              local a = disabled and theme.Opacity.disabled or 0
+              for _, p in ipairs(DIM) do p[1][p[2]] = a end
+            end
+          end
+
+          local function apply(v) color = toColor(v); Safe.mutate(function() swatch.BackgroundColor3 = color end) end
+          local commit = Flag.bind(opts, toArr(color), apply)
+
+          local api = { Frame = btn }
+          function api.GetColor() return color end
+          function api.SetColor(c) commit(toArr(c)); if onChanged then onChanged(color) end end
+
+          function api.Open()
+            if disabled or popover then return end
+            local om = Maid.new()
+            openMaid = om
+            -- The window's UI scale reaches overlay children through Overlay.scale() (2.22): the UIScale
+            -- goes on the popover root, and the placement maths gets the ON-SCREEN size so the flip and
+            -- the clamp stay right. placePopover also gives the dropdown's flip/clamp to this popover,
+            -- which used to sit blindly 36px below the control.
+            local scale = Overlay.scale()
+            popScale = scale
+            local x, y, openUp = Overlay.placePopover(btn.AbsolutePosition, btn.AbsoluteSize, POP_W * scale, POP_H * scale)
+            popover = Create("Frame", { Name = "ColorPopover", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
+              Position = UDim2.new(0, x, 0, y), Size = UDim2.new(0, POP_W, 0, POP_H),
+              ZIndex = Overlay.Z.popover, Create.corner(theme.Radius.md), Create.padding({ all = pad }),
+              Create("UIScale", { Scale = scale }) })
+            Create.stroke(theme.Colors.border, 1, theme.Stroke.floating).Parent = popover -- floating surface: opaque hairline (1.5)
+            -- Frost: the same material as the dropdown. padInset = the host UIPadding, so the noise/sheen
+            -- layers grow back over it and still reach the rounded edge instead of stopping 8px short.
+            Acrylic.decorate(popover, theme, { transparency = frostAlpha(theme), edge = true,
+              radius = theme.Radius.md, padInset = pad, strokeAlpha = theme.Stroke.floating })
+            -- Depth: a SIBLING in the overlay root under the popover layer (a child would render above
+            -- the popover's own fill). posConn closes the popover as soon as the control scrolls, so one
+            -- Effects.place before mounting is enough — the layer never has to follow.
+            local overlayRoot = Overlay.peek()
+            shadow = overlayRoot and Effects.shadow(overlayRoot, theme,
+              { name = "ColorPopoverShadow", level = "popover", zIndex = Overlay.Z.catcher }) or nil
+            Effects.place(shadow, x, y, POP_W * scale, POP_H * scale, "popover", theme)
+
+            -- SV square: hue-colored base + white(sat) overlay + black(value) overlay
+            local sv = Create("ImageButton", { Name = "SV", AutoButtonColor = false,
+              BackgroundColor3 = Color3.fromHSV(hsvH, 1, 1), ZIndex = 1002, Size = UDim2.new(1, 0, 0, 110),
+              Parent = popover, Create.corner(theme.Radius.sm), ClipsDescendants = true })
+            local satOverlay = Create("Frame", { Name = "Sat", BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+              Size = UDim2.new(1, 0, 1, 0), ZIndex = 1003, Parent = sv,
+              Create("UIGradient", { Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }) }) })
+            local valOverlay = Create("Frame", { Name = "Val", BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+              Size = UDim2.new(1, 0, 1, 0), ZIndex = 1004, Parent = sv,
+              Create("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) }) }) })
+            local svDot = Create("Frame", { Name = "Dot", BackgroundColor3 = Color3.fromRGB(255, 255, 255), ZIndex = 1005,
+              Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(0.5, 0.5), Parent = sv, Create.corner(4) })
+            -- Ring on both markers: a white dot vanishes over a pale corner of the SV square / the yellow
+            -- band of the hue strip, so each one carries a hairline in the shell colour (2.11).
+            local svRing = Create.stroke(theme.Colors.background, 1, theme.Acrylic.strokeAlpha); svRing.Parent = svDot
+
+            -- hue slider with rainbow gradient
+            local hue = Create("ImageButton", { Name = "Hue", AutoButtonColor = false, ZIndex = 1002,
+              BackgroundColor3 = Color3.fromRGB(255, 255, 255), Size = UDim2.new(1, 0, 0, 16),
+              Position = UDim2.new(0, 0, 0, 120), Parent = popover, Create.corner(theme.Radius.sm) })
+            Create("UIGradient", { Parent = hue, Color = ColorSequence.new({
+              ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)), ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
+              ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)), ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
+              ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)), ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+              ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0)),
+            }) })
+            local hueDot = Create("Frame", { Name = "HueDot", BackgroundColor3 = Color3.fromRGB(255, 255, 255), ZIndex = 1003,
+              Size = UDim2.new(0, 4, 1, 4), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(hsvH, 0, 0.5, 0), Parent = hue, Create.corner(2) })
+            local hueRing = Create.stroke(theme.Colors.background, 1, theme.Acrylic.strokeAlpha); hueRing.Parent = hueDot
+
+            local function refreshUI()
+              sv.BackgroundColor3 = Color3.fromHSV(hsvH, 1, 1)
+              svDot.Position = UDim2.new(hsvS, 0, 1 - hsvV, 0)
+              hueDot.Position = UDim2.new(hsvH, 0, 0.5, 0)
+              api.SetColor(Color3.fromHSV(hsvH, hsvS, hsvV))
+            end
+            refreshUI()
+
+            local dragTarget
+            stopDrag = function() dragTarget = nil end
+            local function updateFromSV(px, py)
+              local p, sz = sv.AbsolutePosition, sv.AbsoluteSize
+              hsvS = clamp01(((px - (p and p.X or 0)) / ((sz and sz.X) or 1)))
+              hsvV = 1 - clamp01(((py - (p and p.Y or 0)) / ((sz and sz.Y) or 1)))
+              refreshUI()
+            end
+            local function updateFromHue(px)
+              local p, sz = hue.AbsolutePosition, hue.AbsoluteSize
+              hsvH = clamp01(((px - (p and p.X or 0)) / ((sz and sz.X) or 1)))
+              refreshUI()
+            end
+            -- Every listener below goes to the PER-OPEN maid: the popover is rebuilt on each Open, so
+            -- giving them to the component maid leaked one InputChanged/InputEnded pair per open.
+            om:Give(sv.InputBegan:Connect(function(input)
+              if disabled then return end
+              if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragTarget = "sv"; updateFromSV(input.Position.X, input.Position.Y)
+              end
+            end))
+            om:Give(hue.InputBegan:Connect(function(input)
+              if disabled then return end
+              if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragTarget = "hue"; updateFromHue(input.Position.X)
+              end
+            end))
+            om:Give(UserInputService.InputChanged:Connect(function(input)
+              if not dragTarget or disabled then return end
+              if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                if dragTarget == "sv" then updateFromSV(input.Position.X, input.Position.Y) else updateFromHue(input.Position.X) end
+              end
+            end))
+            om:Give(UserInputService.InputEnded:Connect(function(input)
+              if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragTarget = nil end
+            end))
+            om:Give(function() stopDrag = nil end)
+
+            -- close on scroll: the screen-space popover would otherwise detach or float
+            -- outside the window once the control leaves the content viewport.
+            posConn = btn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function() Safe.mutate(api.Close) end)
+            Overlay.mount(popover)
+            Overlay.trackPopover(api.Close)
+            -- 2.11: while it is open the popover holds a themer registration of its OWN. The control's
+            -- closure below only knows the swatch row, so a SetMode/SetAccent landing mid-open would
+            -- otherwise leave the popover (fill, hairline, rim, frost stack, shadow alpha, marker rings)
+            -- wearing the palette it was born with. Instant writes -- a re-skin replays state, it is not
+            -- a transition. Owned by the per-open maid, which api.Close drains synchronously before the
+            -- fold starts, so nothing can paint a frame that is being destroyed.
+            local popFrame, popShadow = popover, shadow
+            local unreg = opts.AccentReg and opts.AccentReg(function()
+              Acrylic.reskin(popFrame, theme, { transparency = frostAlpha(theme), edge = true,
+                radius = theme.Radius.md, padInset = pad, strokeAlpha = theme.Stroke.floating })
+              Effects.reskin(popShadow, theme, "shadow")   -- nil-tolerant: Effect.shadowId is '' by default
+              svRing.Color = theme.Colors.background
+              hueRing.Color = theme.Colors.background
+            end)
+            if unreg then om:Give(unreg) end
+            -- Grows out of the swatch row; the final Position is the computed one, so layout code
+            -- reading popover.Position right after Open still sees it.
+            popOpen(popover, theme, openUp and "up" or "down", scale)
+          end
+
+          -- Synchronous for the CALLER: the reference is dropped, the per-open connections are cut and
+          -- the popover untracked before any motion starts, so a catcher click, a scroll or a second
+          -- Close sees no popover while the DETACHED frame is still folding away.
+          function api.Close()
+            local pv, sh, om = popover, shadow, openMaid
+            popover, shadow, openMaid = nil, nil, nil
+            if posConn then posConn:Disconnect(); posConn = nil end
+            if om then om:DoCleanup() end
+            Overlay.untrackPopover(api.Close)
+            if not pv then return end
+            popShut(pv, theme, popScale, function() pv:Destroy(); if sh then sh:Destroy() end end)
+          end
+          function api.Destroy() api.Close(); maid:DoCleanup() end
+
+          -- Disabled dims the swatch + label and blocks Open; an in-flight drag is ended rather than
+          -- frozen mid-gesture, and the last value is kept (2.8b).
+          local function setDisabled(b)
+            disabled = b and true or false
+            Safe.mutate(function()
+              if disabled and stopDrag then stopDrag() end
+              paintDisabled(true)
+            end)
+          end
+          function api.SetDisabled(b) setDisabled(b) end
+
+          maid:Give(btn.MouseButton1Click:Connect(function()
+            if disabled then return end
+            if popover then api.Close() else api.Open() end
+          end))
+          maid:Give(btn)
+          maid:Give(function() api.Close() end)
+          if opts.Disabled then setDisabled(true) end
+
+          if opts.AccentReg then maid:Give(opts.AccentReg(function()
+            btn.BackgroundColor3 = theme.Colors.surface
+            local lab = btn:FindFirstChild("Label"); if lab then lab.TextColor3 = theme.Colors.foreground end
+            local de = btn:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
+            local st = swatch:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
+            paintDisabled()
+          end)) end
+
+          return api
+        end
+
+        return ColorPicker
+
+    end
+
+    -- Module: components/accordion
+    EmbeddedModules["components/accordion"] = function()
+        -- Deps injected via Init(R) (bundler cannot rewrite require() inside embedded modules).
+        local Accordion = {}
+        local Create, DefaultTheme, Animate, Maid, Icons, Host, REG, Safe, Recipes
+
+        function Accordion.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Icons = R.Icons
+          Host = R.Host; REG = R; Safe = R.Safe; Recipes = R.Recipes
+        end
+
+        local HEADER_H = 34
+
+        function Accordion.new(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local maid = Maid.new()
+          local expanded = opts.Expanded == true
+          local order = 0
+
+          local container = Create("Frame", {
+            Name = "Accordion",
+            BackgroundColor3 = theme.Colors.card,
+            BackgroundTransparency = 0,
+            ClipsDescendants = true,
+            AutomaticSize = Enum.AutomaticSize.None,
+            Size = UDim2.new(1, 0, 0, HEADER_H),
+            LayoutOrder = opts.LayoutOrder or 0,
+            Parent = opts.Parent,
+          })
+          Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = container })
+          Create("UICorner", { CornerRadius = UDim.new(0, theme.Radius.md), Parent = container })
+
+          local header = Create("TextButton", {
+            Name = "Header",
+            Text = "",
+            AutoButtonColor = false,
+            BackgroundColor3 = theme.Colors.card,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, HEADER_H),
+            Parent = container,
+            Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }),
+          })
+          -- The container clips SQUARE (ClipsDescendants), so the header cannot inherit the card's
+          -- rounded top corners: it carries its own radius, and the hover wash inside it matches.
+          Create.corner(theme.Radius.md).Parent = header
+
+          local caret = Create("ImageLabel", {
+            Name = "Caret",
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 16, 0, 16),
+            Position = UDim2.new(0, 0, 0.5, -8),
+            Parent = header,
+          })
+          -- Structural glyph: Icon.structural (muted) collapsed, Icon.structuralActive (foreground) expanded;
+          -- resolved by token name at paint time so SetMode/SetAccent re-tint by name. Accent stays on the lead icon.
+          local function caretColor() return theme.Colors[expanded and theme.Icon.structuralActive or theme.Icon.structural] end
+          Icons.apply(caret, "chevron-right", caretColor())
+          caret.Rotation = expanded and 90 or 0
+          -- Pop on click: the glyph itself is 16px, so the acknowledgement is a scale dip, not a
+          -- rotation overshoot (a Back curve on a 16px chevron jitters -- see applyHeight).
+          local caretScale = Create("UIScale", { Scale = 1, Parent = caret })
+
+          local leadIcon
+          if opts.Icon then
+            leadIcon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
+              Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(0, 24, 0.5, -8), Parent = header })
+            Icons.apply(leadIcon, opts.Icon, theme.Colors[theme.Icon.accent])
+          end
+          local titleX = opts.Icon and 46 or 24
+          local title = Create("TextLabel", {
+            Name = "Title",
+            BackgroundTransparency = 1,
+            Text = opts.Title or "Section",
+            TextColor3 = theme.Colors.foreground,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Size = UDim2.new(1, -titleX, 1, 0),
+            Position = UDim2.new(0, titleX, 0, 0),
+            Parent = header,
+          })
+          Create.text(title, theme, "label")
+
+          local content = Create("Frame", {
+            Name = "Content",
+            BackgroundTransparency = 1,
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Size = UDim2.new(1, 0, 0, 0),
+            Position = UDim2.new(0, 0, 0, HEADER_H + theme.Spacing.gap),
+            Visible = expanded,
+            Parent = container,
+            Create.listLayout({ Padding = theme.Spacing.gap }),
+            Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, bottom = theme.Spacing.inputY }),
+          })
+          local layout = content:FindFirstChildOfClass("UIListLayout")
+
+          local divider = Create("Frame", {
+            Name = "Divider", BackgroundColor3 = theme.Colors.border, BorderSizePixel = 0,
+            Size = UDim2.new(1, -theme.Spacing.inputX * 2, 0, 1), Position = UDim2.new(0, theme.Spacing.inputX, 0, HEADER_H),
+            Visible = expanded, ZIndex = 2, Parent = container,
+          })
+
+          local api = { Container = container, Header = header, Content = content, Maid = maid }
+
+          local GAP = theme.Spacing.gap
+          local REST_Y = HEADER_H + GAP          -- content's resting Y; expand starts (and collapse ends) one gap lower
+
+          -- contentHeight() adds the bottom padding, so it is never 0 even with no rows -- the RAW
+          -- AbsoluteContentSize is the only honest "is there anything to measure" signal (and it is nil
+          -- under the headless mock, where no layout ever runs).
+          local function hasContent()
+            local acs = layout.AbsoluteContentSize
+            return acs ~= nil and (acs.Y or 0) > 0
+          end
+
+          local function contentHeight()
+            -- real Roblox: UIListLayout.AbsoluteContentSize.Y; mock returns nil -> 0
+            local acs = layout.AbsoluteContentSize
+            local y = (acs and acs.Y) or 0
+            return y + theme.Spacing.inputY
+          end
+
+          -- Height is ENGINE-DRIVEN when expanded: the container uses AutomaticSize.Y so Roblox sizes it to
+          -- fit its content (incl. dynamic/reactive rows) WITHOUT any post-construction script write. That
+          -- matters because some executors deny the GUI capability to Heartbeat/property-changed handlers --
+          -- a script-driven re-measure there silently fails and ClipsDescendants then crops every row past
+          -- the first. Collapsed uses AutomaticSize.None + a fixed header height (so the collapse can tween
+          -- the Size down). Toggle animations run on the header-click handler, which keeps capability.
+          local function applyHeight(animated)
+            if animated then
+              -- Quint/Out, NOT the rotateTo default (Back/Out): a Back overshoot swings a 16px glyph past
+              -- its stop and back, which reads as a jitter rather than a flourish at that size. The pop
+              -- lives on the caret's UIScale instead, where an overshoot is invisible but felt.
+              Animate.rotateTo(caret, "base", expanded and 90 or 0, Animate.EASING.smooth, Animate.DIR.Out)
+              Icons.tint(caret, caretColor(), "fast")
+              caretScale.Scale = theme.Motion.popFrom
+              Animate.springTo(caretScale, "release", { Scale = 1 })
+              if expanded then
+                -- reveal: fade the divider in, slide the content up one gap into place, animate the height
+                -- open and then hand sizing to the engine (AutomaticSize.Y) so dynamic content keeps
+                -- fitting with no further script write. This runs on the header-click handler, which keeps
+                -- the GUI capability even where Heartbeat does not.
+                content.Visible = true
+                divider.Visible = true; divider.BackgroundTransparency = 1
+                Animate.to(divider, "fast", { BackgroundTransparency = 0 })
+                content.Position = UDim2.new(0, 0, 0, REST_Y + GAP)
+                Animate.to(content, "base", { Position = UDim2.new(0, 0, 0, REST_Y) })
+                if hasContent() then
+                  container.AutomaticSize = Enum.AutomaticSize.None
+                  local target = REST_Y + contentHeight()
+                  container.Size = UDim2.new(1, 0, 0, HEADER_H)
+                  Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, target) }, function()
+                    if expanded then container.AutomaticSize = Enum.AutomaticSize.Y end
+                  end)
+                else
+                  -- nothing to measure: contentHeight() would still report the bottom padding, so the
+                  -- tween would open to a slab of empty card and snap shut again. Hand the height straight
+                  -- to the engine; it grows the moment a row is mounted.
+                  container.AutomaticSize = Enum.AutomaticSize.Y
+                  container.Size = UDim2.new(1, 0, 0, HEADER_H)
+                end
+              else
+                -- collapse mirrors expand: the divider fades BEFORE it hides and the content slides back
+                -- down one gap (where the expand started) instead of snapping out with the height.
+                Animate.to(divider, "fast", { BackgroundTransparency = 1 })
+                Animate.to(content, "exit", { Position = UDim2.new(0, 0, 0, REST_Y + GAP) },
+                  Animate.EASING.exit, Animate.DIR.In)
+                -- freeze the current engine-fit height, switch AutomaticSize off, animate down
+                local sz = container.AbsoluteSize
+                local from = (sz and sz.Y and sz.Y > HEADER_H) and sz.Y or (REST_Y + contentHeight())
+                container.AutomaticSize = Enum.AutomaticSize.None
+                container.Size = UDim2.new(1, 0, 0, from)
+                Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, HEADER_H) }, function()
+                  if not expanded then content.Visible = false; divider.Visible = false end
+                end)
+              end
+            else
+              content.Position = UDim2.new(0, 0, 0, REST_Y)
+              divider.BackgroundTransparency = 0
+              if expanded then
+                content.Visible = true; divider.Visible = true
+                container.AutomaticSize = Enum.AutomaticSize.Y
+                container.Size = UDim2.new(1, 0, 0, HEADER_H)   -- min; the engine grows it to fit the content
+              else
+                content.Visible = false; divider.Visible = false
+                container.AutomaticSize = Enum.AutomaticSize.None
+                container.Size = UDim2.new(1, 0, 0, HEADER_H)
+              end
+              caret.Rotation = expanded and 90 or 0
+              caret.ImageColor3 = caretColor()
+              caretScale.Scale = 1
+            end
+          end
+
+          function api:Toggle() expanded = not expanded; applyHeight(true); return expanded end
+          function api:Expand() if not expanded then expanded = true; applyHeight(true) end end
+          function api:Collapse() if expanded then expanded = false; applyHeight(true) end end
+          function api:IsExpanded() return expanded end
+          function api:SetTitle(s) Safe.mutate(function() title.Text = s end) end
+          function api:SetIcon(name) if leadIcon then Safe.mutate(function() Icons.apply(leadIcon, name, theme.Colors[theme.Icon.accent]) end) end end
+
+          function api.MountRow(child)
+            order = order + 1
+            child.LayoutOrder = order
+            child.Parent = content              -- AutomaticSize.Y on the container fits it automatically
+            return order
+          end
+
+          -- AddX control methods (Label/Button/Toggle/TextBox/NumberBox/SelectBox/...)
+          Host.attach(api, {
+            R = REG, content = content, theme = theme, config = opts.Config, window = opts.Window,
+            registerSearchable = opts.RegisterSearchable, accentThemer = opts.AccentThemer,
+            registerControl = opts.RegisterControl,
+            nextOrder = function() order = order + 1; return order end,
+          })
+
+          -- Header hover wash (plan 2.7): the wash Frame lives INSIDE the header, so the container's own
+          -- card colour is never touched; its inset cancels the header's UIPadding so the wash covers the
+          -- full row, and its corner matches the one the header carries (the container clips square).
+          local hover = Recipes.hover(header, { theme = theme, host = header, kind = "wash",
+            corner = theme.Radius.md, inset = { x = theme.Spacing.inputX, y = 0 } })
+          maid:Give(hover.disconnect)
+
+          if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function()
+            container.BackgroundColor3 = theme.Colors.card
+            local st = container:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
+            title.TextColor3 = theme.Colors.foreground
+            Icons.apply(caret, "chevron-right", caretColor())
+            caret.Rotation = expanded and 90 or 0
+            if leadIcon then Icons.apply(leadIcon, opts.Icon, theme.Colors[theme.Icon.accent]) end
+            divider.BackgroundColor3 = theme.Colors.border
+            hover.reskin()                       -- the wash is foreground-tinted: re-read it by name
+          end)) end
+
+          maid:Give(header.MouseButton1Click:Connect(function() api:Toggle() end))
+          maid:Give(container)
+
+          function api.Destroy() maid:DoCleanup() end
+
+          applyHeight(false)
+          return api
+        end
+
+        return Accordion
+
+    end
+
+    -- Module: components/tab
+    EmbeddedModules["components/tab"] = function()
+        -- Deps injected via Init(R) (bundler cannot rewrite require() inside embedded modules).
+        local Tab = {}
+        local Create, DefaultTheme, Animate, Maid, Icons, Accordion, Host, REG, Safe, Recipes, Device
+
+        function Tab.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate
+          Maid = R.Maid; Icons = R.Icons; Accordion = R.Accordion; Host = R.Host; REG = R; Safe = R.Safe
+          Recipes = R.Recipes; Device = R.Device
+        end
+
+        function Tab.new(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local maid = Maid.new()
+          local order = 0
+          local selected = false
+
+          -- Label + icon share one tint role: structural (muted) at rest, structuralActive (foreground)
+          -- once selected. Resolved by token NAME at paint time so SetMode/SetAccent re-tint by name.
+          local function tintRole() return selected and theme.Icon.structuralActive or theme.Icon.structural end
+          local function tint() return theme.Colors[tintRole()] end
+
+          -- sidebar button
+          local button = Create("TextButton", {
+            Name = "TabButton",
+            Text = "",
+            AutoButtonColor = false,
+            BackgroundColor3 = theme.Colors.surface,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 34),
+            LayoutOrder = opts.LayoutOrder or 0,
+            Parent = opts.SidebarParent,
+            Create.corner(theme.Radius.md),
+            Create.padding({ left = 10, right = 10 }),
+          })
+          local icon = Create("ImageLabel", {
+            Name = "Icon",
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 16, 0, 16),
+            Position = UDim2.new(0, 4, 0.5, -8),
+            Parent = button,
+          })
+          if opts.Icon then Icons.apply(icon, opts.Icon, tint()) else icon.Visible = false end
+          local label = Create("TextLabel", {
+            Name = "Label",
+            BackgroundTransparency = 1,
+            Text = opts.Name or "Tab",
+            TextColor3 = tint(),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Size = UDim2.new(1, opts.Icon and -30 or -6, 1, 0),
+            Position = UDim2.new(0, opts.Icon and 30 or 6, 0, 0),
+            Parent = button,
+          })
+          Create.text(label, theme, "label")
+
+          -- Hover lifts label + icon to the active tint. The recipe resolves rest/hover by token name at
+          -- paint time, so `rest` is re-pointed on Select/Deselect: a pointer leaving the SELECTED tab
+          -- then paints it back to foreground, not muted. Skipped by the recipe on touch-only devices.
+          local hoverOpts = { theme = theme, kind = "text", label = label, icon = icon,
+            rest = tintRole(), hover = theme.Icon.structuralActive }
+          local hover = Recipes.hover(button, hoverOpts)
+          maid:Give(hover.disconnect)
+
+          -- Fill + label + icon for the current `selected`. animated = Select/Deselect (handler thread:
+          -- tweened, symmetric both ways); instant = themer closure (no tween inside a reskin), which
+          -- also re-reads the fill colour for UNselected tabs so the hover wash never shows a stale mode.
+          local function paintState(animated)
+            hoverOpts.rest = tintRole()
+            local c = tint()
+            if animated then
+              Animate.to(button, "fast", { BackgroundTransparency = selected and 0 or 1 })
+              Animate.to(label, "hover", { TextColor3 = c })
+              if opts.Icon then Icons.tint(icon, c, "hover") end
+            else
+              button.BackgroundColor3 = theme.Colors.surface
+              label.TextColor3 = c
+              if opts.Icon then Icons.apply(icon, opts.Icon, c) end
+              hover.reskin() -- a pointer currently over the tab keeps its lifted tint
+            end
+          end
+
+          -- content (plain Frame + slide transition; NOT a CanvasGroup, so a focused TextBox's
+          -- caret/selection renders — CanvasGroups composite children to a buffer that omits
+          -- the caret overlay, which made text cursors invisible/non-blinking).
+          local content = Create("Frame", {
+            Name = "TabContent",
+            BackgroundTransparency = 1,
+            Visible = false,
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Parent = opts.ContentParent,
+            Create.listLayout({ Padding = theme.Spacing.gap }),
+            Create.padding({ all = theme.Spacing.pad }),
+          })
+
+          -- Drive the parent ScrollingFrame's CanvasSize explicitly from this tab's content height.
+          -- AutomaticCanvasSize is unreliable here because the CanvasGroup starts hidden (measured 0).
+          local contentLayout = content:FindFirstChildOfClass("UIListLayout")
+          local contentPad = theme.Spacing.pad
+          -- carousel travel distance = the visible panel height (so a switch reads as a full page swap);
+          -- fall back to a sensible constant before the scroll frame has an AbsoluteSize (first paint / headless)
+          local function panelH()
+            local sf = content.Parent
+            local s = sf and sf.AbsoluteSize
+            return (s and s.Y and s.Y > 0 and s.Y) or 360
+          end
+          local function syncCanvas()
+            -- Driven by the AbsoluteContentSize property-changed signal below (engine thread, no GUI
+            -- capability on strict executors) AND by Select() (capability). Reading AbsoluteContentSize and
+            -- writing CanvasSize are both protected -> marshal through Safe.mutate (inline when capable).
+            Safe.mutate(function()
+              local sf = content.Parent
+              if selected and sf then
+                local acs = contentLayout.AbsoluteContentSize
+                sf.CanvasSize = UDim2.new(0, 0, 0, ((acs and acs.Y) or 0) + contentPad * 2)
+              end
+            end)
+          end
+          maid:Give(contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas))
+
+          local api = { Button = button, Content = content, Maid = maid }
+
+          function api:IsSelected() return selected end
+
+          -- vertical carousel: the incoming page slides in from sign*panelH, the outgoing exits to
+          -- -sign*panelH, both in sync and on the SAME curve (EASING.smooth) — so the two pages move as
+          -- one filmstrip, never colliding or drifting apart mid-slide.
+          -- dir +1 = navigating to a later tab (filmstrip scrolls up); -1 = earlier tab (scrolls down).
+          function api:Select(dir)
+            selected = true
+            local sign = (dir == -1) and -1 or 1
+            content.Position = UDim2.new(0, 0, 0, sign * panelH())
+            content.Visible = true
+            if content.Parent then content.Parent.CanvasPosition = Vector2.new(0, 0) end
+            syncCanvas()
+            Animate.to(content, "slow", { Position = UDim2.new(0, 0, 0, 0) }, Animate.EASING.smooth)
+            paintState(true)
+          end
+
+          function api:Deselect(dir)
+            if not selected then content.Visible = false; return end  -- already inactive: nothing to animate out
+            selected = false
+            local sign = (dir == -1) and -1 or 1
+            Animate.toThen(content, "slow", { Position = UDim2.new(0, 0, 0, -sign * panelH()) }, function()
+              if not selected then content.Visible = false; content.Position = UDim2.new(0, 0, 0, 0) end
+            end, Animate.EASING.smooth)
+            paintState(true)
+          end
+
+          function api.MountRow(child)
+            order = order + 1
+            child.LayoutOrder = order
+            child.Parent = content
+            return order
+          end
+
+          -- AddLabel/AddParagraph/AddSection/AddSeparator/AddButton/AddToggle/AddTextBox/
+          -- AddNumberBox/AddSelectBox are provided by the Host mixin (below).
+          Host.attach(api, {
+            R = REG, content = content, theme = theme, config = opts.Config, window = opts.Window,
+            registerSearchable = opts.RegisterSearchable, accentThemer = opts.AccentThemer,
+            registerControl = opts.RegisterControl,
+            nextOrder = function() order = order + 1; return order end,
+          })
+
+          if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function() paintState(false) end)) end
+
+          function api:AddAccordion(accOpts)
+            accOpts = accOpts or {}
+            order = order + 1
+            accOpts.Parent = content
+            accOpts.LayoutOrder = order
+            accOpts.Theme = theme
+            accOpts.Config = opts.Config
+            accOpts.Window = opts.Window
+            accOpts.RegisterSearchable = opts.RegisterSearchable
+            accOpts.AccentThemer = opts.AccentThemer
+            accOpts.RegisterControl = opts.RegisterControl
+            return Accordion.new(accOpts)
+          end
+
+          function api:SetIcon(name) opts.Icon = name; Safe.mutate(function() Icons.apply(icon, name, tint()); icon.Visible = true end) end
+          function api:SetTitle(s) Safe.mutate(function() label.Text = s end) end
+
+          -- Wash: the button's own fill at Opacity.tabHover while the pointer is over an UNselected tab
+          -- (the selected one is already solid). Bound only where a pointer exists — touch fires
+          -- Enter/Down/Up with no Leave, so a tap would leave the wash stuck — and a touch release falls
+          -- back to rest for the same reason (mirrors Recipes.hover).
+          if Device.SupportsHover() then
+            local function wash(on)
+              if not selected then Animate.to(button, "hover", { BackgroundTransparency = on and theme.Opacity.tabHover or 1 }) end
+            end
+            maid:Give(button.MouseEnter:Connect(function() wash(true) end))
+            maid:Give(button.MouseLeave:Connect(function() wash(false) end))
+            maid:Give(button.MouseButton1Up:Connect(function() if Device.GetInput() == "Touch" then wash(false) end end))
+          end
+          maid:Give(button.MouseButton1Click:Connect(function() if opts.OnActivate then opts.OnActivate(api) end end))
+          maid:Give(button)
+          maid:Give(content)
+          function api.Destroy() maid:DoCleanup() end
+
+          return api
+        end
+
+        return Tab
+
+    end
+
+    -- Module: core/mount
+    EmbeddedModules["core/mount"] = function()
+        -- Deps injected via Init(R). Resolves where/how to parent the root ScreenGui (robustness
+        -- fallback chain) and applies stealth (random name, cloneref, dedupe, protect).
+        -- Executor globals are read at CALL time so tests and late-injecting executors see current values.
+        local Mount = {}
+
+        function Mount.Init(R) end -- no deps
+
+        -- Feature-detected, GC-safe service getter. cloneref hides the reference from game traps.
+        function Mount.service(name)
+          local ok, s = pcall(function() return game:GetService(name) end)
+          if not ok or not s then return nil end
+          local okcr, cr = pcall(function() return cloneref or clonereference end)
+          if okcr and type(cr) == "function" then
+            local ok2, ref = pcall(cr, s)
+            if ok2 and ref then return ref end
+          end
+          return s
+        end
+
+        -- Resolve where/how to parent. Returns { parent, protect, studio }.
+        function Mount.resolve(config)
+          config = config or {}
+          if config.Parent ~= nil then return { parent = config.Parent } end
+
+          local studio = false
+          local rs = Mount.service("RunService")
+          if rs then local ok, v = pcall(function() return rs:IsStudio() end); studio = ok and v or false end
+
+          -- 1) gethui(): not enumerable via CoreGui/PlayerGui
+          local ok, hui = pcall(function() return gethui and gethui() end)
+          if ok and hui then return { parent = hui, studio = studio } end
+
+          -- 2) protect_gui family -> CoreGui (protect applied in finalize)
+          local protect = nil
+          if type(protectgui) == "function" then
+            protect = protectgui
+          elseif type(syn) == "table" and type(syn.protect_gui) == "function" then
+            protect = syn.protect_gui
+          end
+          local cg = Mount.service("CoreGui")
+          if cg then return { parent = cg, protect = protect, studio = studio } end
+
+          -- 3) PlayerGui: universal safety net (Studio & weak executors)
+          local players = Mount.service("Players")
+          local lp = players and players.LocalPlayer
+          if lp then
+            local pg = lp:FindFirstChildOfClass("PlayerGui")
+            if not pg then
+              local ok3, w = pcall(function() return lp:WaitForChild("PlayerGui", 5) end)
+              pg = ok3 and w or nil
+            end
+            if pg then return { parent = pg, studio = studio } end
+          end
+
+          return { parent = nil, studio = studio }
+        end
+
+        -- Readable in Studio / when overridden; random at runtime.
+        function Mount.guiName(config, studio)
+          config = config or {}
+          if type(config.GuiName) == "string" and config.GuiName ~= "" then return config.GuiName end
+          if config.Stealth == false or studio then return "EzUI" end
+          local hs = Mount.service("HttpService")
+          if hs then
+            local ok, guid = pcall(function() return hs:GenerateGUID(false) end)
+            if ok and guid then return guid end
+          end
+          return "_" .. tostring(math.random(100000, 999999999))
+        end
+
+        -- After the ScreenGui exists: dedupe prior EzUI roots (by attribute, since names may be
+        -- random) and apply protect. Studio skips protect (protect functions don't exist there).
+        -- Runs synchronously on the caller's thread to keep executor capability (do not defer).
+        function Mount.finalize(gui, ctx)
+          ctx = ctx or {}
+          gui:SetAttribute("__ezui", true)
+          local parent = gui.Parent
+          if parent then
+            for _, inst in ipairs(parent:GetChildren()) do
+              if inst ~= gui and inst:GetAttribute("__ezui") then inst:Destroy() end
+            end
+          end
+          if ctx.protect and not ctx.studio then pcall(ctx.protect, gui) end
+          return gui
+        end
+
+        -- A stealth name for an internal (non-root) instance: random GUID at runtime, the readable
+        -- label in Studio. Used for the overlay root/catcher so they don't carry the "EzUI" signature
+        -- into the GUI tree (the root ScreenGui is already anonymized via guiName).
+        function Mount.anonName(readable)
+          local rs = Mount.service("RunService")
+          local studio = false
+          if rs then local ok, v = pcall(function() return rs:IsStudio() end); studio = ok and v or false end
+          if studio then return readable end
+          local hs = Mount.service("HttpService")
+          if hs then local ok, g = pcall(function() return hs:GenerateGUID(false) end); if ok and g then return g end end
+          return "_" .. tostring(math.random(100000, 999999999))
+        end
+
+        return Mount
+
+    end
+
+    -- Module: components/image
+    EmbeddedModules["components/image"] = function()
+        -- Deps injected via Init(R).
+        local Image = {}
+        local Create, DefaultTheme, Icons, Safe
+        function Image.Init(R) Create = R.Create; DefaultTheme = R.Theme; Icons = R.Icons; Safe = R.Safe end
+        function Image.new(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local img = Create("ImageLabel", {
+            Name = "Image", BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
+            Image = opts.Image or "", ImageColor3 = opts.Color or Color3.fromRGB(255, 255, 255),
+            Size = UDim2.new(1, 0, 0, opts.Height or 80), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
+          })
+          -- A Lucide glyph without an explicit Color follows the foreground token, so it must re-tint on
+          -- SetMode; a caller-owned Color3 is left alone. Plain images never register.
+          local glyphColor = function() return opts.Color or theme.Colors.foreground end
+          if opts.Lucide then Icons.apply(img, opts.Lucide, glyphColor()) end
+          local unreg = (opts.Lucide and not opts.Color and opts.AccentReg) and opts.AccentReg(function()
+            Icons.apply(img, opts.Lucide, glyphColor())
+          end)
+          return {
+            Frame = img,
+            SetImage = function(v) Safe.mutate(function() img.Image = v end) end,
+            Destroy = function() if unreg then unreg() end; img:Destroy() end,
+          }
+        end
+        return Image
+
+    end
+
+    -- Module: components/dialog
+    EmbeddedModules["components/dialog"] = function()
+        -- Deps injected via Init(R). Dialog.open(opts) builds a modal alert dialog in the overlay.
+        -- Mirrors shadcn AlertDialog: modal, non-dismissible by backdrop click (no X button) -- the user
+        -- picks a footer button, presses Escape/B (close) or Return/A (the primary button). Optional
+        -- header icon (inline / badge), a device-aware footer, and open/close motion are layered on below.
+        local Dialog = {}
+        local Create, DefaultTheme, Maid, Overlay, Button, Acrylic, Animate, Icons, Device, Effects, Theme
+        local UserInputService = game:GetService("UserInputService")
+        local KC = Enum.KeyCode
+        -- Open dialogs, innermost last. Only the top one answers the keyboard. Kept here (not just as an
+        -- Overlay depth) so a torn-down harness generation can never answer a key aimed at a live dialog.
+        local stack = {}
+        -- The input object a dialog has already acted on. Every open dialog listens to the same signal and
+        -- they all run in ONE dispatch, so without this an Escape that closes the inner dialog would still
+        -- be seen by the outer one (now the top of the stack) and close it in the same frame.
+        local handledInput = nil
+
+        function Dialog.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Button = R.Button; Acrylic = R.Acrylic
+          Animate = R.Animate; Icons = R.Icons; Device = R.Device; Effects = R.Effects; Theme = R.Theme
+          for i = #stack, 1, -1 do stack[i] = nil end
+          handledInput = nil
+        end
+
+        local MARGIN = 24     -- min gap between the card and the edge of its container when clamping width
+        local CLOSE_SCALE = 0.92  -- close zoom; no Motion token holds it (enterScale 0.94 / exitScale 0.96)
+        local BADGE_TINT = 0.15   -- surface mixed this far toward the icon colour; no theme token yet
+
+        -- Card 1501, content 1502, badge glyph 1503 -- all relative to the shared modal layer.
+        local function zOf(n) return Overlay.Z.modal + n end
+        local function mix(theme, a, b, t) return (theme.mix or Theme.mix)(a, b, t) end
+        local function modeVal(theme, tok) return (theme.modeVal or Theme.modeVal)(theme, tok) end
+        -- A destructive dialog must read before the button row does: the badge carries a little of the
+        -- icon's colour instead of the neutral surface.
+        local function badgeColor(theme, icon) return mix(theme, theme.Colors.surface, icon, BADGE_TINT) end
+
+        -- Card width: opts.Width (default 320), clamped to the container width minus margins when known.
+        local function resolveWidth(opts)
+          local want = opts.Width or 320
+          local avail
+          if opts.Window and opts.Window.Main then
+            local s = opts.Window.Main.AbsoluteSize; avail = s and s.X
+          else
+            local vp = Overlay.viewport(); avail = vp and vp.X
+          end
+          if avail and avail > 0 then
+            local max = avail - MARGIN * 2
+            if max > 0 and want > max then want = max end
+          end
+          return want
+        end
+
+        -- Card surface opts shared by decorate (build) and reskin (SetMode/SetAccent): opaque, with the
+        -- floating hairline alpha rather than the acrylic default so the card reads as a solid sheet.
+        local function cardSkin(theme) return { solid = true, strokeAlpha = theme.Stroke.floating } end
+
+        -- Header title: one TextLabel in every header shape, differing only in alignment + geometry.
+        local function titleLabel(parent, theme, opts, xAlign, props)
+          local lbl = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "Dialog",
+            TextColor3 = theme.Colors.foreground, TextXAlignment = xAlign, ZIndex = zOf(2), Parent = parent })
+          for k, v in pairs(props) do lbl[k] = v end
+          return Create.text(lbl, theme, "title")
+        end
+
+        -- Header: one of three shapes -- badge (icon square above a centred title), inline (small icon left
+        -- of the title), or a plain left-aligned title. Returns whether the header is centred so the
+        -- message can match its alignment, plus the coloured parts the reskin closure repaints.
+        local function buildHeader(card, theme, opts)
+          -- IconColor is a caller override; without one the tint follows theme.Colors.foreground live
+          local function iconColor() return opts.IconColor or theme.Colors.foreground end
+          local parts = { iconColor = iconColor }
+          if opts.Icon and opts.IconBadge then
+            local header = Create("Frame", { Name = "Header", BackgroundTransparency = 1,
+              Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 1, ZIndex = zOf(2), Parent = card })
+            Create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, theme.Spacing.gap),
+              HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = header })
+            parts.badge = Create("Frame", { Name = "IconBadge", BackgroundColor3 = badgeColor(theme, iconColor()),
+              Size = UDim2.new(0, 40, 0, 40), LayoutOrder = 1, ZIndex = zOf(2), Parent = header, Create.corner(theme.Radius.md) })
+            parts.icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5),
+              Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(0, 20, 0, 20), ZIndex = zOf(3), Parent = parts.badge })
+            Icons.apply(parts.icon, opts.Icon, iconColor())
+            parts.title = titleLabel(header, theme, opts, Enum.TextXAlignment.Center,
+              { Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 2 })
+            return true, parts
+          elseif opts.Icon then
+            local gap = theme.Spacing.icon
+            local header = Create("Frame", { Name = "Header", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22),
+              LayoutOrder = 1, ZIndex = zOf(2), Parent = card })
+            parts.icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5),
+              Position = UDim2.new(0, 0, 0.5, 0), Size = UDim2.new(0, 16, 0, 16), ZIndex = zOf(2), Parent = header })
+            Icons.apply(parts.icon, opts.Icon, iconColor())
+            parts.title = titleLabel(header, theme, opts, Enum.TextXAlignment.Left,
+              { Position = UDim2.new(0, 16 + gap, 0, 0), Size = UDim2.new(1, -(16 + gap), 1, 0) })
+            return false, parts
+          else
+            parts.title = titleLabel(card, theme, opts, Enum.TextXAlignment.Left,
+              { Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 1 })
+            return false, parts
+          end
+        end
+
+        -- Footer: non-touch -> right-aligned, content-width buttons (Action rightmost). Touch -> full-width
+        -- buttons stacked vertically and reversed, so the primary Action sits on top (shadcn flex-col-reverse).
+        -- Buttons own their themer registration (AccentReg) and release it through the dialog maid.
+        local function buildFooter(card, theme, buttons, touch, fire, maid, accentReg)
+          local n = #buttons
+          local row = Create("Frame", { Name = "Buttons", BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, touch and 0 or 34),
+            AutomaticSize = touch and Enum.AutomaticSize.Y or Enum.AutomaticSize.None,
+            LayoutOrder = 4, ZIndex = zOf(2), Parent = card })
+          Create("UIListLayout", {
+            FillDirection = touch and Enum.FillDirection.Vertical or Enum.FillDirection.Horizontal,
+            HorizontalAlignment = touch and Enum.HorizontalAlignment.Center or Enum.HorizontalAlignment.Right,
+            SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, theme.Spacing.gap), Parent = row })
+          for i, b in ipairs(buttons) do
+            local order = touch and (n - i + 1) or i
+            local btn = Button.new({ Parent = row, LayoutOrder = order, Theme = theme, Text = b.Text or "OK",
+              Variant = b.Variant, Icon = b.Icon, AutoWidth = not touch, AccentReg = accentReg,
+              Callback = function() fire(b) end })
+            maid:Give(btn)
+          end
+        end
+
+        function Dialog.open(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local maid = Maid.new()
+          local buttons = opts.Buttons or { { Text = "OK" } }
+          local handle = {}
+          local touch = Device and Device.IsTouch() or false
+          local width = resolveWidth(opts)
+          local modal = opts.Modal ~= false
+          -- A dialog takes the screen: a dropdown left open underneath would float over the scrim.
+          Overlay.closeAll()
+          -- Stacked dialogs: only the FIRST paints a scrim (0.5 over 0.5 would read as 0.75) and only the
+          -- innermost answers the keyboard.
+          local depth = Overlay.pushDialog()
+          local function scrimAlpha() return modeVal(theme, theme.Opacity.dialogScrim) end
+          local scrimGoal = (modal and depth == 1) and scrimAlpha() or 1
+
+          local dim = Create("TextButton", { Name = "Dialog", AutoButtonColor = false, Text = "",
+            BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 1, 0), ZIndex = Overlay.Z.modal, Modal = modal })
+          -- CanvasGroup so the whole card (fill, stroke, text, buttons) fades as ONE piece instead of a
+          -- dozen independently tweened transparencies.
+          local card = Create("CanvasGroup", { Name = "Card", Size = UDim2.new(0, width, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y, GroupTransparency = 1,
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), ZIndex = zOf(1), Parent = dim,
+            Create.corner(theme.Radius.lg), Create.padding({ all = theme.Spacing.pad }),
+            Create.listLayout({ Padding = theme.Spacing.gap }) })
+          -- ONE UIScale carries both jobs: the UI scale (2.22 -- standalone only, a window-scoped dialog
+          -- already lives inside Main and must not scale twice) and the enter/exit zoom on top of it.
+          local base = opts.Window and 1 or Overlay.scale()
+          local us = Create("UIScale", { Scale = base * theme.Motion.enterScale, Parent = card })
+          Acrylic.decorate(card, theme, cardSkin(theme))
+          local stroke = card:FindFirstChildOfClass("UIStroke")
+          Effects.rim(stroke, theme)
+          -- Shadow is a SIBLING of the card at the modal layer (card is +1), so it never covers it. The
+          -- card is AutomaticSize, so its geometry is tracked through the Absolute* signals.
+          local shadow = Effects.shadow(dim, theme, { name = "DialogShadow", level = "dialog", zIndex = Overlay.Z.modal })
+          if shadow then shadow.ImageTransparency = 1 end
+
+          local centered, parts = buildHeader(card, theme, opts)
+          local message
+          if opts.Message then
+            message = Create("TextLabel", { Name = "Message", BackgroundTransparency = 1, Text = opts.Message,
+              TextColor3 = theme.Colors.mutedForeground,
+              TextXAlignment = centered and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left, TextWrapped = true,
+              TextYAlignment = Enum.TextYAlignment.Top,
+              Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, ZIndex = zOf(2), Parent = card })
+            Create.text(message, theme, "body")
+          end
+
+          -- Hairline between the body and the footer (pointer UIs only: the touch footer is a full-width
+          -- stack where a rule reads as clutter). A row of the card's UIListLayout, hence LayoutOrder 3.
+          local rule
+          if not touch then
+            rule = Create("Frame", { Name = "FooterRule", BackgroundColor3 = theme.Colors.border,
+              BackgroundTransparency = theme.Stroke.divider, BorderSizePixel = 0,
+              Size = UDim2.new(1, 0, 0, 1), LayoutOrder = 3, ZIndex = zOf(2), Parent = card })
+          end
+
+          local closing = false
+          -- Live re-skin (SetMode/SetAccent) while the dialog is open: card fill + stroke through the
+          -- acrylic painter, then every text/icon part from the live palette. Released with the maid on Close.
+          if opts.AccentReg then maid:Give(opts.AccentReg(function()
+            Acrylic.reskin(card, theme, cardSkin(theme))
+            Effects.rim(stroke, theme)                 -- per-mode edge alphas
+            Effects.reskin(shadow, theme, "shadow")    -- nil-tolerant
+            if modal and depth == 1 and not closing then dim.BackgroundTransparency = scrimAlpha() end
+            if rule then rule.BackgroundColor3 = theme.Colors.border end
+            parts.title.TextColor3 = theme.Colors.foreground
+            if message then message.TextColor3 = theme.Colors.mutedForeground end
+            if parts.badge then parts.badge.BackgroundColor3 = badgeColor(theme, parts.iconColor()) end
+            if parts.icon then Icons.apply(parts.icon, opts.Icon, parts.iconColor()) end
+          end)) end
+
+          local function popSelf()
+            for i = #stack, 1, -1 do if stack[i] == handle then table.remove(stack, i); break end end
+          end
+
+          function handle.Close()
+            if closing then return end
+            closing = true
+            popSelf()
+            Overlay.popDialog()
+            dim.Modal = false
+            dim.Active = false
+            -- Fold out: shrink + fade + drop, scrim last so the card is gone before the room lights up.
+            Animate.to(us, "exit", { Scale = base * CLOSE_SCALE }, Animate.EASING.exit, Animate.DIR.In)
+            Animate.to(card, "exit", { GroupTransparency = 1, Position = UDim2.new(0.5, 0, 0.5, theme.Motion.dialogDrop) },
+              Animate.EASING.exit, Animate.DIR.In)
+            if shadow then Animate.to(shadow, "exit", { ImageTransparency = 1 }, Animate.EASING.exit, Animate.DIR.In) end
+            Animate.toThen(dim, "exit", { BackgroundTransparency = 1 }, function() maid:DoCleanup(); dim:Destroy() end,
+              Animate.EASING.exit, Animate.DIR.In)
+          end
+
+          -- A footer button (and Return/A) runs its callback and then closes.
+          local function fire(b)
+            if b and b.Callback then b.Callback() end
+            handle.Close()
+          end
+          buildFooter(card, theme, buttons, touch, fire, maid, opts.AccentReg)
+
+          maid:Give(dim)
+          -- Scope the backdrop to the owning window when one is given (its api exposes .Main), so the
+          -- scrim covers only the window frame (rounded to match it). Standalone dialogs fall back to the
+          -- global screen overlay, shared with dropdowns/colorpickers that want the full screen.
+          local winFrame = opts.Window and opts.Window.Main
+          if winFrame then
+            Create.corner(theme.Radius.window).Parent = dim
+            dim.Parent = winFrame
+          else
+            Overlay.mount(dim)
+          end
+          if shadow then Effects.follow(shadow, card, "dialog", theme, maid) end
+
+          -- Escape / gamepad B closes; Return / gamepad A fires the LAST (primary) button. gameProcessed
+          -- input (chat, a focused TextBox) is ignored, and only the innermost dialog reacts.
+          stack[#stack + 1] = handle
+          maid:Give(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if gameProcessed or closing then return end
+            if handledInput ~= nil and handledInput == input then return end
+            -- Torn down by its owner rather than by Close() (a window Close destroys the whole Main
+            -- subtree): release the slot -- without this the dead dialog would sit on top of the stack and
+            -- swallow every later Escape. Roblox-safe liveness check: a destroyed Instance has Parent nil.
+            if dim.Parent == nil then handle.Close(); return end
+            -- The stack alone answers "am I the innermost LIVE dialog". `depth` is captured once at open
+            -- and never moves, while Overlay.dialogDepth() falls every time ANY dialog closes -- so
+            -- comparing them would deafen a nested dialog forever as soon as its opener closed first
+            -- (a footer button whose callback opens a confirm: fire() runs the callback, THEN closes).
+            if stack[#stack] ~= handle then return end
+            local k = input and input.KeyCode
+            if k == nil then return end
+            if k == KC.Escape or k == KC.ButtonB then
+              handledInput = input; handle.Close()
+            elseif k == KC.Return or k == KC.ButtonA then
+              handledInput = input; fire(buttons[#buttons])
+            end
+          end))
+
+          -- Unfold: fade + zoom from Motion.enterScale + a rise of Motion.dialogRise (shadcn fade-zoom-95).
+          card.Position = UDim2.new(0.5, 0, 0.5, theme.Motion.dialogRise)
+          Animate.to(dim, "base", { BackgroundTransparency = scrimGoal })
+          Animate.to(card, "base", { GroupTransparency = 0, Position = UDim2.new(0.5, 0, 0.5, 0) }, Animate.EASING.smooth)
+          Animate.springTo(us, "enter", { Scale = base })
+          if shadow then Animate.to(shadow, "base", { ImageTransparency = (theme.fx or Theme.fx)(theme).shadow }) end
+          return handle
+        end
+
+        return Dialog
+
+    end
+
+    -- Module: core/theme
+    EmbeddedModules["core/theme"] = function()
+        local Theme = {}
+
+        local function rgb(r, g, b) return Color3.fromRGB(r, g, b) end
+
+        -- Every number a component used to hardcode lives here (durations, alphas, sizes, offsets),
+        -- with TODAY'S literal as the default so adding a token never moves a pixel on its own. Groups
+        -- are named-field tables only (no arrays): deepMerge recurses into named fields, so a window
+        -- override like { Sizes = { fab = { size = 48 } } } replaces one leaf and inherits the rest.
+        local DEFAULT = {
+          Colors = {
+            background = rgb(9, 9, 11),
+            card = rgb(24, 24, 27),
+            surface = rgb(39, 39, 42),
+            border = rgb(63, 63, 70),
+            input = rgb(39, 39, 42),
+            ring = rgb(212, 212, 216),
+            mutedForeground = rgb(161, 161, 170),
+            foreground = rgb(250, 250, 250),
+            primary = rgb(250, 250, 250),
+            primaryForeground = rgb(24, 24, 27),
+            destructive = rgb(239, 68, 68),
+            success = rgb(34, 197, 94),
+            warning = rgb(234, 179, 8),
+            info = rgb(59, 130, 246),
+            -- OFF track sits one step above surface (39) so the pill reads against its own row (plan 2.9)
+            switchTrackOff = rgb(63, 63, 70),
+          },
+          Radius = { sm = 6, md = 8, lg = 10, xl = 14, window = 12, input = 6, xs = 2 },
+          Spacing = { pad = 16, padLg = 24, inputX = 12, inputY = 8, gap = 8, section = 16, major = 24, icon = 8 },
+          Font = {
+            title = { Weight = Enum.FontWeight.Bold, Size = 18 },
+            header = { Weight = Enum.FontWeight.Medium, Size = 16 },
+            label = { Weight = Enum.FontWeight.Medium, Size = 14 },
+            body = { Weight = Enum.FontWeight.Regular, Size = 14, LineHeight = 1.25 },
+            muted = { Weight = Enum.FontWeight.Regular, Size = 12 },
+            overline = { Weight = Enum.FontWeight.Medium, Size = 11 },
+          },
+          -- fast/base/slow are pinned by animate_test; the rest is the motion grammar (unfold in, fold out)
+          Motion = {
+            fast = 0.12, base = 0.18, slow = 0.28,
+            enter = 0.28, exit = 0.14, hover = 0.12, press = 0.08, release = 0.22, stagger = 0.035,
+            enterScale = 0.94, exitScale = 0.96, pressScale = 0.97, hoverScale = 1.06, popFrom = 0.9,
+            knobStretch = 1.2, handleGrow = 1.3, handleHover = 1.15, spin = 0.8, snap = 0.3, hideDrift = 12,
+            popSlide = 6, dialogRise = 12, dialogDrop = 8, bumpPx = 2, copyRevert = 1.2, pulse = 0.4,
+            shake = { amp = 3, steps = 4, step = 0.04 },
+            cascade = { x = 6, y = 8 },
+          },
+          -- shadowId = the uploaded assets/shadow-9slice.png; set it to '' to switch every depth layer
+          -- off (Effects.shadow/glow then return nil and each call site skips the layer).
+          -- slice must match that sprite: 499 square with a 49px falloff border. controlGlow 'auto' = off on mobile
+          Effect = {
+            shadowId = "rbxassetid://91077512535886", slice = { x0 = 49, y0 = 49, x1 = 450, y1 = 450 },
+            window = { spread = 28, offsetY = 6 }, dialog = { spread = 32, offsetY = 10 }, popover = { spread = 18, offsetY = 4 },
+            toast = { spread = 16, offsetY = 4 }, tooltip = { spread = 10, offsetY = 2 }, control = { spread = 6, offsetY = 0 },
+            lift = { spreadDelta = 8, alphaDelta = -0.12 }, controlGlow = "auto",
+            skeleton = { period = 1.1, rotation = 15 },   -- shimmer sweep period (s) and band angle (deg)
+          },
+          -- UIStroke transparencies; panel/search are per-mode (read through Theme.modeVal)
+          Stroke = {
+            window = 0.3, floating = 0, control = 0, divider = 0.4, focusThickness = 2,
+            panel = { dark = 0.6, light = 0 }, search = { dark = 0.8, light = 0.5 },
+            -- track = progress/slider rail hairline; knob = rim that keeps a white knob readable on a
+            -- white track; pulse = the alphas a listening keybind chip breathes between.
+            track = 0.5, knob = 0.7, pulse = { low = 0.2, high = 0.7 },
+          },
+          Opacity = {
+            hoverWash = 0.94, pressWash = 0.9, hoverFill = 0.12, pressFill = 0.2, ghostHover = 0.4, ghostPress = 0.25,
+            tabHover = 0.92, tabPress = 0.88, optionHover = 0.6, rowHover = 0.94, disabled = 0.5, scrim = 0.45,
+            dialogScrim = { dark = 0.5, light = 0.6 }, glowHover = 0.7,
+            flash = 0.35,   -- lift a progress fill starts from when it completes, fading back to opaque
+          },
+          -- frost = default host transparency behind the sheen; glintFade = fade band at each end of the top glint line
+          -- popoverFrost = a popover is frosted one step LIGHTER than the shell: content behind it must stay readable
+          Acrylic = { noiseId = "rbxassetid://9968344105", tileSize = 128, strokeAlpha = 0.3, highlightBand = 0.45, frost = 0.12, glintFade = 0.25, popoverFrost = 0.04 },
+          Scrollbar = { imageId = "", alpha = 0.35 },
+          Sizes = {
+            icon = 16, iconSm = 14, iconButton = 26, touchHit = 44, scrollbar = 4, progress = 8, sliderHit = 24, chip = 22,
+            knob = 20, tagMeasureFudge = 1.08, dragKeep = 40, dragThreshold = 6,
+            titleBar = 40, titleBarTall = 56, -- window.lua TITLE_H / TITLE_H_TALL (title image or subtitle)
+            resizeGrip = 12, resizeGripInset = 4, splitGap = 12,
+            indicator = { w = 3, h = 18, stretch = 26, radius = 2, haloW = 9, haloH = 26, haloAlpha = 0.85 },
+            grip = { w = 2, h = 24 },
+            fab = { size = 44, simple = 50, peek = 15, hoverPeek = 7, margin = 16, radius = 12, popFrom = 0.6 },
+          },
+          -- icon tint roles: names of Colors tokens, resolved at paint time so SetMode/SetAccent re-tint
+          Icon = { structural = "mutedForeground", structuralActive = "foreground", accent = "primary" },
+          Tooltip = { delay = 0.35, gap = 6, padX = 8, height = 24 },
+          Toast = {
+            width = 300, inset = 16, gap = 8, peek = 10, maxVisible = 3, peekScale = 0.05, peekFade = 0.18, barHeight = 3,
+            padX = 12, padY = 8, progressInset = 0, slide = 48, exitSlide = 32, exitScale = 0.95, typeTint = 0.35,
+            badgeAlpha = 0.85, staggerCap = 5,
+          },
+        }
+
+        Theme.PALETTES = {
+          dark = DEFAULT.Colors,
+          -- Tonal ladder: chrome 240 -> surface 244 -> input 250 -> card 255 must stay four distinct steps so
+          -- window shell, rows, fields and panels separate without relying on strokes (plan 1.13).
+          light = {
+            background = rgb(240, 240, 243), card = rgb(255, 255, 255), surface = rgb(244, 244, 245),
+            border = rgb(228, 228, 231), input = rgb(250, 250, 250), ring = rgb(24, 24, 27),
+            mutedForeground = rgb(113, 113, 122), foreground = rgb(24, 24, 27),
+            primary = rgb(24, 24, 27), primaryForeground = rgb(250, 250, 250),
+            destructive = rgb(239, 68, 68), success = rgb(34, 197, 94), warning = rgb(234, 179, 8),
+            info = rgb(59, 130, 246), switchTrackOff = rgb(212, 212, 216), -- OFF track darker than surface 244 (plan 2.9)
+          },
+        }
+
+        -- Per-mode effect values live OUTSIDE DEFAULT: applyMode only swaps Colors, so anything that
+        -- must flip with the mode is looked up through Theme.fx(theme) at paint time instead of being
+        -- copied into the instance. light.sheenTop is nil on purpose: the acrylic sheen then falls back
+        -- to theme.Colors.card (an identity multiplier), keeping the light gradient tests green.
+        Theme.MODE_EFFECTS = {
+          dark = {
+            sheenTop = rgb(255, 255, 255), sheenBottom = rgb(214, 214, 222), highlight = 0.93,
+            grain = 0.92, grainTint = rgb(255, 255, 255), edgeTop = 0.0, edgeBottom = 0.65, glint = 0.86,
+            inset = rgb(196, 196, 206), shadow = 0.5, glow = 0.72,
+          },
+          light = {
+            sheenTop = nil, sheenBottom = rgb(240, 240, 243), highlight = 1,
+            grain = 0.97, grainTint = rgb(0, 0, 0), edgeTop = 0.2, edgeBottom = 0.7, glint = 1,
+            inset = rgb(236, 236, 240), shadow = 0.8, glow = 0.8,
+          },
+        }
+
+        -- swap base+semantic tokens in place, preserving the live accent (primary/primaryForeground)
+        function Theme.applyMode(theme, mode)
+          local p = Theme.PALETTES[mode] or Theme.PALETTES.dark
+          for k, v in pairs(p) do
+            if k ~= "primary" and k ~= "primaryForeground" then theme.Colors[k] = v end
+          end
+          theme.Mode = mode
+          return theme
+        end
+
+        -- Effect table for the theme's current mode; Mode unset (module default) or unknown reads as dark.
+        function Theme.fx(theme)
+          local mode = type(theme) == "table" and theme.Mode or nil
+          return Theme.MODE_EFFECTS[mode] or Theme.MODE_EFFECTS.dark
+        end
+
+        -- A token is per-mode when it is a { dark=, light= } table; anything else (numbers, strings,
+        -- nested groups like Motion.shake) passes through untouched. A per-mode table missing the
+        -- current mode falls back to its dark value so a partial override never yields nil.
+        function Theme.modeVal(theme, tok)
+          if type(tok) ~= "table" or (tok.dark == nil and tok.light == nil) then return tok end
+          local mode = type(theme) == "table" and theme.Mode or nil
+          local v = mode and tok[mode]
+          if v == nil then v = tok.dark end
+          return v
+        end
+
+        -- Manual lerp on .R/.G/.B only: real Color3 exposes nothing else that is safe here (verify_bundle's
+        -- faithful Color3 throws on R8/Lerp), and Color3.new keeps the result a plain Color3.
+        function Theme.mix(a, b, t)
+          -- nil guard only: a real Color3 is userdata, so a type()=="table" check would throw in Roblox
+          if a == nil or b == nil then error("Theme.mix(a, b, t): two Color3 values required", 2) end
+          t = tonumber(t) or 0
+          if t < 0 then t = 0 elseif t > 1 then t = 1 end
+          return Color3.new(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t)
+        end
+
+        local function deepMerge(base, over)
+          local out = {}
+          for k, v in pairs(base) do
+            if type(v) == "table" then out[k] = deepMerge(v, (over and over[k]) or {}) else out[k] = v end
+          end
+          if over then for k, v in pairs(over) do if out[k] == nil then out[k] = v elseif type(v) ~= "table" then out[k] = v end end end
+          return out
+        end
+
+        -- expose defaults directly
+        for k, v in pairs(DEFAULT) do Theme[k] = v end
+
+        -- BuilderSans face for a Font role weight. Font.fromName is the only API that carries the weight
+        -- (Font.fromEnum takes ONE argument and would silently drop it); nil where the Font global is
+        -- absent so Create.text leaves FontFace alone and the label keeps Font = BuilderSans.
+        -- BuilderSans ships no 600, so a SemiBold request resolves to Bold rather than a missing face.
+        function Theme.FontFace(weight)
+          if not (Font and Font.fromName) then return nil end
+          if weight == nil then weight = Enum.FontWeight.Regular end
+          if weight == Enum.FontWeight.SemiBold then weight = Enum.FontWeight.Bold end
+          return Font.fromName("BuilderSans", weight)
+        end
+
+        function Theme.new(overrides)
+          overrides = overrides or {}
+          local t = deepMerge(DEFAULT, overrides)
+          -- helpers ride on the instance so a component holding only `theme` can call theme.fx(theme) etc.
+          t.FontFace = Theme.FontFace
+          t.fx = Theme.fx
+          t.modeVal = Theme.modeVal
+          t.mix = Theme.mix
+          t.new = Theme.new
+          return t
+        end
+
+        return Theme
+
+    end
+
+    -- Module: core/overlay
+    EmbeddedModules["core/overlay"] = function()
+        -- Deps injected via Init(R).
+        local Overlay = {}
+        local Create, Mount
+        local root = nil
+        local catcher = nil -- full-screen click-catcher behind open popovers (closes them on outside click)
+        local popovers = {} -- set of close functions for open popovers (dropdowns, color pickers)
+
+        -- Process-wide UI scale (last writer wins, like Animate.setEnabled): the window that last called
+        -- SetUIScale owns it. Overlay children scale THEMSELVES from this number (UIScale on the toast
+        -- container / tip / dropdown / card) — never a UIScale on the overlay root, because the catcher's
+        -- (1,0,1,0) size would then stop covering the screen.
+        local DEFAULT_SCALE = 1
+        local uiScale = DEFAULT_SCALE
+        local dialogDepth = 0 -- stacked-dialog counter (2.12); reset() zeroes it
+
+        -- Overlay layers (ZIndexBehavior.Sibling: siblings compare ZIndex). Components read from here
+        -- instead of repeating the literals: popover content is Z.popover+N, dialog card Z.modal+N, etc.
+        Overlay.Z = { catcher = 1000, popover = 1001, modal = 1500, fab = 1700, toast = 1800, tooltip = 2000 }
+
+        -- Anchor-to-popover gap when the caller passes none: today's selectbox literal (4px), kept
+        -- as the default so a caller that has not yet forwarded a theme token keeps its geometry.
+        local DEFAULT_GAP = 4
+        -- Unmeasured-screen fallback (mock / first frame before AbsoluteSize is valid).
+        local FALLBACK_VIEWPORT = { X = 1920, Y = 1080 }
+
+        function Overlay.Init(R) Create = R.Create; Mount = R.Mount end
+
+        -- Anonymous (random at runtime, readable in Studio) name so overlay instances don't carry the
+        -- "EzUI" signature into the GUI tree. Falls back to the readable label if Mount is unavailable.
+        local function anon(readable)
+          if Mount and Mount.anonName then return Mount.anonName(readable) end
+          return readable
+        end
+
+        -- A transparent full-screen button mounted under the popover (Z.catcher, the popover is
+        -- Z.popover+). A click anywhere outside the popover lands on it and closes everything.
+        local function ensureCatcher()
+          if catcher and catcher.Parent ~= nil then return end
+          if not root then return end
+          catcher = Create("ImageButton", {
+            Name = anon("OverlayCatcher"), AutoButtonColor = false, BackgroundTransparency = 1,
+            Active = true, Size = UDim2.new(1, 0, 1, 0), ZIndex = Overlay.Z.catcher, Parent = root,
+          })
+          catcher.MouseButton1Click:Connect(function() Overlay.closeAll() end)
+        end
+
+        local function removeCatcher()
+          if catcher then catcher:Destroy(); catcher = nil end
+        end
+
+        -- Non-creating getter: the live overlay root or nil. Used by Safe's capability probe so it
+        -- never forces root creation. Roblox-safe liveness check (a destroyed Instance has Parent=nil).
+        function Overlay.peek()
+          if root and root.Parent ~= nil then return root end
+          return nil
+        end
+
+        function Overlay.get(parentGui)
+          -- Roblox-safe liveness check: reading a non-existent member (e.g. a mock-only
+          -- "_destroyed" flag) THROWS on real Instances. A destroyed Instance has Parent=nil.
+          if root and root.Parent ~= nil then return root end
+          root = Create("Frame", {
+            Name = anon("OverlayRoot"),
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 1, 0),
+            ZIndex = Overlay.Z.catcher,
+            ClipsDescendants = false,
+            Parent = parentGui,
+          })
+          return root
+        end
+
+        function Overlay.mount(element)
+          assert(root, "Overlay.get(parentGui) must be called before mount")
+          element.Parent = root
+          return element
+        end
+
+        -- Popover registry: components register their Close fn so the window can close
+        -- every open popover at once (e.g. on drag/resize/minimize/shutdown).
+        function Overlay.trackPopover(closeFn) popovers[closeFn] = true; ensureCatcher(); return closeFn end
+        function Overlay.untrackPopover(closeFn)
+          popovers[closeFn] = nil
+          if next(popovers) == nil then removeCatcher() end
+        end
+        function Overlay.closeAll()
+          local fns = popovers; popovers = {}
+          for fn in pairs(fns) do pcall(fn) end
+          removeCatcher()
+        end
+
+        -- Screen size for popover placement; falls back when unmeasured (mock / first frame).
+        function Overlay.viewport()
+          if root then
+            local s = root.AbsoluteSize
+            if s and (s.X or 0) > 0 and (s.Y or 0) > 0 then return s end
+          end
+          return { X = FALLBACK_VIEWPORT.X, Y = FALLBACK_VIEWPORT.Y } -- a copy: callers must not mutate the fallback
+        end
+
+        -- Popover geometry shared by SelectBox / ColorPicker: prefer below the anchor, flip above only
+        -- when below overflows AND above fits (otherwise stay below: an overflow beats a negative y),
+        -- and clamp x inside [0, viewport - w - gap]. `w`/`h` are the popover's on-screen size, so a
+        -- caller with a UIScale passes w*scale, h*scale (2.22). Returns x, y, openUp.
+        function Overlay.placePopover(anchorPos, anchorSize, w, h, gap)
+          gap = gap or DEFAULT_GAP
+          local ax, ay = anchorPos and anchorPos.X or 0, anchorPos and anchorPos.Y or 0
+          local ah = anchorSize and anchorSize.Y or 0
+          local vp = Overlay.viewport()
+          local below = ay + ah + gap
+          local above = ay - gap - h
+          local openUp = (below + h > vp.Y) and (above >= 0)
+          local y = openUp and above or below
+          local x = math.max(0, math.min(ax, vp.X - w - gap))
+          return x, y, openUp
+        end
+
+        -- Process-wide UI scale (see header). Overlay-hosted components read scale() when they build so
+        -- their own UIScale matches the window; nothing is attached to the root here.
+        function Overlay.setScale(n)
+          if type(n) ~= "number" or n ~= n or n <= 0 then
+            error("Overlay.setScale(n): positive number expected, got " .. tostring(n), 2)
+          end
+          uiScale = n
+          return n
+        end
+        function Overlay.scale() return uiScale end
+
+        -- Stacked dialogs (2.12): each open dialog pushes, each close pops. Depth is clamped at 0 so an
+        -- unbalanced pop (double-close, close after reset) can never make later dialogs mis-layer.
+        function Overlay.pushDialog() dialogDepth = dialogDepth + 1; return dialogDepth end
+        function Overlay.popDialog() dialogDepth = math.max(0, dialogDepth - 1); return dialogDepth end
+        function Overlay.dialogDepth() return dialogDepth end
+
+        function Overlay.reset()
+          root = nil; catcher = nil; popovers = {}
+          uiScale = DEFAULT_SCALE; dialogDepth = 0
+        end
+
+        return Overlay
+
+    end
+
+    -- Module: components/separator
+    EmbeddedModules["components/separator"] = function()
+        -- Deps injected via Init(R).
+        local Separator = {}
+        local Create, DefaultTheme
+
+        function Separator.Init(R) Create = R.Create; DefaultTheme = R.Theme end
+
+        function Separator.new(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local frame = Create("Frame", {
+            Name = "Separator",
+            BackgroundColor3 = theme.Colors.border,
+            BackgroundTransparency = theme.Stroke.divider,   -- divider alpha role, shared with accordion/table rules
+            BorderSizePixel = 0,
+            Size = UDim2.new(1, 0, 0, 1),
+            LayoutOrder = opts.LayoutOrder or 0,
+            Parent = opts.Parent,
+          })
+          -- keep the unregister so Destroy drops the closure (one used to leak per destroyed separator)
+          local unreg = opts.AccentReg and opts.AccentReg(function() frame.BackgroundColor3 = theme.Colors.border end)
+          return { Frame = frame, Destroy = function() if unreg then unreg() end; frame:Destroy() end }
+        end
+
+        return Separator
+
+    end
+
+    -- Module: components/host
+    EmbeddedModules["components/host"] = function()
+        -- Mixin: adds AddX control methods to any container (Tab/Accordion) via the registry R.
+        -- No Init (mixin only); Host.attach(api, ctx) wires the methods.
+        local Host = {}
+
+        local SIMPLE = {
+          AddLabel = { mod = "Label" },
+          AddParagraph = { mod = "Label", preset = { Variant = "paragraph" } },
+          AddSection = { mod = "Label", preset = { Variant = "section" } },
+          AddSeparator = { mod = "Separator" },
+          AddButton = { mod = "Button" },
+          AddToggle = { mod = "Toggle" },
+          AddTextBox = { mod = "TextBox" },
+          AddNumberBox = { mod = "NumberBox" },
+          AddSelectBox = { mod = "SelectBox" },
+          AddSlider = { mod = "Slider" },
+          AddKeybind = { mod = "Keybind" },
+          AddColorPicker = { mod = "ColorPicker" },
+          AddImage = { mod = "Image" },
+          AddTable = { mod = "Table" },
+          AddProgressBar = { mod = "ProgressBar" },
+          AddResizable = { mod = "Resizable" },
+          AddCard = { mod = "Card" },
+        }
+
+        -- Tie a cleanup fn to a control's lifetime. Controls that expose a Maid (Tab/Accordion/Window)
+        -- take it directly; the rest (Button/Label/Image/ProgressBar/Separator/Card...) only have Destroy,
+        -- so it is wrapped to run fn FIRST and then the original. Used for per-control reskin
+        -- unregisters (LockScrim here; tooltip / disabled in later items) so a destroyed control never
+        -- leaves a closure behind in the window's themer.
+        function Host.own(control, fn)
+          if type(fn) ~= "function" then error("Host.own(control, fn): fn must be a function", 2) end
+          if control.Maid then control.Maid:Give(fn); return control end
+          local d = control.Destroy
+          control.Destroy = function(...)
+            fn()
+            if d then return d(...) end
+          end
+          return control
+        end
+
+        -- ctx = { R, content, theme, config, window, nextOrder }
+        function Host.attach(api, ctx)
+          for method, spec in pairs(SIMPLE) do
+            api[method] = function(_, arg)
+              local opts = {}
+              if type(arg) == "string" then
+                opts.Text = arg
+              elseif type(arg) == "function" then
+                opts.Text = arg                  -- reactive shorthand: AddLabel(function() return ... end)
+              elseif type(arg) == "table" then
+                for k, v in pairs(arg) do opts[k] = v end
+              end
+              if spec.preset then
+                for k, v in pairs(spec.preset) do if opts[k] == nil then opts[k] = v end end
+              end
+              opts.Parent = ctx.content
+              opts.LayoutOrder = ctx.nextOrder()
+              opts.Theme = ctx.theme
+              opts.Config = ctx.config
+              opts.Window = ctx.window
+              opts.AccentReg = ctx.accentThemer and ctx.accentThemer.register
+              opts.AccentThemer = ctx.accentThemer
+              local control = ctx.R[spec.mod].new(opts)
+              if opts.Tooltip and ctx.R.Tooltip and control and control.Frame then
+                -- Button/Label/Image/ProgressBar/Separator/Card expose no .Maid, so without Host.own the
+                -- tip's hover connections (and a chip still on screen) outlive the destroyed control.
+                local tip = ctx.R.Tooltip.attach(control.Frame, opts.Tooltip, ctx.theme)
+                if tip and tip.Destroy then Host.own(control, tip.Destroy) end
+              end
+              if ctx.registerSearchable and control and control.Frame then
+                -- opts.Text may be a function (reactive label); index a stable string only.
+                local searchText = (type(opts.Text) == "string" and opts.Text) or opts.Title or opts.Name or ""
+                ctx.registerSearchable(control.Frame, searchText)
+              end
+              if control and control.Frame then
+                local C = ctx.R.Create
+                local scrim = C("Frame", { Name = "LockScrim", BackgroundColor3 = ctx.theme.Colors.background,
+                  BackgroundTransparency = ctx.theme.Opacity.scrim, BorderSizePixel = 0, Visible = false, ZIndex = 50,
+                  Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame, C.corner(ctx.theme.Radius.md) })
+                local shield = C("ImageButton", { Name = "LockShield", AutoButtonColor = false, BackgroundTransparency = 1,
+                  Active = true, Visible = false, ZIndex = 51, Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame })
+                control.SetLocked = function(b) local v = b and true or false; ctx.R.Safe.mutate(function() scrim.Visible = v; shield.Visible = v end) end
+                -- the scrim is chrome-coloured, so it must follow SetMode; owned by the control so a
+                -- destroyed control takes its closure with it
+                if ctx.accentThemer then
+                  Host.own(control, ctx.accentThemer.register(function() scrim.BackgroundColor3 = ctx.theme.Colors.background end))
+                end
+                if opts.Locked then control.SetLocked(true) end
+                if ctx.registerControl then ctx.registerControl(control) end
+              end
+              return control
+            end
+          end
+        end
+
+        return Host
 
     end
 
@@ -8855,6 +6902,2434 @@ EmbeddedModules["../output/bundle"] = function()
 
     end
 
+    -- Module: components/numberbox
+    EmbeddedModules["components/numberbox"] = function()
+        -- Deps injected via Init(R).
+        local RunService = game:GetService("RunService")
+        local NumberBox = {}
+        local Create, DefaultTheme, Maid, Icons, Flag, Numfmt, Safe, Animate, Recipes
+
+        function NumberBox.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Icons = R.Icons; Flag = R.Flag; Numfmt = R.Numfmt; Safe = R.Safe
+          Animate = R.Animate; Recipes = R.Recipes
+        end
+
+        function NumberBox.new(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local maid = Maid.new()
+          local minV, maxV, step = opts.Min, opts.Max, opts.Step or 1
+          local value = opts.Default or 0
+          local hasLabel = opts.Text ~= nil and opts.Text ~= ""
+          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
+          local rowH = (not hasLabel) and 30 or (hasDesc and 56 or 46)
+          -- SetEnabled blocks USER input only (steppers, wheel, typing): SetValue/Flag.bind restores keep
+          -- updating value and visuals while disabled (plan 2.8 contract a).
+          local enabled = true
+          local hovering = false               -- pointer really over the Box (wheel gate)
+
+          local function clamp(n)
+            n = tonumber(n) or value
+            if minV then n = math.max(minV, n) end
+            if maxV then n = math.min(maxV, n) end
+            return n
+          end
+
+          local root = Create("Frame", { Name = "NumberBoxRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
+            Size = UDim2.new(1, 0, 0, rowH), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
+            Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
+          if hasLabel then
+            Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
+              TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+              TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+              Position = UDim2.new(0, 0, 0, hasDesc and 6 or 0),
+              Size = UDim2.new(0.5, -8, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = root }), theme, "label")
+            if hasDesc then
+              Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+                TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+                TextYAlignment = Enum.TextYAlignment.Top,
+                Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(0.5, -8, 0, 26), Parent = root }), theme, "muted")
+            end
+          end
+          local box = Create("Frame", { Name = "Box", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
+            Position = hasLabel and UDim2.new(0.5, 4, 0.5, -15) or UDim2.new(0, 0, 0, 0),
+            Size = hasLabel and UDim2.new(0.5, -4, 0, 30) or UDim2.new(1, 0, 0, 30),
+            Parent = root, Create.corner(theme.Radius.input) })
+          -- the Box's only UIStroke: the focus recipe owns its Thickness, strokeColor() its Color
+          local boxStroke = Create.stroke(theme.Colors.border, 1); boxStroke.Parent = box
+          -- +/- are structural glyphs: they rest at Icon.structural (muted), never the accent (1.4)
+          local function structural() return theme.Colors[theme.Icon.structural] end
+          local function stepBtn(name, icon, x)
+            local b = Create("ImageButton", { Name = name, AutoButtonColor = false, BackgroundColor3 = theme.Colors.surface,
+              Size = UDim2.new(0, 26, 1, -6), Position = x, Parent = box, Create.corner(theme.Radius.sm) })
+            local img = Create("ImageLabel", { BackgroundTransparency = 1, ImageTransparency = 0, Size = UDim2.new(0, 14, 0, 14),
+              Position = UDim2.new(0.5, -7, 0.5, -7), Parent = b })
+            Icons.apply(img, icon, structural())
+            -- The wash sits at ZIndex 0 INSIDE the button: above the button's own fill, below the glyph
+            -- (Sibling behaviour), so the +/- answer a pointer without a second surface in the Box.
+            local hover = Recipes.hover(b, { theme = theme, host = b, corner = theme.Radius.sm, kind = "wash" })
+            maid:Give(hover.disconnect)
+            -- Press squashes the GLYPH, never the button: the shared recipe's Motion.pressScale keeps the
+            -- +/- feeling like every other control, and the button keeps the 26px hit area it draws.
+            maid:Give(Recipes.press(b, img, { theme = theme }).disconnect)
+            return b, img, hover
+          end
+          local minus, minusImg, minusHover = stepBtn("Minus", "minus", UDim2.new(0, 3, 0.5, -12))
+          local plus, plusImg, plusHover = stepBtn("Plus", "plus", UDim2.new(1, -29, 0.5, -12))
+          local input = Create.text(Create("TextBox", { Name = "Input", BackgroundTransparency = 1, Text = tostring(value),
+            TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Center, ClearTextOnFocus = false,
+            Position = UDim2.new(0, 32, 0, 0), Size = UDim2.new(1, -64, 1, 0), Parent = box }), theme, "body")
+
+          local atMin, atMax = false, false
+          -- A glyph at its bound reads as disabled: it fades to Opacity.disabled over Motion.fast instead
+          -- of swapping colour. The last state is remembered per glyph so a themer re-derive or a
+          -- SetValue that never crosses a bound spends no tween on an unchanged goal.
+          local dimmed = { [minusImg] = false, [plusImg] = false }
+          -- A disabled control dims every glyph, so the whole-control dim outranks the per-bound one; the
+          -- bound state is still recorded, which is exactly the rest Recipes.disabled restores on enable.
+          local function glyphAlpha(img) return (dimmed[img] or not enabled) and theme.Opacity.disabled or 0 end
+          local function dim(img, off)
+            if dimmed[img] == off then return end
+            dimmed[img] = off
+            Animate.to(img, "fast", { ImageTransparency = glyphAlpha(img) })
+          end
+          local function updateBounds()
+            atMin = minV ~= nil and value <= minV
+            atMax = maxV ~= nil and value >= maxV
+            Safe.mutate(function()
+              dim(minusImg, atMin); minus.Active = not atMin
+              dim(plusImg, atMax); plus.Active = not atMax
+            end)
+          end
+
+          local function fmt(n)
+            return Numfmt.format(n, { Format = opts.Format, Decimals = opts.Decimals, Prefix = opts.Prefix, Suffix = opts.Suffix })
+          end
+          local focused = false
+          -- single source of the Box stroke colour, read by the focus recipe and the themer closure alike
+          local function strokeColor(f) return f and theme.Colors.ring or theme.Colors.border end
+          local function render() Safe.mutate(function() input.Text = focused and tostring(value) or fmt(value) end) end
+          local function apply(n) value = clamp(n); render(); updateBounds() end
+          local commit = Flag.bind(opts, clamp(opts.Default or 0), apply)
+          local function set(n) commit(clamp(n)); if opts.Callback then opts.Callback(value) end end
+
+          -- A press refused at Min/Max bumps the Box Motion.bumpPx toward the side the user pushed and
+          -- returns to the EXACT starting Position table (no drift). Motion off = no bump at all, and a
+          -- bump already in flight is never restarted (its rest would be the displaced offset).
+          local bumping = false
+          local function bump(dir)
+            if bumping or dir == nil or not Animate.isEnabled() then return end
+            local rest = box.Position
+            bumping = true
+            Animate.chain({
+              { box, "press", { Position = UDim2.new(rest.X.Scale, rest.X.Offset + dir * theme.Motion.bumpPx,
+                rest.Y.Scale, rest.Y.Offset) }, Animate.EASING.snap, Animate.DIR.Out },
+              { box, "press", { Position = rest }, Animate.EASING.snap, Animate.DIR.Out },
+            }, function() bumping = false end)
+          end
+
+          -- SetEnabled: surface dim + input guards. SetLocked (the host's scrim) is a separate flag and
+          -- neither of them clears the other; Recipes.disabled keeps each part's rest so a glyph that was
+          -- dimmed at a bound comes back dimmed.
+          local function setEnabled(b)
+            b = b and true or false
+            if enabled == b then return end
+            enabled = b
+            Safe.mutate(function()
+              input.TextEditable = b
+              Recipes.disabled({
+                { box, "BackgroundTransparency", 0 },
+                { minusImg, "ImageTransparency", dimmed[minusImg] and theme.Opacity.disabled or 0 },
+                { plusImg, "ImageTransparency", dimmed[plusImg] and theme.Opacity.disabled or 0 },
+              }, not b, theme)
+            end)
+          end
+
+          local function holdRepeat(btn, stepFn, atBoundFn, dir)
+            local conn, held
+            local function stop()
+              held = false
+              if conn then conn:Disconnect(); conn = nil end
+            end
+            maid:Give(btn.MouseButton1Down:Connect(function()
+              if not enabled then return end
+              if atBoundFn() then bump(dir); return end
+              held = true
+              stepFn()                                  -- immediate first step
+              local elapsed, since = 0, 0
+              conn = RunService.Heartbeat:Connect(function(dt)
+                if not held then return end
+                elapsed = elapsed + dt
+                if elapsed < 0.35 then return end       -- initial hold delay
+                since = since + dt
+                local interval = math.max(0.03, 0.12 - (elapsed - 0.35) * 0.06)  -- accelerate
+                if since >= interval then
+                  since = 0
+                  if atBoundFn() then stop(); return end
+                  stepFn()
+                end
+              end)
+            end))
+            maid:Give(btn.MouseButton1Up:Connect(stop))
+            maid:Give(btn.MouseLeave:Connect(stop))
+            maid:Give(stop)
+          end
+          holdRepeat(minus, function() set(value - step) end, function() return atMin end, -1)
+          holdRepeat(plus, function() set(value + step) end, function() return atMax end, 1)
+          maid:Give(input.Focused:Connect(function() focused = true; input.Text = tostring(value) end))
+          maid:Give(input.FocusLost:Connect(function()
+            focused = false
+            local parsed = Numfmt.parse(input.Text, { Prefix = opts.Prefix, Suffix = opts.Suffix })
+            if parsed ~= nil then set(parsed) else render() end
+          end))
+          maid:Give(Recipes.focus(boxStroke, input, strokeColor, { theme = theme }).disconnect)
+          -- Wheel gate: InputChanged fires for anything that moves over the Box (and a wheel event that
+          -- is not consumed here keeps scrolling the panel behind it), so the value only follows the
+          -- wheel while the pointer is really over the Box or the field holds focus.
+          maid:Give(box.MouseEnter:Connect(function() hovering = true end))
+          maid:Give(box.MouseLeave:Connect(function() hovering = false end))
+          maid:Give(box.InputChanged:Connect(function(io)
+            if io.UserInputType == Enum.UserInputType.MouseWheel and enabled and (hovering or focused) then
+              local dir = (io.Position.Z >= 0) and 1 or -1
+              set(value + step * dir)
+            end
+          end))
+          maid:Give(root)
+          if opts.Disabled then setEnabled(false) end
+
+          if opts.AccentReg then maid:Give(opts.AccentReg(function()
+            root.BackgroundColor3 = theme.Colors.surface
+            box.BackgroundColor3 = theme.Colors.background
+            boxStroke.Color = strokeColor(focused)
+            input.TextColor3 = theme.Colors.foreground
+            local ti = root:FindFirstChild("Title"); if ti then ti.TextColor3 = theme.Colors.foreground end
+            local de = root:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
+            minus.BackgroundColor3 = theme.Colors.surface; plus.BackgroundColor3 = theme.Colors.surface
+            Icons.apply(minusImg, "minus", structural()); Icons.apply(plusImg, "plus", structural())
+            minusHover.reskin(); plusHover.reskin()   -- the wash owns a colour token too
+            updateBounds()
+          end)) end
+
+          return {
+            Frame = root,
+            GetValue = function() return value end,
+            SetValue = function(n) set(n) end,
+            SetMin = function(n) minV = n; set(value) end,
+            SetMax = function(n) maxV = n; set(value) end,
+            SetEnabled = function(b) setEnabled(b) end,
+            Destroy = function() maid:DoCleanup() end,
+          }
+        end
+
+        return NumberBox
+
+    end
+
+    -- Module: core/animate
+    EmbeddedModules["core/animate"] = function()
+        -- Deps injected via Init(R) (the bundler cannot rewrite require() inside embedded modules).
+        local TweenService = game:GetService("TweenService")
+
+        local Animate = {}
+        local Theme
+        local motionTbl -- Animate.useMotion override (a window's merged theme.Motion); nil = Theme.Motion
+        -- Reduced motion is process-wide (single-window norm). `explicit` remembers that a user/config
+        -- choice was made so a later applyDefault (OS preference) never overrides it.
+        local enabled, explicit = true, false
+        -- Last-resort duration when a token is unknown everywhere (keeps a typo from throwing in Studio).
+        local DEFAULT_DUR = 0.18
+        -- Today's values for tokens that core/theme.lua may not define yet (F1 lands them in parallel);
+        -- theme tokens win whenever present, these only cover the gap.
+        local FALLBACK = { spin = 0.8, exit = 0.14, exitScale = 0.96, popSlide = 6 }
+
+        function Animate.Init(R)
+          Theme = R.Theme
+          Animate.Motion = motionTbl or Theme.Motion
+        end
+
+        Animate.EASING = {
+          pop = Enum.EasingStyle.Back, smooth = Enum.EasingStyle.Quint,
+          enter = Enum.EasingStyle.Quint, exit = Enum.EasingStyle.Quart,
+          snap = Enum.EasingStyle.Quad or Enum.EasingStyle.Quart, -- Quad guard: older enum tables lack it
+        }
+        Animate.DIR = { In = Enum.EasingDirection.In, Out = Enum.EasingDirection.Out, InOut = Enum.EasingDirection.InOut }
+
+        -- Motion token lookup: useMotion table -> Theme.Motion -> FALLBACK. Only numbers count (a nested
+        -- token group like Motion.shake must never reach TweenInfo); returns nil when unknown.
+        local function token(name)
+          local v = motionTbl and motionTbl[name]
+          if type(v) ~= "number" and Theme and Theme.Motion then v = Theme.Motion[name] end
+          if type(v) == "number" then return v end
+          return FALLBACK[name]
+        end
+
+        local function resolve(duration)
+          if type(duration) == "number" then return duration end
+          if type(duration) == "string" then return token(duration) or DEFAULT_DUR end
+          return DEFAULT_DUR
+        end
+
+        -- Delay is optional everywhere and must reach TweenInfo.new as a number (nil delayTime is not
+        -- verified safe in Roblox): nil/unknown token -> 0.
+        local function resolveDelay(delay)
+          if type(delay) == "number" then return delay end
+          if type(delay) == "string" then return token(delay) or 0 end
+          return 0
+        end
+
+        -- Point resolve() at a window's merged theme.Motion so CreateWindow{ Theme = { Motion = {...} } }
+        -- applies. Process-wide like setEnabled; nil restores the Theme defaults.
+        function Animate.useMotion(tbl)
+          motionTbl = type(tbl) == "table" and tbl or nil
+          Animate.Motion = motionTbl or (Theme and Theme.Motion)
+        end
+
+        function Animate.info(duration, style, dir, delay)
+          return TweenInfo.new(duration, style or Enum.EasingStyle.Quart, dir or Enum.EasingDirection.Out, 0, false, delay or 0)
+        end
+
+        -- Explicit choice (SetAnimationsEnabled / config.Animations): last writer wins.
+        function Animate.setEnabled(b) enabled = b and true or false; explicit = true end
+        -- Environment default (OS reduce-motion): only applies while nobody chose explicitly.
+        function Animate.applyDefault(b)
+          if not explicit then enabled = b and true or false end
+          return enabled
+        end
+        function Animate.isEnabled() return enabled end
+        function Animate.isExplicit() return explicit end
+
+        -- Stub returned when motion is disabled: the goal is already applied and any
+        -- Completed handler runs immediately (mirrors the synchronous test mock).
+        local function instantTween()
+          return { Completed = { Connect = function(_, fn) if fn then fn() end; return { Disconnect = function() end } end } }
+        end
+
+        local function applyNow(instance, goalProps)
+          for k, v in pairs(goalProps) do instance[k] = v end
+        end
+
+        function Animate.to(instance, duration, goalProps, style, dir, delay)
+          if not enabled then
+            applyNow(instance, goalProps)
+            return instantTween()
+          end
+          local tween = TweenService:Create(instance, Animate.info(resolve(duration), style, dir, resolveDelay(delay)), goalProps)
+          tween:Play()
+          return tween
+        end
+
+        -- Tween, then run onComplete. Connects Completed BEFORE Play so the handler still
+        -- fires under the synchronous test mock (and runs immediately when motion is off).
+        function Animate.toThen(instance, duration, goalProps, onComplete, style, dir, delay)
+          if not enabled then
+            applyNow(instance, goalProps)
+            if onComplete then onComplete() end
+            return instantTween()
+          end
+          local tween = TweenService:Create(instance, Animate.info(resolve(duration), style, dir, resolveDelay(delay)), goalProps)
+          if onComplete then tween.Completed:Connect(onComplete) end
+          tween:Play()
+          return tween
+        end
+
+        -- spring: a tween with a Back/Out overshoot (the library's "expressive" feel).
+        function Animate.springTo(instance, duration, goalProps)
+          return Animate.to(instance, duration, goalProps, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        end
+
+        -- rotate convenience (defaults to a Back/Out overshoot).
+        function Animate.rotateTo(instance, duration, deg, style, dir)
+          return Animate.to(instance, duration, { Rotation = deg },
+            style or Enum.EasingStyle.Back, dir or Enum.EasingDirection.Out)
+        end
+
+        -- exit: Quart/In (accelerating away) — the shared "leave" curve for popovers/toasts/dialogs.
+        function Animate.exitTo(instance, duration, goalProps, onDone)
+          return Animate.toThen(instance, duration, goalProps, onDone, Animate.EASING.exit, Animate.DIR.In)
+        end
+
+        -- Sequential toThen: each step { inst, dur, goal, style, dir, delay } starts from the previous
+        -- Completed (so the whole chain is synchronous under the mock); onDone after the last one.
+        function Animate.chain(steps, onDone)
+          local i = 0
+          local function step()
+            i = i + 1
+            local s = steps and steps[i]
+            if not s then if onDone then onDone() end; return end
+            Animate.toThen(s[1], s[2], s[3], step, s[4], s[5], s[6])
+          end
+          step()
+        end
+
+        -- Looping tween; repeatCount -1 (default) runs until Cancel. Returns { Cancel } — wrap it in a
+        -- function before maid:Give (maid only knows Disconnect/Destroy/functions). Never restart a
+        -- loop from Completed: the mock fires Completed synchronously inside Play, which would recurse.
+        function Animate.loop(instance, duration, goalProps, style, reverses, repeatCount)
+          reverses = reverses == true
+          if not enabled then
+            -- Rest pose without motion: a one-way loop rests at its goal; a ping-pong loop rests where
+            -- it started, so the instance is left untouched.
+            if not reverses then applyNow(instance, goalProps) end
+            return { Cancel = function() end }
+          end
+          local info = TweenInfo.new(resolve(duration), style or Enum.EasingStyle.Linear, Enum.EasingDirection.InOut,
+            repeatCount or -1, reverses, 0)
+          local tween = TweenService:Create(instance, info, goalProps)
+          tween:Play()
+          return { Cancel = function() tween:Cancel() end }
+        end
+
+        -- Endless Linear rotation for loader glyphs, period Motion.spin. Rest pose is Rotation 0: set
+        -- on start, on Cancel, and when motion is off (a static 'loader' glyph, never a frozen mid-spin one).
+        function Animate.spin(img, duration)
+          img.Rotation = 0
+          if not enabled then return { Cancel = function() img.Rotation = 0 end } end
+          local handle = Animate.loop(img, duration or token("spin"), { Rotation = 360 }, Enum.EasingStyle.Linear, false, -1)
+          return { Cancel = function() handle.Cancel(); img.Rotation = 0 end }
+        end
+
+        -- Ping-pong loop (attention pulse, completion pulse); cycles nil = endless.
+        function Animate.pulse(instance, duration, goalProps, style, cycles)
+          return Animate.loop(instance, duration, goalProps, style, true, cycles or -1)
+        end
+
+        local function uiScaleOf(inst)
+          local us = inst:FindFirstChildOfClass("UIScale")
+          if not us then us = Instance.new("UIScale"); us.Parent = inst end
+          return us
+        end
+
+        -- pop-in: scale a UIScale child from 0.9 -> 1 with a Back/Out overshoot.
+        function Animate.pop(inst, duration)
+          local us = uiScaleOf(inst)
+          us.Scale = 0.9
+          return Animate.to(us, duration or "base", { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        end
+
+        -- Popover open: grow from Motion.exitScale with a Back/Out overshoot (base) while sliding
+        -- Motion.popSlide px into place from the anchor side (Quart/Out, fast). edge 'down' = opens
+        -- below its anchor, so it starts popSlide px ABOVE its final Position; 'up' starts below.
+        -- The final Position is the caller's own, so layout code reading it synchronously still holds.
+        function Animate.popIn(frame, edge)
+          local us = uiScaleOf(frame)
+          if not enabled then us.Scale = 1; return instantTween() end
+          local target = frame.Position
+          us.Scale = token("exitScale")
+          if target then
+            local dy = (edge == "up") and token("popSlide") or -token("popSlide")
+            frame.Position = UDim2.new(target.X.Scale, target.X.Offset, target.Y.Scale, target.Y.Offset + dy)
+            Animate.to(frame, "fast", { Position = target }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+          end
+          return Animate.springTo(us, "base", { Scale = 1 })
+        end
+
+        -- Popover close: shrink to Motion.exitScale (Quart/In over Motion.exit), then onDone (destroy).
+        function Animate.popOut(frame, onDone)
+          local us = uiScaleOf(frame)
+          return Animate.toThen(us, token("exit"), { Scale = token("exitScale") }, onDone, Animate.EASING.exit, Animate.DIR.In)
+        end
+
+        return Animate
+
+    end
+
+    -- Module: core/recipes
+    EmbeddedModules["core/recipes"] = function()
+        -- Deps injected via Init(R). State kit: one recipe per interaction state (hover wash, press
+        -- scale, focus ring, disabled dim, empty state, scrollbar) so every control answers input the
+        -- same way. Stateless per call (the module is cached across tests): each recipe returns a handle
+        -- whose disconnect() drops every connection it made, so callers maid:Give(handle.disconnect).
+        -- Handlers run inside signal callbacks (capability present), so they write GUI state directly.
+        local Recipes = {}
+        local Create, Theme, Animate, Icons, Safe, Device
+
+        function Recipes.Init(R)
+          Create = R.Create; Theme = R.Theme; Animate = R.Animate; Icons = R.Icons; Safe = R.Safe; Device = R.Device
+        end
+
+        local function noop() end
+        local NOOP_HANDLE = { reskin = noop, disconnect = noop }
+
+        -- Module defaults stand in when a caller has no window theme yet (Theme exposes DEFAULT groups).
+        local function themeOf(opts) return (opts and opts.theme) or Theme end
+
+        local function disconnectAll(conns)
+          return function()
+            for i = #conns, 1, -1 do
+              local c = conns[i]
+              if c and c.Disconnect then c:Disconnect() end
+              conns[i] = nil
+            end
+          end
+        end
+
+        -- A colour option is a Colors token NAME (resolved live so SetMode/SetAccent reskin by name) or
+        -- a Color3 the caller owns; `default` is the token name used when the option is absent.
+        local function colorOf(theme, c, default)
+          if type(c) == "string" then return theme.Colors[c] or theme.Colors[default] end
+          if c ~= nil then return c end
+          return theme.Colors[default]
+        end
+
+        -- MouseButton1Down/Up exist on GuiButton only; a plain Frame (table Row, kind='fill') presses
+        -- through InputBegan/InputEnded instead, filtered to primary click and touch.
+        local function isButton(inst)
+          local cls = inst.ClassName
+          return cls == "TextButton" or cls == "ImageButton"
+        end
+        local function isPress(input)
+          local t = input and input.UserInputType
+          return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
+        end
+        local function onPress(conns, src, down, up)
+          if isButton(src) then
+            conns[#conns + 1] = src.MouseButton1Down:Connect(down)
+            conns[#conns + 1] = src.MouseButton1Up:Connect(up)
+          else
+            conns[#conns + 1] = src.InputBegan:Connect(function(i) if isPress(i) then down() end end)
+            conns[#conns + 1] = src.InputEnded:Connect(function(i) if isPress(i) then up() end end)
+          end
+        end
+
+        -- Pointer hover persists after a click, but a touch tap fires Enter/Down/Up with no Leave, so a
+        -- release under touch must fall back to rest or the wash sticks (device.lua rationale).
+        local function pointerHover() return Device.SupportsHover() and Device.GetInput() ~= "Touch" end
+
+        -- ---- hover ------------------------------------------------------------------------------------
+        local function pick(state, rest, hover, press)
+          if state == "press" then return press elseif state == "hover" then return hover end
+          return rest
+        end
+
+        -- The visual parts one hover kind drives: { {inst, prop, valueOf}, ... } where valueOf(state)
+        -- resolves the goal for "rest" | "hover" | "press" at paint time. Returns parts plus the wash
+        -- Frame (wash kind only).
+        local function hoverParts(kind, host, opts, theme)
+          if kind == "wash" then
+            local inset = opts.inset or {}
+            local ix, iy = inset.x or inset[1] or 0, inset.y or inset[2] or 0
+            -- ZIndex 0: above the host fill, below its content (Sibling behaviour); the negative inset
+            -- cancels the row's UIPadding so the wash covers the whole row.
+            local wash = Create("Frame", {
+              Name = "Hover", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1, BorderSizePixel = 0,
+              Size = UDim2.new(1, 2 * ix, 1, 2 * iy), Position = UDim2.new(0, -ix, 0, -iy),
+              ZIndex = 0, Active = false, Parent = host,
+            })
+            if opts.corner then Create.corner(opts.corner).Parent = wash end
+            local hoverA, pressA = opts.hoverAlpha or theme.Opacity.hoverWash, opts.pressAlpha or theme.Opacity.pressWash
+            return { { wash, "BackgroundTransparency", function(s) return pick(s, 1, hoverA, pressA) end } }, wash
+          elseif kind == "fill" then
+            -- No new Frame (host has a UIListLayout): the host's own transparency carries the state and
+            -- returns to whatever it rested at; BackgroundColor3 is never touched (identity tests).
+            local restA = host.BackgroundTransparency or 1
+            local hoverA = opts.hoverAlpha or theme.Opacity.rowHover
+            local pressA = opts.pressAlpha or hoverA
+            return { { host, "BackgroundTransparency", function(s) return pick(s, restA, hoverA, pressA) end } }, nil
+          elseif kind == "text" then
+            local function tint(s)
+              if s == "rest" then return colorOf(theme, opts.rest, "mutedForeground") end
+              return colorOf(theme, opts.hover, "foreground")
+            end
+            local parts = {}
+            if opts.label then parts[#parts + 1] = { opts.label, "TextColor3", tint } end
+            if opts.icon then parts[#parts + 1] = { opts.icon, "ImageColor3", tint } end
+            return parts, nil
+          end
+          error("Recipes.hover: kind must be 'wash' | 'text' | 'fill', got " .. tostring(kind), 3)
+        end
+
+        -- Shared core: `sources` are the instances whose Enter/Leave/Down/Up drive one visual state
+        -- (iconButton feeds the glyph button AND its hit target).
+        local function bindHover(sources, opts)
+          opts = opts or {}
+          local theme = themeOf(opts)
+          if not Device.SupportsHover() then return NOOP_HANDLE end
+          local kind = opts.kind or "wash"
+          local parts, wash = hoverParts(kind, opts.host or sources[1], opts, theme)
+
+          local state, hovering, pressed = "rest", false, false
+          local function paint(next, instant)
+            state = next
+            local dur = (next == "press") and "press" or "hover"
+            for _, p in ipairs(parts) do
+              local inst, prop, v = p[1], p[2], p[3](next)
+              if instant then inst[prop] = v else Animate.to(inst, dur, { [prop] = v }) end
+            end
+          end
+          local function enter() hovering = true; paint(pressed and "press" or "hover") end
+          local function leave() hovering = false; pressed = false; paint("rest") end
+          local function down() pressed = true; paint("press") end
+          local function up()
+            pressed = false
+            if hovering and pointerHover() then paint("hover") else hovering = false; paint("rest") end
+          end
+
+          local conns = {}
+          for _, src in ipairs(sources) do
+            conns[#conns + 1] = src.MouseEnter:Connect(enter)
+            conns[#conns + 1] = src.MouseLeave:Connect(leave)
+            onPress(conns, src, down, up)
+          end
+          return {
+            Frame = wash,
+            -- re-read tokens by name after SetMode/SetAccent; the wash colour is the only owned colour,
+            -- text parts repaint their current state instantly (no tween inside a themer closure)
+            reskin = function()
+              if wash then wash.BackgroundColor3 = theme.Colors.foreground end
+              if kind == "text" then paint(state, true) end
+            end,
+            disconnect = disconnectAll(conns),
+          }
+        end
+
+        -- Recipes.hover(hit, { theme, host, corner, inset = {x,y}, kind = 'wash'|'text'|'fill', label, icon,
+        --   rest, hover, hoverAlpha, pressAlpha }) -> { Frame, reskin, disconnect }
+        -- wash: child Frame 'Hover' in host (never 'Active'); fill: host transparency only; text: label /
+        -- icon tint. Skipped entirely (no Frame, no handlers) when the device has no pointer.
+        function Recipes.hover(hit, opts) return bindHover({ hit }, opts) end
+
+        -- ---- press ------------------------------------------------------------------------------------
+        -- UIScale lives in scaleHost (the inner content), never the row itself: a UIScale on a
+        -- UIListLayout item reflows its siblings. scaleHost nil = no scale at all; the press feedback is
+        -- then just the wash/fill dip the hover recipe already applies on Down.
+        function Recipes.press(hit, scaleHost, opts)
+          if scaleHost == nil then return { disconnect = noop } end
+          local theme = themeOf(opts)
+          local us = scaleHost:FindFirstChildOfClass("UIScale") or Create("UIScale", { Scale = 1, Parent = scaleHost })
+          local pressed = false
+          local function down() pressed = true; Animate.to(us, "press", { Scale = theme.Motion.pressScale }) end
+          -- release only from a pressed state so a plain mouse-out does not spend a tween going 1 -> 1
+          local function up() if pressed then pressed = false; Animate.springTo(us, "release", { Scale = 1 }) end end
+          local conns = {}
+          onPress(conns, hit, down, up)
+          conns[#conns + 1] = hit.MouseLeave:Connect(up)
+          return { Scale = us, disconnect = disconnectAll(conns) }
+        end
+
+        -- ---- iconButton -------------------------------------------------------------------------------
+        -- Centre of a GuiObject in its parent's UDim2 space, honouring AnchorPoint (default 0,0).
+        local function centreOf(inst)
+          local p, s, a = inst.Position, inst.Size, inst.AnchorPoint
+          if not p or not s then return UDim2.new(0.5, 0, 0.5, 0) end
+          local ax, ay = a and a.X or 0, a and a.Y or 0
+          return UDim2.new(p.X.Scale + s.X.Scale * (0.5 - ax), p.X.Offset + s.X.Offset * (0.5 - ax),
+            p.Y.Scale + s.Y.Scale * (0.5 - ay), p.Y.Offset + s.Y.Offset * (0.5 - ay))
+        end
+
+        -- Recipes.iconButton(btn, { theme, icon, rest, hover, hitSize, parent, onClick }) -> { Hit, reskin, disconnect }
+        -- The glyph button keeps its own size (an ImageButton renders its Image at full Size, so the
+        -- glyph IS the button); a transparent sibling '<Name>Hit' supplies the comfortable target
+        -- (Sizes.iconButton, Sizes.touchHit on touch). Handlers are bound to BOTH so existing tests that
+        -- fire on the button keep working and pointer input landing on the hit behaves the same.
+        function Recipes.iconButton(btn, opts)
+          opts = opts or {}
+          local theme = themeOf(opts)
+          local size = opts.hitSize or (Device.IsTouch() and theme.Sizes.touchHit or theme.Sizes.iconButton)
+          local hit = Create("ImageButton", {
+            Name = (btn.Name or btn.ClassName) .. "Hit", BackgroundTransparency = 1, ImageTransparency = 1, BorderSizePixel = 0,
+            AutoButtonColor = false, Active = true, AnchorPoint = Vector2.new(0.5, 0.5), Position = centreOf(btn),
+            Size = UDim2.new(0, size, 0, size), ZIndex = (btn.ZIndex or 1) + 1, Parent = opts.parent or btn.Parent,
+          })
+          local sources = { btn, hit }
+          local function restC() return colorOf(theme, opts.rest, "mutedForeground") end
+          local function hoverC() return colorOf(theme, opts.hover, "foreground") end
+          if opts.icon then Icons.apply(btn, opts.icon, restC()) end
+
+          local wash = bindHover(sources, { theme = theme, host = hit, corner = theme.Radius.sm, kind = "wash" })
+          local conns, hovering = {}, false
+          if Device.SupportsHover() then
+            local function enter() hovering = true; Icons.tint(btn, hoverC()) end
+            local function leave() hovering = false; Icons.tint(btn, restC()) end
+            local function up() if not pointerHover() then leave() end end
+            for _, src in ipairs(sources) do
+              conns[#conns + 1] = src.MouseEnter:Connect(enter)
+              conns[#conns + 1] = src.MouseLeave:Connect(leave)
+              conns[#conns + 1] = src.MouseButton1Up:Connect(up)
+            end
+          end
+          if opts.onClick then
+            for _, src in ipairs(sources) do conns[#conns + 1] = src.MouseButton1Click:Connect(opts.onClick) end
+          end
+          local disconnectOwn = disconnectAll(conns)
+          return {
+            Hit = hit,
+            reskin = function()
+              local c = hovering and hoverC() or restC()
+              if opts.icon then Icons.apply(btn, opts.icon, c) else btn.ImageColor3 = c end
+              wash.reskin()
+            end,
+            disconnect = function() disconnectOwn(); wash.disconnect() end,
+          }
+        end
+
+        -- ---- focus ------------------------------------------------------------------------------------
+        -- Recipes.focus(stroke, host, getColor, { theme }) -> { set, disconnect }
+        -- getColor(focused) stays the caller's single source of stroke colour (precedence such as
+        -- invalid > focused > border lives there); the recipe only owns Thickness. Focused/FocusLost are
+        -- TextBox-only and SelectionGained/Lost are gamepad selection, so each is bound only when the
+        -- host exposes it (read under pcall: Roblox throws on a missing member). set(focused) covers
+        -- hosts with no focus event of their own (SelectBox field open, Keybind chip listening).
+        function Recipes.focus(stroke, host, getColor, opts)
+          opts = opts or {}
+          local theme = themeOf(opts)
+          local restThickness = stroke.Thickness or 1
+          -- A hairline host (the sidebar/dropdown search rest at Stroke.search: 0.8 dark, 0.5 light) would
+          -- draw its ring at that same alpha and read as almost nothing, so a translucent rest fades to
+          -- opaque while focused and back on blur. opts.restAlpha (number or function) is re-read on every
+          -- paint so a SetMode mid-focus still restores the right hairline; a stroke that already rests
+          -- opaque (TextBox/NumberBox/Keybind) gets no Transparency goal at all.
+          local restAlphaOpt = opts.restAlpha
+          local capturedAlpha = stroke.Transparency or 0
+          local function restAlpha()
+            if type(restAlphaOpt) == "function" then return restAlphaOpt() or 0 end
+            if type(restAlphaOpt) == "number" then return restAlphaOpt end
+            return capturedAlpha
+          end
+          local function apply(focused)
+            focused = focused and true or false
+            local goal = { Thickness = focused and theme.Stroke.focusThickness or restThickness }
+            local rest = restAlpha()
+            if rest > 0 then goal.Transparency = focused and theme.Stroke.control or rest end
+            if getColor then goal.Color = getColor(focused) end
+            Animate.to(stroke, "fast", goal)
+          end
+          local function on() apply(true) end
+          local function off() apply(false) end
+          local conns = {}
+          local function bind(name, fn)
+            local ok, sig = pcall(function() return host[name] end)
+            if ok and sig ~= nil then conns[#conns + 1] = sig:Connect(fn) end
+          end
+          bind("Focused", on); bind("FocusLost", off)
+          bind("SelectionGained", on); bind("SelectionLost", off)
+          -- Gamepad selection: the stroke IS the ring, so the engine's default adornment is replaced by
+          -- an invisible, unparented Frame. Written blind under pcall: nil is the default in Roblox and
+          -- in the mock alike, so reading it back could never tell "unset" from "unsupported".
+          pcall(function()
+            host.SelectionImageObject = Create("Frame", { Name = "SelectionImage", BackgroundTransparency = 1, BorderSizePixel = 0 })
+          end)
+          return { set = apply, disconnect = disconnectAll(conns) }
+        end
+
+        -- ---- disabled ---------------------------------------------------------------------------------
+        -- Recipes.disabled(parts, on, theme) with parts = { {inst, prop, rest}, ... }: every part tweens
+        -- to Opacity.disabled when on, back to its own rest (the value it had while enabled) when off.
+        -- rest omitted = the engine default 0 for *Transparency; a nil inst (optional stroke) is skipped.
+        function Recipes.disabled(parts, on, theme)
+          theme = theme or Theme
+          local alpha = theme.Opacity.disabled
+          for _, p in ipairs(parts or {}) do
+            local inst, prop, rest = p[1], p[2], p[3]
+            if inst and prop then
+              if rest == nil then rest = 0 end
+              Animate.to(inst, "fast", { [prop] = on and alpha or rest })
+            end
+          end
+        end
+
+        -- ---- empty ------------------------------------------------------------------------------------
+        -- Recipes.empty(parent, { theme, text, icon, zIndex }) -> { Frame, SetVisible, reskin }
+        -- Hidden until the owner says the list is empty (its SetVisible already runs inside the owner's
+        -- Safe.mutate toggle). Parent must be layout-free: the frame fills it and centres its stack.
+        function Recipes.empty(parent, opts)
+          opts = opts or {}
+          local theme = themeOf(opts)
+          local z = opts.zIndex
+          local frame = Create("Frame", {
+            Name = "Empty", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 1, 0),
+            Visible = false, Active = false, ZIndex = z, Parent = parent,
+            Create("UIListLayout", {
+              FillDirection = Enum.FillDirection.Vertical, SortOrder = Enum.SortOrder.LayoutOrder,
+              HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center,
+              Padding = UDim.new(0, theme.Spacing.gap),
+            }),
+          })
+          local icon
+          if opts.icon then
+            icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, LayoutOrder = 1, ZIndex = z,
+              Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), Parent = frame })
+            Icons.apply(icon, opts.icon, theme.Colors.mutedForeground)
+          end
+          local label = Create("TextLabel", { Name = "Text", BackgroundTransparency = 1, Text = opts.text or "",
+            TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Center, TextWrapped = true,
+            AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), LayoutOrder = 2, ZIndex = z, Parent = frame })
+          Create.text(label, theme, "muted")
+          return {
+            Frame = frame,
+            SetVisible = function(b) frame.Visible = b and true or false end,
+            reskin = function()
+              label.TextColor3 = theme.Colors.mutedForeground
+              if icon then Icons.apply(icon, opts.icon, theme.Colors.mutedForeground) end
+            end,
+          }
+        end
+
+        -- ---- scrollbar --------------------------------------------------------------------------------
+        -- Idempotent, so a themer closure simply calls it again to re-tint. Top/Mid/BottomImage stay at
+        -- the engine default until Scrollbar.imageId names a verified flat asset.
+        function Recipes.scrollbar(sf, theme)
+          theme = theme or Theme
+          sf.ScrollBarThickness = theme.Sizes.scrollbar
+          sf.ScrollBarImageColor3 = theme.Colors.border
+          sf.ScrollBarImageTransparency = theme.Scrollbar.alpha
+          local id = theme.Scrollbar.imageId
+          if id and id ~= "" then sf.TopImage = id; sf.MidImage = id; sf.BottomImage = id end
+          return sf
+        end
+
+        return Recipes
+
+    end
+
+    -- Module: components/keybind
+    EmbeddedModules["components/keybind"] = function()
+        -- Deps injected via Init(R).
+        local Keybind = {}
+        local Create, DefaultTheme, Maid, Flag, Safe, Recipes, Animate
+        local UserInputService = game:GetService("UserInputService")
+        function Keybind.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe; Recipes = R.Recipes
+          Animate = R.Animate
+        end
+
+        -- Prompt shown on the chip while it waits for a key (a kbd chip has no placeholder of its own).
+        local LISTEN_TEXT = "Press a key"
+
+        -- Listening pulse alphas + period. theme.Stroke.pulse = { low, high } and theme.Motion.pulse are
+        -- the tokens these belong in (reported as a deviation); until core/theme.lua carries them this
+        -- FALLBACK holds the values, the way core/animate.lua covers tokens that may not exist yet.
+        local FALLBACK = { low = 0.2, high = 0.7, period = 0.4 }
+        local function pulseTok(theme, k)
+          local v
+          if k == "period" then v = theme.Motion and theme.Motion.pulse
+          else v = theme.Stroke and theme.Stroke.pulse and theme.Stroke.pulse[k] end
+          if type(v) == "number" then return v end
+          return FALLBACK[k]
+        end
+
+        -- Escape cancels listening. Resolved ONCE through a pcall (indexing an absent member throws in
+        -- Roblox) so an exotic client degrades to nil instead of erroring on every keypress; the nil
+        -- guard at the comparison is what stops an InputBegan with no KeyCode from reading as Escape.
+        local ESCAPE = (function()
+          local ok, kc = pcall(function() return Enum.KeyCode.Escape end)
+          if ok then return kc end
+          return nil
+        end)()
+
+        -- A real Enum.KeyCode is an EnumItem (userdata), NOT a table — so type(k)=="table"
+        -- is false in Roblox and the key would always read as "Unknown". Read .Name directly
+        -- (works for EnumItem userdata, the mock's enum tables, and plain strings).
+        local function keyName(k)
+          if type(k) == "string" then return k end
+          if k ~= nil then
+            local ok, name = pcall(function() return k.Name end)
+            if ok and type(name) == "string" then return name end
+          end
+          return "Unknown"
+        end
+
+        -- Indexing Enum.KeyCode with an invalid/free-form string THROWS in real Roblox
+        -- ("X is not a valid member of Enum.KeyCode") — and this runs on every keypress.
+        -- Resolve once through a pcall so a bad name degrades to Unknown instead of erroring.
+        local function toKeyCode(name)
+          local ok, kc = pcall(function() return Enum.KeyCode[name] end)
+          if ok and kc then return kc end
+          return Enum.KeyCode.Unknown
+        end
+
+        function Keybind.new(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local maid = Maid.new()
+          local listening = false
+          local enabled = true                 -- SetEnabled: blocks the click that arms listening
+          local keyCode = "Unknown"
+          local onPressed
+
+          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
+          local btn = Create("TextButton", { Name = "Keybind", AutoButtonColor = false, Text = "",
+            BackgroundColor3 = theme.Colors.surface, Size = UDim2.new(1, 0, 0, hasDesc and 50 or 34), LayoutOrder = opts.LayoutOrder or 0,
+            Parent = opts.Parent, Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
+          Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Keybind",
+            TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+            Position = UDim2.new(0, 0, 0, hasDesc and 8 or 0), Size = UDim2.new(1, -80, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn }),
+            theme, "label")
+          if hasDesc then
+            Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+              TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+              TextYAlignment = Enum.TextYAlignment.Top,
+              Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, -80, 0, 18), Parent = btn }), theme, "muted")
+          end
+          -- kbd-style chip: a recessed `background` fill with a border stroke, sized to its own text
+          -- (AutomaticSize.X + padding) but never narrower than a comfortable target. AnchorPoint (1,0.5)
+          -- pins its RIGHT edge to the row, so a long key name grows leftwards instead of overflowing.
+          local keyBox = Create.text(Create("TextLabel", { Name = "Key", BackgroundColor3 = theme.Colors.background,
+            Text = "...", TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Center,
+            AutomaticSize = Enum.AutomaticSize.X, AnchorPoint = Vector2.new(1, 0.5),
+            Size = UDim2.new(0, 0, 0, theme.Sizes.chip), Position = UDim2.new(1, 0, 0.5, 0), Parent = btn,
+            Create.corner(theme.Radius.sm),
+            Create.padding({ left = theme.Spacing.gap, right = theme.Spacing.gap }),
+            Create("UISizeConstraint", { MinSize = Vector2.new(theme.Sizes.touchHit, theme.Sizes.chip) }) }),
+            theme, "muted")
+          -- The chip's only UIStroke doubles as its focus ring (1.7): border/1 at rest, ring at
+          -- Stroke.focusThickness while listening. A TextLabel has no Focused event, so the recipe is
+          -- driven through set(); chipColor() is the single source of the colour for the themer too.
+          local chipStroke = Create.stroke(theme.Colors.border, 1); chipStroke.Parent = keyBox
+          local function chipColor(on) return on and theme.Colors.ring or theme.Colors.border end
+          local ring = Recipes.focus(chipStroke, keyBox, chipColor, { theme = theme })
+          maid:Give(ring.disconnect)
+          -- Row hover + press (2.7): the wash cancels the row's UIPadding so it covers the whole row, and
+          -- the press scale lives on the CHIP -- a UIScale on the row itself would reflow its siblings.
+          local hover = Recipes.hover(btn, { theme = theme, host = btn, corner = theme.Radius.md,
+            inset = { x = theme.Spacing.inputX, y = 0 } })
+          maid:Give(hover.disconnect)
+          maid:Give(Recipes.press(btn, keyBox, { theme = theme }).disconnect)
+
+          -- One source for the chip's text and tint, re-derived from `listening` (so the themer closure
+          -- and a mid-listen SetMode both paint the state that is actually current).
+          local function chipText() return listening and LISTEN_TEXT or keyCode end
+          local function chipTint() return listening and theme.Colors.mutedForeground or theme.Colors.foreground end
+          local function paintChip() keyBox.Text = chipText(); keyBox.TextColor3 = chipTint() end
+
+          -- While listening the stroke breathes between two alphas; the handle is { Cancel }, so it
+          -- reaches the maid wrapped in a function. Reduced motion skips the loop entirely (the ring
+          -- thickness alone says "listening") rather than parking the stroke at the low alpha.
+          local pulse
+          local function stopPulse()
+            if pulse then pulse.Cancel(); pulse = nil end
+            chipStroke.Transparency = theme.Stroke.control
+          end
+          local function startPulse()
+            stopPulse()
+            if not Animate.isEnabled() then return end
+            chipStroke.Transparency = pulseTok(theme, "low")
+            pulse = Animate.pulse(chipStroke, pulseTok(theme, "period"),
+              { Transparency = pulseTok(theme, "high") }, Enum.EasingStyle.Sine)
+          end
+          maid:Give(stopPulse)
+
+          -- InputBegan arrives from UserInputService, so the stroke write rides Safe.mutate like the text.
+          -- ring.set() runs LAST so the focus tween is the one a caller reads back as the latest.
+          local function setListening(on)
+            listening = on and true or false
+            Safe.mutate(function()
+              paintChip()
+              if listening then startPulse() else stopPulse() end
+              ring.set(listening)
+            end)
+          end
+
+          -- Capture: the chip pops and the stroke flashes accent -> border, so a rebind registers even
+          -- though the ring is leaving at the same moment.
+          -- MUST run BEFORE setListening(false): two tweens on one UIStroke that share a property make
+          -- Roblox cancel the older one WHOLE, so if this played last it would kill the focus recipe's
+          -- {Thickness, Color} tween and strand the chip at Stroke.focusThickness forever. Played first,
+          -- it writes the accent synchronously and the ring's own tween cancels IT instead -- picking the
+          -- live accent Color up as its start value, so the flash is still seen and Thickness lands at 1.
+          local function flashCapture()
+            Safe.mutate(function()
+              Animate.pop(keyBox, "fast")
+              chipStroke.Color = theme.Colors.primary
+              Animate.to(chipStroke, "base", { Color = chipColor(false), Transparency = theme.Stroke.control })
+            end)
+          end
+
+          local function apply(name)
+            keyCode = keyName(name)
+            Safe.mutate(paintChip)
+          end
+          local commit = Flag.bind(opts, keyName(opts.Default or "Unknown"), apply)
+
+          -- Rebind the key and notify via OnChanged. Use this (not opts.Callback) to react to
+          -- the user *choosing a different key* — e.g. driving Window:SetToggleKey so the window's
+          -- built-in toggle handler stays the single source of truth instead of adding a second one.
+          local function setKey(k)
+            commit(keyName(k))
+            if opts.OnChanged then opts.OnChanged(toKeyCode(keyCode)) end
+          end
+
+          -- SetEnabled dims the chip and blocks the click that starts listening; SetLocked (the host's
+          -- scrim) stays independent. Disabling mid-listen disarms it instead of leaving the row armed.
+          local function setEnabled(b)
+            b = b and true or false
+            if enabled == b then return end
+            enabled = b
+            if not b and listening then setListening(false) end
+            Safe.mutate(function()
+              Recipes.disabled({ { keyBox, "BackgroundTransparency", 0 }, { keyBox, "TextTransparency", 0 } }, not b, theme)
+            end)
+          end
+          if opts.Disabled then setEnabled(false) end
+
+          local api = { Frame = btn }
+          function api.GetKey() return toKeyCode(keyCode) end
+          function api.SetKey(k) setKey(k) end
+          function api.OnPressed(fn) onPressed = fn end
+          function api.SetEnabled(b) setEnabled(b) end
+          function api.Destroy() maid:DoCleanup() end
+
+          maid:Give(btn.MouseButton1Click:Connect(function()
+            if not enabled then return end
+            setListening(true)
+          end))
+          maid:Give(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+            if listening then
+              -- Escape cancels and keeps the current binding. ESCAPE may be nil on a client without the
+              -- member, and an InputBegan can arrive with no KeyCode at all, so both sides are guarded --
+              -- otherwise nil == nil would swallow a real capture.
+              if ESCAPE ~= nil and input.KeyCode == ESCAPE then setListening(false); return end
+              flashCapture()                                -- first: see the comment on flashCapture
+              setListening(false)                           -- last: its ring tween must outlive the flash
+              setKey(input.KeyCode)
+            elseif not gameProcessed and input.KeyCode == toKeyCode(keyCode) then
+              if opts.Callback then opts.Callback() end
+              if onPressed then onPressed() end
+            end
+          end))
+          maid:Give(btn)
+
+          if opts.AccentReg then maid:Give(opts.AccentReg(function()
+            btn.BackgroundColor3 = theme.Colors.surface
+            local lab = btn:FindFirstChild("Label"); if lab then lab.TextColor3 = theme.Colors.foreground end
+            local de = btn:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
+            keyBox.BackgroundColor3 = theme.Colors.background
+            paintChip()                                   -- re-derives text + tint from `listening`
+            chipStroke.Color = chipColor(listening)
+            hover.reskin()
+          end)) end
+
+          return api
+        end
+        return Keybind
+
+    end
+
+    -- Module: components/notification
+    EmbeddedModules["components/notification"] = function()
+        -- Deps injected via Init(R). Sonner-style toasts: slide in from the anchored edge, stack
+        -- bottom-right (newest in front), older ones peek behind (scaled + faded); hover the stack to
+        -- expand into a full list. Each toast is a CanvasGroup so it fades -- and exits -- as one piece.
+        local Notification = {}
+        local Create, DefaultTheme, Maid, Overlay, Animate, Icons, Safe, Effects, Recipes
+        local RunService = game:GetService("RunService")
+        local container
+        local stackShadow  -- ONE shadow under the front toast (sibling of the toasts, ZIndex 0)
+        local order = {}   -- array of entries (oldest first, newest last)
+        local seq = 0
+        local expanded = false
+        local stepConn
+        local pinnedScale  -- Notification.setScale(n); nil = follow the process-wide Overlay.scale()
+
+        -- Pre-measure fallbacks: AbsoluteSize / AbsoluteContentSize are nil headless and on the first
+        -- frame, so the stack still lays out (and the hover hit-area still exists) before any measure.
+        local FALLBACK_H = 60
+        -- Icon badge square. No Sizes token holds 20 today (icon 16 / iconSm 14 / iconButton 26), so the
+        -- one number the badge needs lives here rather than being faked out of an unrelated token.
+        local BADGE = 20
+
+        function Notification.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Animate = R.Animate; Icons = R.Icons
+          Safe = R.Safe; Effects = R.Effects; Recipes = R.Recipes
+          container = nil
+          stackShadow = nil
+          -- Init is re-entrant (the test harness re-runs it per loadLib): drop the previous Heartbeat
+          -- countdown so a fresh container never runs two tickers over the same `order`.
+          if stepConn then stepConn:Disconnect() end
+          stepConn = nil
+          expanded = false
+          pinnedScale = nil
+        end
+
+        local enabled = true
+        function Notification.setEnabled(b) enabled = b ~= false end
+
+        local TYPE_COLOR = { info = "info", success = "success", warning = "warning", error = "destructive", loading = "info" }
+        local TYPE_ICON = { info = "info", success = "circle-check", warning = "triangle-alert", error = "circle-alert", loading = "loader" }
+
+        local position = "bottom-right"
+        local POS = {
+          ["top-left"]      = { ax = 0,   ay = 0 },
+          ["top-center"]    = { ax = 0.5, ay = 0 },
+          ["top-right"]     = { ax = 1,   ay = 0 },
+          ["bottom-left"]   = { ax = 0,   ay = 1 },
+          ["bottom-center"] = { ax = 0.5, ay = 1 },
+          ["bottom-right"]  = { ax = 1,   ay = 1 },
+        }
+
+        -- The container is process-wide, so there is no single owning window: layout tokens are read
+        -- from the theme of the toast currently in front, and from the module defaults when empty.
+        local function frontTheme()
+          local e = order[#order]
+          return (e and e.theme) or DefaultTheme
+        end
+        -- theme.mix rides on Theme.new instances and on the module itself; a bare table theme falls back.
+        local function mix(theme, a, b, t) return (theme.mix or DefaultTheme.mix)(a, b, t) end
+        -- Border tinted toward the type colour: an error toast reads as an error before its icon does.
+        local function edgeColor(theme, accent) return mix(theme, theme.Colors.border, accent, theme.Toast.typeTint) end
+
+        local function containerPosition(cfg, TK)
+          local cx = (cfg.ax == 0 and UDim.new(0, TK.inset)) or (cfg.ax == 1 and UDim.new(1, -TK.inset)) or UDim.new(0.5, 0)
+          local cy = (cfg.ay == 0) and UDim.new(0, TK.inset) or UDim.new(1, -TK.inset)
+          return UDim2.new(cx.Scale, cx.Offset, cy.Scale, cy.Offset)
+        end
+
+        -- Window:SetUIScale forwards through Notification.setScale; when nothing pinned a value we follow
+        -- the process-wide Overlay scale, so a window that only reached Overlay.setScale still scales.
+        local function currentScale()
+          if pinnedScale then return pinnedScale end
+          local s = Overlay.scale and Overlay.scale()
+          return (type(s) == "number" and s > 0) and s or 1
+        end
+
+        -- ---- countdown ticker ---------------------------------------------------------------------
+        -- One Heartbeat handler for the whole stack, connected lazily by show() and dropped the moment
+        -- the stack empties. Before this it ran forever -- even after Overlay.reset() tore the container
+        -- down -- and a re-Init left the stale one ticking over the same `order`.
+        local function stopTicker()
+          if stepConn then stepConn:Disconnect(); stepConn = nil end
+        end
+
+        local function tick(dt)
+          for i = #order, 1, -1 do
+            local e = order[i]
+            if e.frame and e.total and not e.paused then
+              e.remaining = e.remaining - dt
+              -- Heartbeat handlers lack the GUI capability on strict executors, so a raw write throws.
+              -- pcall (not Safe.mutate) because this is a per-frame cosmetic write -- skip it cleanly when
+              -- there's no capability rather than deferring 60 writes/sec. The countdown + dismiss below
+              -- run on plain Lua state / Safe.mutate, so the toast still expires correctly.
+              if e.bar then
+                local bh = ((e.theme or DefaultTheme).Toast).barHeight
+                pcall(function() e.bar.Size = UDim2.new(math.max(0, e.remaining / e.total), 0, 0, bh) end)
+              end
+              if e.remaining <= 0 then Notification.dismiss(e.id) end
+            end
+          end
+          if #order == 0 then stopTicker() end
+        end
+
+        local function ensureTicker()
+          if not stepConn then stepConn = RunService.Heartbeat:Connect(tick) end
+        end
+
+        -- ---- container ------------------------------------------------------------------------------
+        local function ensureContainer(theme)
+          if container and container.Parent ~= nil then return container end
+          local TK = theme.Toast
+          stackShadow = nil                    -- belonged to the previous container
+          local cfg = POS[position] or POS["bottom-right"]
+          container = Create("Frame", {
+            -- Height starts at 0 and is grown by relayout to wrap the actual toast stack. The container
+            -- IS the MouseEnter/Leave hover hit-area, so it must NOT span the full screen height -- a tall
+            -- strip would falsely trigger hover/expand whenever the pointer sits in that column (most
+            -- visible at top-center/bottom-center, where the column runs down the middle of the screen).
+            Name = "ToastContainer", BackgroundTransparency = 1, ZIndex = Overlay.Z.toast,
+            AnchorPoint = Vector2.new(cfg.ax, cfg.ay), Position = containerPosition(cfg, TK),
+            Size = UDim2.new(0, TK.width, 0, 0),
+          })
+          -- UI scale lives HERE, never on the overlay root (the click catcher's (1,0,1,0) would stop
+          -- covering the screen). Toast.width stays logical px; this multiplies the whole stack.
+          Create("UIScale", { Name = "ContainerScale", Scale = currentScale(), Parent = container })
+          container.MouseEnter:Connect(function()
+            expanded = true
+            for _, e in ipairs(order) do e.paused = true end
+            Notification.relayout("expand")   -- the one pass that fans the rows out on a stagger
+          end)
+          container.MouseLeave:Connect(function()
+            expanded = false
+            for _, e in ipairs(order) do e.paused = false end
+            Notification.relayout()
+          end)
+          Overlay.mount(container)
+          return container
+        end
+
+        -- One 9-slice layer for the whole stack rather than one per toast. nil while Effect.shadowId is
+        -- '' (the default), so every use below is nil-tolerant.
+        local function ensureStackShadow(theme)
+          if stackShadow and stackShadow.Parent ~= nil then return stackShadow end
+          stackShadow = Effects.shadow(container, theme, { name = "StackShadow", level = "toast", zIndex = 0 })
+          if stackShadow then stackShadow.Visible = false end
+          return stackShadow
+        end
+
+        -- Park the shadow under the FRONT toast. Toasts render at the default ZIndex 1, so the layer sits
+        -- at 0; it is a sibling (a child would render above the toast's own fill). Absolute* is nil
+        -- headless and before the first engine measure, so the layer simply stays hidden until measured.
+        local function syncStackShadow(theme)
+          if not stackShadow then return end
+          local e = order[#order]
+          local f = e and e.frame
+          local ap, as = f and f.AbsolutePosition, f and f.AbsoluteSize
+          local cp = container and container.AbsolutePosition
+          if not (ap and as and cp and (as.Y or 0) > 0) then stackShadow.Visible = false; return end
+          stackShadow.Visible = true
+          -- Absolute* are SCREEN pixels, but the shadow lives inside the container's own UIScale, whose
+          -- children are laid out in logical pixels. Feeding screen px straight in mis-sized and
+          -- mis-placed the layer by exactly the UI scale, so divide it back out first.
+          local s = currentScale()
+          Effects.place(stackShadow, (ap.X - cp.X) / s, (ap.Y - cp.Y) / s, as.X / s, as.Y / s, "toast", theme)
+          Effects.reskin(stackShadow, theme, "shadow")   -- per-mode alpha; nil-tolerant, cheap, idempotent
+        end
+
+        -- Intrinsic (scale-independent) height of a toast: UIListLayout content + its own vertical
+        -- padding. Reading AbsoluteSize mid-animation gives the SCALED height and makes the expanded
+        -- gaps jitter, so the measured value is only a fallback.
+        local function toastHeight(e)
+          local lay = e.frame:FindFirstChildOfClass("UIListLayout")
+          local acs = lay and lay.AbsoluteContentSize
+          local pad = 0
+          if e.padding then pad = e.padding.PaddingTop.Offset + e.padding.PaddingBottom.Offset end
+          if acs and acs.Y and acs.Y > 0 then return acs.Y + pad end
+          return (e.frame.AbsoluteSize and e.frame.AbsoluteSize.Y) or FALLBACK_H
+        end
+
+        -- position/scale/fade each toast based on its index from the front (newest = 0).
+        -- `reason` is 'expand' for the hover fan-out -- the ONLY pass allowed to carry the stagger delay --
+        -- and nil / 'measure' for everything else. The engine fires AbsoluteSize on every frame of the
+        -- entrance (AbsoluteSize includes the UIScale), so a measurement-driven pass that re-armed the
+        -- stagger would stall the back rows instead of fanning them out; one that re-issued the steady
+        -- tweens would cancel the entrance's Back/Out overshoot from a partial value. Hence both the
+        -- reason gate and the per-entry `laid` cache: a MEASUREMENT that changes nothing writes no tween.
+        function Notification.relayout(reason)
+          local theme = frontTheme()
+          local TK, M = theme.Toast, theme.Motion
+          local n = #order
+          local cfg = POS[position] or POS["bottom-right"]
+          local vdir = (cfg.ay == 0) and 1 or -1
+          local y = 0
+          for idx = n, 1, -1 do
+            local e = order[idx]
+            if not e.frame then
+              -- GUI deferred to a later Heartbeat; skip until built (it relayouts itself when ready)
+            else
+              local i = n - idx -- 0 = newest (front)
+              local scale, transp, visible, yoff
+              if expanded then
+                visible, scale, transp, yoff = true, 1, 0, y
+                y = y + toastHeight(e) + TK.gap
+              else
+                visible = i < TK.maxVisible
+                scale = 1 - i * TK.peekScale
+                transp = i * TK.peekFade
+                yoff = i * TK.peek
+              end
+              e.frame.Visible = visible
+              e.frame.AnchorPoint = Vector2.new(cfg.ax, cfg.ay)
+              local target = UDim2.new(cfg.ax, 0, cfg.ay, vdir * yoff)
+              -- The layout this entry was last given. A measurement re-runs relayout with identical
+              -- numbers, and re-tweening then would both cost 2n tween objects per measured frame and
+              -- replace the in-flight entrance with a steady tween from its partial value. Only a
+              -- measurement is allowed to skip: every other caller asked for a fresh pass.
+              local last = e.laid
+              local moved = not last or last.yoff ~= yoff or last.scale ~= scale or last.transp ~= transp
+                or last.ax ~= cfg.ax or last.ay ~= cfg.ay
+              e.laid = { yoff = yoff, scale = scale, transp = transp, ax = cfg.ax, ay = cfg.ay }
+              if e.entering then
+                -- The entrance OWNS position + scale for exactly one pass. A steady tween fired in the
+                -- same frame used to fight the pop for the UIScale and flatten the Back/Out overshoot,
+                -- which is why the entrance never actually overshot.
+                e.entering = false
+                Animate.springTo(e.frame, "enter", { Position = target })
+                Animate.to(e.frame, "base", { GroupTransparency = transp }, Animate.EASING.enter)
+                Animate.springTo(e.scale, "enter", { Scale = scale })
+              elseif moved or reason ~= "measure" then
+                -- Expanding the stack fans the rows open: each one further back waits an extra
+                -- Motion.stagger, capped at Toast.staggerCap so a tall stack still opens promptly. Only
+                -- the expand pass itself: a reflow that happens to land while expanded (a measurement, an
+                -- update that regrew a toast) must move at delay 0 or it re-arms the whole fan.
+                local d = (expanded and reason == "expand") and math.min(i, TK.staggerCap) * M.stagger or 0
+                Animate.to(e.frame, "base", { Position = target, GroupTransparency = transp }, Animate.EASING.smooth, nil, d)
+                Animate.to(e.scale, "base", { Scale = scale }, Animate.EASING.smooth, nil, d)
+              end
+            end
+          end
+          -- Size the container (the hover hit-area) to wrap the visible stack so MouseEnter only fires over
+          -- the toasts, never the empty column above/below them. Set directly (not animated) so the hit-area
+          -- never lags the pointer. Anchored at the edge, so growing height extends toward screen centre.
+          if container then
+            local h = 0
+            if n > 0 then
+              if expanded then
+                h = math.max(0, y - TK.gap)         -- y accumulated a trailing gap per toast
+              else
+                local front = order[n]              -- newest = front of the collapsed stack
+                local fh = front and front.frame and front.frame.AbsoluteSize and front.frame.AbsoluteSize.Y or 0
+                if fh <= 0 then fh = FALLBACK_H end -- fallback before first engine measure (and headless tests)
+                h = fh + math.min(n - 1, TK.maxVisible - 1) * TK.peek
+              end
+            end
+            container.Size = UDim2.new(0, TK.width, 0, h)
+          end
+          syncStackShadow(theme)
+        end
+
+        local function indexOf(id) for i, e in ipairs(order) do if e.id == id then return i end end end
+
+        -- Semantic accent for a toast type, read from the LIVE palette so a reskin picks up the mode's
+        -- colour (the four type tokens are mode-invariant today, but a theme override may change them).
+        local function accentFor(theme, ty) return theme.Colors[TYPE_COLOR[ty]] or theme.Colors.info end
+
+        -- The bar hugs the bottom edge, so a toast WITH a countdown drops its bottom padding to
+        -- Toast.progressInset and gets it back when the bar goes away (morph to a persistent type).
+        local function setProgressPad(entry, hasBar)
+          if not entry.padding then return end
+          local TK = (entry.theme or DefaultTheme).Toast
+          entry.padding.PaddingBottom = UDim.new(0, hasBar and TK.progressInset or TK.padY)
+        end
+
+        local function startCountdown(entry, total, accent, theme)
+          -- 'Progress' is a DIRECT child of the toast: no track wrapper (a parent would shadow the
+          -- lookup) and no sibling track (the toast has a UIListLayout, so it would become a second row).
+          local bar = Create("Frame", { Name = "Progress", BackgroundColor3 = accent, BorderSizePixel = 0,
+            Size = UDim2.new(1, 0, 0, theme.Toast.barHeight), LayoutOrder = 99, Parent = entry.frame,
+            Create.corner(theme.Radius.xs) })
+          entry.total = total; entry.remaining = total; entry.paused = false; entry.bar = bar
+          setProgressPad(entry, true)
+        end
+
+        local function createMsgLabel(text, theme, parent)
+          local lbl = Create("TextLabel", { Name = "Message", BackgroundTransparency = 1, Text = text,
+            TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, Parent = parent })
+          return Create.text(lbl, theme, "muted")
+        end
+
+        -- Stop the loader spin (if any); Animate.spin's Cancel rests the glyph at Rotation 0.
+        local function stopSpin(entry)
+          if entry.spin then entry.spin.Cancel(); entry.spin = nil end
+        end
+
+        -- Type motion: success lands with a pop on its glyph, an error shakes its head. The pop scales a
+        -- UIScale UNDER the glyph (never the glyph itself, whose Rotation belongs to the spinner), and
+        -- the shake rotates the whole card by Motion.shake.amp degrees and ends exactly at 0.
+        local function typeFeedback(entry)
+          local theme = entry.theme
+          if entry.type == "success" then
+            if entry.icon then Animate.pop(entry.icon, "enter") end
+          elseif entry.type == "error" and entry.frame and Animate.isEnabled() then
+            local sh = theme.Motion.shake
+            Animate.chain({
+              { entry.frame, sh.step, { Rotation = -sh.amp }, Enum.EasingStyle.Sine },
+              { entry.frame, sh.step, { Rotation = sh.amp }, Enum.EasingStyle.Sine },
+              { entry.frame, sh.step, { Rotation = 0 }, Enum.EasingStyle.Sine },
+            })
+          end
+        end
+
+        -- Live re-skin (SetMode/SetAccent): every coloured part re-reads theme.Colors. Parts that
+        -- applyUpdate creates or replaces later (Message, Progress) are read off the entry at call time.
+        local function reskin(entry)
+          local theme = entry.theme
+          local accent = accentFor(theme, entry.type)
+          entry.accent = accent
+          entry.frame.BackgroundColor3 = theme.Colors.card
+          if entry.stroke then entry.stroke.Color = edgeColor(theme, accent) end
+          if entry.badge then entry.badge.BackgroundColor3 = accent end
+          entry.titleLabel.TextColor3 = theme.Colors.foreground
+          if entry.msgLabel then entry.msgLabel.TextColor3 = theme.Colors.mutedForeground end
+          -- the icon-button recipe owns the Close glyph tint (it must keep a hovered glyph lifted)
+          if entry.closeHandle then entry.closeHandle.reskin() end
+          if entry.actionHover then entry.actionHover.reskin() end
+          if entry.actionBtn then
+            entry.actionBtn.BackgroundColor3 = theme.Colors.surface
+            entry.actionBtn.TextColor3 = theme.Colors.foreground
+          end
+          if entry.bar then entry.bar.BackgroundColor3 = accent end
+          -- Icons.apply only rewrites ImageColor3 when the glyph is unchanged, so a spinning loader is
+          -- retinted without touching its Rotation.
+          if entry.icon then Icons.apply(entry.icon, TYPE_ICON[entry.type] or "info", accent) end
+        end
+
+        -- Everything the build attached (themer registration, recipe handlers, property signals) is
+        -- released exactly once, on dismiss.
+        local function releaseEntry(entry)
+          if entry.unreg then entry.unreg(); entry.unreg = nil end
+          local rel = entry.releases
+          if not rel then return end
+          for i = #rel, 1, -1 do local fn = rel[i]; rel[i] = nil; pcall(fn) end
+        end
+
+        local function msgText(v, arg)
+          if type(v) == "function" then local ok, r = pcall(v, arg); return ok and r or nil end
+          if type(v) == "string" then return v end
+          return nil
+        end
+
+        local applyUpdate  -- forward declaration; applyUpdate is assigned after Notification.loading, show's pendingUpdate hook closes over it
+
+        function Notification.show(opts)
+          if not enabled then return nil end
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          seq = seq + 1
+          local id = seq
+          local entry = { id = id, onDismiss = opts.OnDismiss, releases = {} }
+          order[#order + 1] = entry           -- reserve FIFO slot synchronously
+          Safe.mutate(function()
+            local TK = theme.Toast
+            local ty = opts.Type or "info"
+            local accent = accentFor(theme, ty)
+            ensureContainer(theme)
+            ensureStackShadow(theme)
+            ensureTicker()
+            local pcfg = POS[position] or POS["bottom-right"]
+            -- Enter from outside the anchored edge; relayout's entering branch springs it home.
+            local sx = (pcfg.ax == 1 and UDim.new(1, TK.slide)) or (pcfg.ax == 0 and UDim.new(0, -TK.slide)) or UDim.new(0.5, 0)
+            -- center toasts slide in vertically from the nearest edge: top-center from above, bottom-center from below
+            local sy = (pcfg.ax == 0.5) and UDim.new(pcfg.ay, ((pcfg.ay == 0) and -1 or 1) * TK.slide) or UDim.new(pcfg.ay, 0)
+            local hasBar = (ty ~= "loading") and ((opts.Duration or 4000) > 0)
+            local padding = Create.padding({ left = TK.padX, right = TK.padX, top = TK.padY,
+              bottom = hasBar and TK.progressInset or TK.padY })
+            local toast = Create("CanvasGroup", {
+              Name = "Toast", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0, GroupTransparency = 1,
+              AnchorPoint = Vector2.new(pcfg.ax, pcfg.ay), Position = UDim2.new(sx.Scale, sx.Offset, sy.Scale, sy.Offset),
+              Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Parent = container,
+              Create.corner(theme.Radius.md), padding,
+              Create.listLayout({ Padding = 4 }),
+            })
+            -- floating surface: opaque hairline (Stroke.floating) tinted Toast.typeTint toward the type
+            local stroke = Create.stroke(edgeColor(theme, accent), 1, theme.Stroke.floating)
+            stroke.Parent = toast
+            -- Entrance state: off-edge, fully faded, shrunk. relayout (entering branch) animates all three.
+            local scale = Create("UIScale", { Scale = theme.Motion.enterScale, Parent = toast })
+            entry.entering = true
+            local sizeConn = toast:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+              -- property-changed handler -> engine thread without GUI capability on strict executors; relayout
+              -- reads AbsoluteContentSize/AbsoluteSize raw, so marshal it through Safe.mutate. Always relayout
+              -- (not only when expanded): the collapsed container height tracks the front toast's measured
+              -- height, so the hover hit-area must update once the engine measures the toast. 'measure'
+              -- keeps it cheap and harmless -- the engine fires this on every frame of the entrance, so the
+              -- pass must not re-arm the stagger nor re-tween a row that has not actually moved.
+              Safe.mutate(function() Notification.relayout("measure") end)
+            end)
+            entry.releases[#entry.releases + 1] = function() sizeConn:Disconnect() end
+            local titleRow = Create("Frame", { Name = "TitleRow", BackgroundTransparency = 1,
+              Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 1, Parent = toast })
+            -- Badge behind the glyph. TitleRow has no layout, so a decorative child is safe here (the
+            -- toast itself has a UIListLayout and could not take one). ZIndex 0 = under its sibling Icon.
+            local badge = Create("Frame", { Name = "IconBadge", BackgroundColor3 = accent,
+              BackgroundTransparency = TK.badgeAlpha, BorderSizePixel = 0, ZIndex = 0, Active = false,
+              Size = UDim2.new(0, BADGE, 0, BADGE), Position = UDim2.new(0, -2, 0.5, -BADGE / 2),
+              Parent = titleRow, Create.corner(theme.Radius.sm) })
+            local tIcon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
+              Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon),
+              Position = UDim2.new(0, 0, 0.5, -theme.Sizes.icon / 2), Parent = titleRow })
+            Icons.apply(tIcon, TYPE_ICON[ty] or "info", accent)
+            local titleX = BADGE + theme.Spacing.icon   -- clears the badge, not just the 16px glyph
+            local titleLabel = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "",
+              TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+              TextTruncate = Enum.TextTruncate.AtEnd,
+              Size = UDim2.new(1, -(titleX + theme.Sizes.icon), 1, 0), Position = UDim2.new(0, titleX, 0, 0), Parent = titleRow })
+            Create.text(titleLabel, theme, "label")
+            local closeBtn = Create("ImageButton", { Name = "Close", AutoButtonColor = false, BackgroundTransparency = 1,
+              Size = UDim2.new(0, theme.Sizes.iconSm, 0, theme.Sizes.iconSm),
+              Position = UDim2.new(1, -theme.Sizes.iconSm, 0, 0), Parent = titleRow })
+            -- Comfortable hit target + hover wash + glyph lift; the glyph itself stays 14px. 'primary'
+            -- rest keeps the close affordance as bright as the rest of the chrome.
+            local closeHandle = Recipes.iconButton(closeBtn, { theme = theme, icon = "x", rest = "primary",
+              hover = "foreground", parent = titleRow, onClick = function() Notification.dismiss(id) end })
+            entry.releases[#entry.releases + 1] = closeHandle.disconnect
+            local msgLabel
+            if opts.Message then
+              msgLabel = createMsgLabel(opts.Message, theme, toast)
+            end
+            local aBtn, actionHover
+            if opts.Action then
+              local act = opts.Action
+              aBtn = Create("TextButton", { Name = "Action", AutoButtonColor = false,
+                BackgroundColor3 = theme.Colors.surface, Text = act.Text or act.Label or "Action",
+                TextColor3 = theme.Colors.foreground,
+                Size = UDim2.new(0, 96, 0, 24), LayoutOrder = 3, Parent = toast, Create.corner(theme.Radius.sm) })
+              Create.text(aBtn, theme, "muted")
+              -- wash only: a UIScale on the Action would reflow the toast's UIListLayout rows
+              actionHover = Recipes.hover(aBtn, { theme = theme, corner = theme.Radius.sm, kind = "wash" })
+              entry.releases[#entry.releases + 1] = actionHover.disconnect
+              aBtn.MouseButton1Click:Connect(function() if act.Callback then pcall(act.Callback) end; Notification.dismiss(id) end)
+            end
+            entry.frame = toast; entry.scale = scale; entry.stroke = stroke; entry.padding = padding
+            entry.icon = tIcon; entry.badge = badge; entry.titleLabel = titleLabel
+            entry.closeBtn = closeBtn; entry.closeHandle = closeHandle
+            entry.actionBtn = aBtn; entry.actionHover = actionHover
+            entry.theme = theme
+            entry.type = ty; entry.accent = accent
+            entry.msgLabel = msgLabel
+            if entry.type == "loading" then entry.spin = Animate.spin(tIcon) end
+            if hasBar then startCountdown(entry, (opts.Duration or 4000) / 1000, accent, theme) end
+            -- A live toast follows SetMode/SetAccent through the window's themer; released in dismiss.
+            -- Registered after the build so the closure never sees a half-built toast.
+            if opts.AccentReg then entry.unreg = opts.AccentReg(function() reskin(entry) end) end
+            Notification.relayout()
+            typeFeedback(entry)
+            if entry.pendingUpdate then applyUpdate(entry, entry.pendingUpdate); entry.pendingUpdate = nil end
+          end)
+          return id
+        end
+
+        function Notification.loading(opts)
+          opts = opts or {}
+          opts.Type = "loading"; opts.Duration = 0
+          return Notification.show(opts)
+        end
+
+        applyUpdate = function(entry, opts)
+          local theme = entry.theme
+          local newType = opts.Type or entry.type
+          local accent = accentFor(theme, newType)
+          local morphed = newType ~= entry.type
+          entry.type = newType; entry.accent = accent
+          -- Cancel BEFORE re-applying the glyph: Cancel rests Rotation at 0 so the new (static) icon
+          -- never lands mid-spin. A morph back to 'loading' restarts the spin.
+          stopSpin(entry)
+          if entry.stroke then entry.stroke.Color = edgeColor(theme, accent) end
+          if entry.badge then entry.badge.BackgroundColor3 = accent end
+          if entry.icon then
+            Icons.apply(entry.icon, TYPE_ICON[newType] or "info", accent)
+            if newType == "loading" then entry.spin = Animate.spin(entry.icon) end
+          end
+          if opts.Title ~= nil and entry.titleLabel then entry.titleLabel.Text = opts.Title end
+          if opts.Message ~= nil then
+            if entry.msgLabel then
+              entry.msgLabel.Text = opts.Message
+            else
+              entry.msgLabel = createMsgLabel(opts.Message, theme, entry.frame)
+            end
+          end
+          if opts.Duration and opts.Duration > 0 then
+            if entry.bar then entry.bar:Destroy(); entry.bar = nil end
+            startCountdown(entry, opts.Duration / 1000, accent, theme)
+          elseif opts.Duration == 0 then
+            if entry.bar then entry.bar:Destroy(); entry.bar = nil end
+            entry.total = nil; entry.remaining = nil; entry.bar = nil
+            setProgressPad(entry, false)
+          end
+          if morphed then typeFeedback(entry) end
+          Notification.relayout()
+        end
+
+        function Notification.update(id, opts)
+          local i = indexOf(id); if not i then return end
+          local entry = order[i]
+          opts = opts or {}
+          Safe.mutate(function()
+            if not entry.frame then entry.pendingUpdate = opts; return end
+            applyUpdate(entry, opts)
+          end)
+        end
+
+        function Notification.promise(runner, opts)
+          opts = opts or {}
+          -- Register the runner Heartbeat:Once BEFORE calling loading() so that, when capability is absent,
+          -- this handler is snapshotted first and fires before Safe's flush handler. The runner's
+          -- Notification.update call then lands in the same Safe queue as the loading build, so the flush
+          -- drains both in FIFO order: build frame first, then applyUpdate -- no extra Heartbeat needed.
+          -- `pendingId` is set synchronously (before any Heartbeat fires) so the closure sees the real id.
+          local pendingId
+          RunService.Heartbeat:Once(function()
+            local ok, res = pcall(runner)
+            local dur = opts.Duration or 4000
+            if ok then
+              Notification.update(pendingId, { Type = "success", Title = msgText(opts.Success, res) or "Success", Duration = dur })
+            else
+              Notification.update(pendingId, { Type = "error", Title = msgText(opts.Error, res) or "Error", Duration = dur })
+            end
+            if opts.Finally then pcall(opts.Finally) end
+          end)
+          local id = Notification.loading({
+            Title = msgText(opts.Loading) or "Loading…", Message = opts.Message, Theme = opts.Theme, AccentReg = opts.AccentReg })
+          pendingId = id
+          return id
+        end
+
+        -- Outward exit vector: away from the anchored edge (right stack slides right, a centred stack
+        -- slides back out through the edge it came from).
+        local function exitOffset(cfg, TK)
+          if cfg.ax == 1 then return TK.exitSlide, 0 end
+          if cfg.ax == 0 then return -TK.exitSlide, 0 end
+          return 0, (cfg.ay == 0) and -TK.exitSlide or TK.exitSlide
+        end
+
+        function Notification.dismiss(id)
+          local i = indexOf(id)
+          if not i then return end
+          -- Removed from the order FIRST: count() drops in the same tick, and the relayout below never
+          -- touches a frame that is on its way out.
+          local entry = table.remove(order, i)
+          if #order == 0 then stopTicker() end
+          if entry.onDismiss then pcall(entry.onDismiss) end
+          -- Same Safe queue as the build, so a dismiss issued before a deferred build still runs after it
+          -- (FIFO) and releases the themer registration + spin the build created.
+          Safe.mutate(function()
+            stopSpin(entry)
+            releaseEntry(entry)
+            local frame = entry.frame
+            if not frame then Notification.relayout(); return end
+            local TK = (entry.theme or DefaultTheme).Toast
+            local cfg = POS[position] or POS["bottom-right"]
+            local dx, dy = exitOffset(cfg, TK)
+            local p = frame.Position
+            local goal = { GroupTransparency = 1 }
+            if p then goal.Position = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset + dy) end
+            -- A real exit (fade + slide out + shrink) instead of vanishing mid-frame; two tweens, and the
+            -- destroy hangs off the fade so the frame is gone the moment the fold-out finishes.
+            if entry.scale then
+              Animate.to(entry.scale, "exit", { Scale = TK.exitScale }, Animate.EASING.exit, Animate.DIR.In)
+            end
+            Animate.toThen(frame, "exit", goal, function()
+              frame:Destroy()
+              Notification.relayout()
+            end, Animate.EASING.exit, Animate.DIR.In)
+          end)
+        end
+
+        function Notification.clearAll()
+          for i = #order, 1, -1 do Notification.dismiss(order[i].id) end
+          -- Window:Close() calls this next to Overlay.reset(), so drop the pin with the stack: it belongs
+          -- to the window that set it, and a later window's toasts would otherwise inherit its UI scale.
+          -- currentScale() then follows Overlay.scale() again, which the next SetUIScale writes first.
+          pinnedScale = nil
+        end
+
+        function Notification.count() return #order end
+
+        -- UI scale forwarding (Window:SetUIScale). The UIScale lives on the toast container, NEVER on the
+        -- overlay root -- the click catcher's (1,0,1,0) size would stop covering the screen.
+        function Notification.setScale(n)
+          if type(n) ~= "number" or n ~= n or n <= 0 then return currentScale() end
+          pinnedScale = n
+          if container and container.Parent ~= nil then
+            Safe.mutate(function()
+              local us = container:FindFirstChild("ContainerScale")
+              if us then us.Scale = n end
+            end)
+          end
+          return n
+        end
+
+        function Notification.setPosition(p)
+          local key = tostring(p):lower():gsub("%s+", "-")
+          if not POS[key] then return position end
+          position = key
+          if container and container.Parent ~= nil then
+            Safe.mutate(function()
+              local cfg = POS[position]
+              container.AnchorPoint = Vector2.new(cfg.ax, cfg.ay)
+              container.Position = containerPosition(cfg, frontTheme().Toast)
+              Notification.relayout()
+            end)
+          end
+          return position
+        end
+
+        return Notification
+
+    end
+
+    -- Module: core/signal
+    EmbeddedModules["core/signal"] = function()
+        local Signal = {}
+        Signal.__index = Signal
+
+        function Signal.new()
+          return setmetatable({ _handlers = {}, _order = {} }, Signal)
+        end
+
+        function Signal:Connect(fn)
+          self._order[#self._order + 1] = fn
+          self._handlers[fn] = true
+          return { Disconnect = function()
+            self._handlers[fn] = nil
+            for i, f in ipairs(self._order) do if f == fn then table.remove(self._order, i) break end end
+          end }
+        end
+
+        function Signal:Once(fn)
+          local conn
+          conn = self:Connect(function(...) conn.Disconnect(); fn(...) end)
+          return conn
+        end
+
+        function Signal:Fire(...)
+          local snapshot = {}
+          for i, fn in ipairs(self._order) do snapshot[i] = fn end
+          for _, fn in ipairs(snapshot) do if self._handlers[fn] then fn(...) end end
+        end
+
+        function Signal:DisconnectAll()
+          self._handlers = {}; self._order = {}
+        end
+
+        return Signal
+
+    end
+
+    -- Module: core/config
+    EmbeddedModules["core/config"] = function()
+        local HttpService = game:GetService("HttpService")
+
+        local Config = {}
+        Config.__index = Config
+
+        local function hasFS()
+          return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+        end
+
+        function Config.new(opts)
+          opts = opts or {}
+          local self = setmetatable({
+            folder = opts.FolderName or "EzUI",
+            file = opts.FileName or "Settings",
+            autoSave = opts.AutoSave ~= false,
+            autoLoad = opts.AutoLoad ~= false,
+            profile = "Default",
+            values = {},
+            defaults = {},
+            setters = {},
+          }, Config)
+          -- AutoLoad (the documented default) reads the saved file on startup so flags
+          -- restore their values as controls register against this config.
+          if self.autoLoad then self:Load() end
+          return self
+        end
+
+        function Config:_dir() return self.folder .. "/" .. self.file end
+        -- The Default profile is the saved file itself: <FolderName>/<FileName>.json. Named
+        -- profiles live in a <FolderName>/<FileName>/ subfolder so FileName stays a file name.
+        function Config:_pathFor(name)
+          if name == "Default" then return self.folder .. "/" .. self.file .. ".json" end
+          return self:_dir() .. "/" .. name .. ".json"
+        end
+        function Config:_path() return self:_pathFor(self.profile) end
+
+        function Config:ActiveProfile() return self.profile end
+
+        function Config:SwitchProfile(name)
+          self.profile = name or "Default"
+          self:Load()
+          return self.profile
+        end
+
+        function Config:ListProfiles()
+          local names = { Default = true }
+          if type(listfiles) == "function" then
+            local ok, files = pcall(listfiles, self:_dir())
+            if ok and type(files) == "table" then
+              for _, f in ipairs(files) do
+                local n = tostring(f):match("([^/\\]+)%.json$")
+                if n then names[n] = true end
+              end
+            end
+          end
+          local out = {}
+          for n in pairs(names) do out[#out + 1] = n end
+          return out
+        end
+
+        function Config:DeleteProfile(name)
+          if type(delfile) == "function" and type(isfile) == "function" then
+            local p = self:_pathFor(name)
+            if isfile(p) then pcall(delfile, p) end
+          end
+        end
+
+        function Config:Register(flag, default, setValue)
+          self.defaults[flag] = default
+          self.setters[flag] = setValue
+          if self.values[flag] == nil then self.values[flag] = default end
+        end
+
+        function Config:Get(flag) return self.values[flag] end
+
+        function Config:Set(flag, value)
+          self.values[flag] = value
+          if self.autoSave then self:Save() end
+        end
+
+        function Config:GetAllKeys()
+          local keys = {}
+          for k in pairs(self.values) do keys[#keys + 1] = k end
+          return keys
+        end
+
+        function Config:Save()
+          if not hasFS() then return false end
+          local ok, encoded = pcall(function() return HttpService:JSONEncode(self.values) end)
+          if not ok then return false end
+          if type(makefolder) == "function" then
+            pcall(makefolder, self.folder)
+            -- only named profiles need the <FolderName>/<FileName>/ subfolder; the Default
+            -- profile is written straight to <FolderName>/<FileName>.json
+            if self.profile ~= "Default" then pcall(makefolder, self:_dir()) end
+          end
+          return pcall(writefile, self:_path(), encoded)
+        end
+
+        function Config:Load()
+          if not hasFS() then return false end
+          local path = self:_path()
+          -- migrate from the older multi-profile layout where Default lived at
+          -- <FolderName>/<FileName>/Default.json instead of <FolderName>/<FileName>.json
+          if not isfile(path) and self.profile == "Default" then
+            local nested = self:_dir() .. "/Default.json"
+            if isfile(nested) then path = nested end
+          end
+          if not isfile(path) then return false end
+          local ok, content = pcall(readfile, path)
+          if not ok then return false end
+          local ok2, decoded = pcall(function() return HttpService:JSONDecode(content) end)
+          if not ok2 or type(decoded) ~= "table" then return false end
+          for flag, value in pairs(decoded) do
+            self.values[flag] = value
+            if self.setters[flag] then pcall(self.setters[flag], value) end
+          end
+          return true
+        end
+
+        function Config:ResetFlag(flag)
+          local d = self.defaults[flag]
+          self.values[flag] = d
+          if self.setters[flag] then pcall(self.setters[flag], d) end
+          if self.autoSave then self:Save() end
+        end
+
+        function Config:Reset(opts)
+          opts = opts or {}
+          for flag, d in pairs(self.defaults) do
+            self.values[flag] = d
+            if self.setters[flag] then pcall(self.setters[flag], d) end
+          end
+          if opts.ClearFile and type(delfile) == "function" and hasFS() and isfile(self:_path()) then
+            pcall(delfile, self:_path())
+          else
+            self:Save()
+          end
+        end
+
+        return Config
+
+    end
+
+    -- Module: core/device
+    EmbeddedModules["core/device"] = function()
+        -- Deps injected via Init(R) (bundler cannot rewrite require() inside embedded modules).
+        -- Centralized device/platform detection. Phone-vs-tablet is a best-effort viewport
+        -- heuristic (Roblox exposes no physical-size/DPI), driven primarily by aspect ratio so
+        -- it is DPI-independent; tune via Device.Configure. Console/Desktop/Touch are reliable.
+        local UserInputService = game:GetService("UserInputService")
+        local GuiService = game:GetService("GuiService")
+
+        local Device = {}
+        local Signal
+        local DEFAULTS = { TabletMaxAspect = 1.55, TabletMinDiagonal = math.huge }
+        local cfg = { TabletMaxAspect = DEFAULTS.TabletMaxAspect, TabletMinDiagonal = DEFAULTS.TabletMinDiagonal }
+
+        local function viewport()
+          local cam = workspace and workspace.CurrentCamera
+          local vp = cam and cam.ViewportSize
+          if vp and vp.X and vp.X > 0 then return vp end
+          return { X = 1280, Y = 720 }
+        end
+
+        function Device.GetType()
+          if GuiService and GuiService.IsTenFootInterface and GuiService:IsTenFootInterface() then
+            return "Console"
+          end
+          local touch = UserInputService.TouchEnabled
+          local mouse = UserInputService.MouseEnabled
+          if touch and not mouse then
+            local vp = viewport()
+            local a, b = math.max(vp.X, vp.Y), math.min(vp.X, vp.Y)
+            local aspect = (b > 0) and (a / b) or 1
+            local diag = math.sqrt(vp.X * vp.X + vp.Y * vp.Y)
+            if aspect <= cfg.TabletMaxAspect or diag >= cfg.TabletMinDiagonal then return "Tablet" end
+            return "Mobile"
+          end
+          return "Desktop"
+        end
+
+        function Device.IsMobile() return Device.GetType() == "Mobile" end
+        function Device.IsTablet() return Device.GetType() == "Tablet" end
+        function Device.IsDesktop() return Device.GetType() == "Desktop" end
+        function Device.IsConsole() return Device.GetType() == "Console" end
+        function Device.IsTouch() return UserInputService.TouchEnabled == true end
+
+        -- Capability probes resolve the service lazily under pcall: an exotic executor may hand back nil
+        -- from GetService or lack a newer property (GuiService.ReducedMotionEnabled on older clients),
+        -- and a probe must degrade to its conservative default instead of throwing inside a hover bind.
+        local function readService(name, prop)
+          local ok, v = pcall(function() return game:GetService(name)[prop] end)
+          if ok then return v end
+          return nil
+        end
+
+        -- Hover affordances (wash, tooltip intent, halo) only make sense with a pointer; touch-only
+        -- devices skip them rather than getting a stuck hover state after the first tap.
+        function Device.SupportsHover() return readService("UserInputService", "MouseEnabled") == true end
+        -- OS-level accessibility flag; Animate reads it to default reduced-motion users to instant goals.
+        function Device.PrefersReducedMotion() return readService("GuiService", "ReducedMotionEnabled") == true end
+
+        function Device.GetInput()
+          local t = UserInputService.GetLastInputType and UserInputService:GetLastInputType()
+          local name = (t and t.Name) or ""
+          if name == "Touch" then return "Touch" end
+          if name:find("Gamepad") then return "Gamepad" end
+          return "KeyboardMouse"
+        end
+
+        local lastType, lastInput
+        function Device._recompute()
+          local t, i = Device.GetType(), Device.GetInput()
+          if t ~= lastType or i ~= lastInput then
+            lastType, lastInput = t, i
+            if Device.Changed then Device.Changed:Fire({ Type = t, Input = i, Viewport = viewport() }) end
+          end
+        end
+
+        function Device.Configure(opts)
+          if type(opts) == "table" then
+            if tonumber(opts.TabletMaxAspect) then cfg.TabletMaxAspect = tonumber(opts.TabletMaxAspect) end
+            if tonumber(opts.TabletMinDiagonal) then cfg.TabletMinDiagonal = tonumber(opts.TabletMinDiagonal) end
+          end
+          Device._recompute()
+        end
+
+        local connected = false
+        function Device.Init(R)
+          Signal = R.Signal
+          cfg.TabletMaxAspect = DEFAULTS.TabletMaxAspect
+          cfg.TabletMinDiagonal = DEFAULTS.TabletMinDiagonal
+          if not Device.Changed then Device.Changed = Signal.new() end
+          lastType, lastInput = Device.GetType(), Device.GetInput()
+          if connected then return end
+          connected = true
+          local function hook(sig) if sig and sig.Connect then sig:Connect(function() Device._recompute() end) end end
+          hook(UserInputService.LastInputTypeChanged)
+          if UserInputService.GetPropertyChangedSignal then
+            hook(UserInputService:GetPropertyChangedSignal("TouchEnabled"))
+            hook(UserInputService:GetPropertyChangedSignal("MouseEnabled"))
+            hook(UserInputService:GetPropertyChangedSignal("KeyboardEnabled"))
+          end
+          local cam = workspace and workspace.CurrentCamera
+          if cam and cam.GetPropertyChangedSignal then hook(cam:GetPropertyChangedSignal("ViewportSize")) end
+        end
+
+        return Device
+
+    end
+
+    -- Module: components/slider
+    EmbeddedModules["components/slider"] = function()
+        -- Deps injected via Init(R).
+        local Slider = {}
+        local Create, DefaultTheme, Animate, Maid, Flag, Safe, Effects, Recipes, Device
+        local UserInputService = game:GetService("UserInputService")
+        function Slider.Init(R)
+          Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe
+          Effects = R.Effects; Recipes = R.Recipes; Device = R.Device
+        end
+
+        -- Rail geometry pinned by theme_test/slider_test: a 6px track 16px above the padded row bottom,
+        -- with a 12px handle centred on it. The Hit strip and the halo derive from these.
+        local TRACK_H, TRACK_Y, HANDLE = 6, -16, 12
+
+        function Slider.new(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local maid = Maid.new()
+          local minV = opts.Min or 0
+          local maxV = opts.Max or 100
+          local step = opts.Step or 1
+          local value = minV
+          local onChanged
+
+          local function snap(n)
+            n = tonumber(n) or value
+            if step and step > 0 then n = math.floor((n - minV) / step + 0.5) * step + minV end
+            if n < minV then n = minV elseif n > maxV then n = maxV end
+            return n
+          end
+
+          local hasDesc = opts.Description ~= nil and opts.Description ~= ""
+          -- symmetric vertical padding so the title/track/handle aren't flush against the row edges;
+          -- grow the row height by 2*padY so the inner layout (title at top, track anchored to the
+          -- inner bottom) keeps its relative geometry and simply gains breathing room top and bottom.
+          local padY = theme.Spacing.inputY
+          local root = Create("Frame", { Name = "SliderRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
+            Size = UDim2.new(1, 0, 0, (opts.Text and (hasDesc and 62 or 46) or 28) + padY * 2), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
+            Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = padY, bottom = padY }) })
+          local valueLabel, titleLabel, descLabel
+          if opts.Text then
+            -- Title is the row label (14, Medium) like every other row; the 16px slot and the track
+            -- offset are pinned geometry (theme_test), so only the type role changes.
+            titleLabel = Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
+              TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+              Size = UDim2.new(1, -40, 0, 16), Parent = root }), theme, "label")
+            valueLabel = Create.text(Create("TextLabel", { Name = "Value", BackgroundTransparency = 1, Text = "0",
+              TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Right,
+              Size = UDim2.new(0, 40, 0, 16), Position = UDim2.new(1, -40, 0, 0), Parent = root }), theme, "muted")
+            if hasDesc then
+              descLabel = Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+                TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+                TextYAlignment = Enum.TextYAlignment.Top,
+                Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -40, 0, 18), Parent = root }), theme, "muted")
+            end
+          end
+          -- The empty part of the rail is the window background (one step below the row) plus a stroke,
+          -- so an untouched slider still reads as a groove rather than a gap.
+          local track = Create("Frame", { Name = "Track", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
+            Size = UDim2.new(1, 0, 0, TRACK_H), Position = UDim2.new(0, 0, 1, TRACK_Y), Parent = root, Create.corner(TRACK_H / 2) })
+          local trackStroke = Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = track })
+          local fill = Create("Frame", { Name = "Fill", BackgroundColor3 = theme.Colors.primary, BorderSizePixel = 0,
+            Size = UDim2.new(0, 0, 1, 0), Parent = track, Create.corner(TRACK_H / 2) })
+          -- AnchorPoint (0.5, 0.5): the handle sits ON the value point, so the grow UIScale expands about
+          -- its centre instead of dragging the glyph down-right from a top-left origin.
+          local handle = Create("Frame", { Name = "Handle", BackgroundColor3 = theme.Colors.foreground, BorderSizePixel = 0, ZIndex = 2,
+            AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(0, HANDLE, 0, HANDLE),
+            Position = UDim2.new(0, 0, 0.5, 0), Parent = track, Create.corner(HANDLE / 2) })
+          local handleScale = Create("UIScale", { Scale = 1, Parent = handle })
+          -- Halo: a glow parented to the TRACK at ZIndex 0 (Track has no ClipsDescendants), so it shares
+          -- the handle's coordinate space and follows it with a plain Position write -- no Absolute* math.
+          -- nil while Effect.shadowId is '' and on phones under controlGlow 'auto'.
+          local halo = Effects.glow(track, theme, theme.Colors.primary, "control", 0, "Halo")
+          Effects.mirror(halo, handle, "control", theme)
+          -- Finger-sized grab strip over the 6px rail: transparent, ZIndex above the track so pointer
+          -- input lands here rather than on the rail. Deliberately NOT 'Active' -- the rail it replaces
+          -- never sank input either, and an Active frame inside the content ScrollingFrame would swallow
+          -- the scroll the row sits in (same rule as the Recipes hover wash).
+          local hitH = theme.Sizes.sliderHit
+          local hit = Create("Frame", { Name = "Hit", BackgroundTransparency = 1, BorderSizePixel = 0, Active = false, ZIndex = 3,
+            Size = UDim2.new(1, 0, 0, hitH), Position = UDim2.new(0, 0, 1, TRACK_Y + TRACK_H / 2 - hitH / 2), Parent = root })
+
+          local dragging = false
+          local built = false
+          -- Handle and halo are both centre-anchored on the value point, so one goal serves both.
+          local function valuePos(scale) return UDim2.new(scale, 0, 0.5, 0) end
+
+          local function apply(v)
+            value = snap(v)
+            local scale = (maxV > minV) and (value - minV) / (maxV - minV) or 0
+            local direct = dragging or not built
+            Safe.mutate(function()
+              if valueLabel then valueLabel.Text = tostring(value) end
+              if direct then
+                -- an active drag writes straight through so the rail never lags the finger
+                fill.Size = UDim2.new(scale, 0, 1, 0)
+                handle.Position = valuePos(scale)
+                if halo then halo.Position = valuePos(scale) end
+                return
+              end
+              -- programmatic SetValue (config restore, api call) flows instead of jumping
+              local E, D = Animate.EASING.smooth, Animate.DIR.Out
+              Animate.to(fill, "base", { Size = UDim2.new(scale, 0, 1, 0) }, E, D)
+              Animate.to(handle, "base", { Position = valuePos(scale) }, E, D)
+              if halo then Animate.to(halo, "base", { Position = valuePos(scale) }, E, D) end
+            end)
+          end
+          local commit = Flag.bind(opts, snap(opts.Default or minV), apply)
+          built = true
+
+          local api = { Frame = root }
+          function api.GetValue() return value end
+          function api.SetValue(v) commit(snap(v)); if opts.Callback then opts.Callback(value) end; if onChanged then onChanged(value) end end
+          function api.OnChanged(fn) onChanged = fn end
+          function api.Destroy() maid:DoCleanup() end
+
+          -- ---- handle feedback ------------------------------------------------------
+          local hovering = false
+          local function handleGrow()
+            local s = dragging and theme.Motion.handleGrow or (hovering and theme.Motion.handleHover or 1)
+            Animate.springTo(handleScale, "release", { Scale = s })
+            if halo then Animate.to(halo, "base", { ImageTransparency = dragging and theme.fx(theme).glow or 1 }) end
+          end
+
+          local enabled = true
+          local function setEnabled(b)
+            local was = enabled
+            enabled = b ~= false
+            Safe.mutate(function()
+              local parts = { { fill, "BackgroundTransparency", 0 }, { handle, "BackgroundTransparency", 0 } }
+              if valueLabel then parts[#parts + 1] = { valueLabel, "TextTransparency", 0 } end
+              Recipes.disabled(parts, not enabled, theme)
+            end)
+            -- a drag already under way is forced to finish (value kept) rather than left hanging
+            if was and not enabled and dragging then dragging = false; handleGrow() end
+          end
+
+          if opts.AccentReg then maid:Give(opts.AccentReg(function()
+            root.BackgroundColor3 = theme.Colors.surface
+            track.BackgroundColor3 = theme.Colors.background
+            trackStroke.Color = theme.Colors.border
+            fill.BackgroundColor3 = theme.Colors.primary
+            handle.BackgroundColor3 = theme.Colors.foreground
+            Effects.reskin(halo, theme, "glow", theme.Colors.primary)
+            if titleLabel then titleLabel.TextColor3 = theme.Colors.foreground end
+            if descLabel then descLabel.TextColor3 = theme.Colors.mutedForeground end
+            if valueLabel then valueLabel.TextColor3 = theme.Colors.mutedForeground end
+          end)) end
+
+          local function fromX(px)
+            local ap, sz = track.AbsolutePosition, track.AbsoluteSize
+            local x0 = ap and ap.X or 0
+            local w = (sz and sz.X) or 1
+            local t = (px - x0) / (w > 0 and w or 1)
+            if t < 0 then t = 0 elseif t > 1 then t = 1 end
+            api.SetValue(minV + t * (maxV - minV))
+          end
+          maid:Give(hit.InputBegan:Connect(function(input)
+            if not enabled then return end
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+              dragging = true; handleGrow(); fromX(input.Position.X)
+            end
+          end))
+          maid:Give(UserInputService.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+              fromX(input.Position.X)
+            end
+          end))
+          maid:Give(UserInputService.InputEnded:Connect(function(input)
+            if not dragging then return end
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+              dragging = false; handleGrow()
+            end
+          end))
+          if Device.SupportsHover() then
+            maid:Give(hit.MouseEnter:Connect(function() hovering = true; if enabled then handleGrow() end end))
+            maid:Give(hit.MouseLeave:Connect(function() hovering = false; handleGrow() end))
+          end
+
+          -- Blocks USER input only: SetValue / a config restore still updates state and visuals.
+          function api.SetEnabled(b) setEnabled(b) end
+          if opts.Disabled then setEnabled(false) end
+          maid:Give(root)
+          return api
+        end
+        return Slider
+
+    end
+
+    -- Module: components/table
+    EmbeddedModules["components/table"] = function()
+        -- Deps injected via Init(R).
+        local Table = {}
+        local Create, DefaultTheme, Maid, Safe, Recipes
+        function Table.Init(R) Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Safe = R.Safe; Recipes = R.Recipes end
+
+        -- Row geometry (today's literals): 24px rows, Body starts 2px under the header so the 1px
+        -- HeaderRule sits in that gap; cells inset 4px so header text lines up with body cells.
+        local ROW_H, BODY_Y, CELL_INSET = 24, 26, 4
+
+        function Table.new(opts)
+          opts = opts or {}
+          local theme = opts.Theme or DefaultTheme
+          local maid = Maid.new()
+          local cols = opts.Columns or {}
+
+          local root = Create("Frame", { Name = "Table", BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, (opts.Height or 120) + BODY_Y), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
+
+          -- Body rows answer hover through the FILL kind of the hover recipe: the Row lays its cells out
+          -- with a horizontal UIListLayout, so a wash Frame would be laid out as an extra column. `fill`
+          -- tweens the Row's own BackgroundTransparency and never writes BackgroundColor3 (theme_test
+          -- pins the first row's colour by identity). Handles are dropped with the rows on Clear().
+          local rowHovers = {}
+          local function dropRowHovers()
+            for i = #rowHovers, 1, -1 do rowHovers[i](); rowHovers[i] = nil end
+          end
+
+          local function makeRow(parent, cells, header, order)
+            local row = Create("Frame", { Name = header and "Header" or "Row",
+              BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = header and 1 or 0,
+              Size = UDim2.new(1, 0, 0, ROW_H), LayoutOrder = order or 0, Parent = parent,
+              Create.corner(header and 0 or theme.Radius.xs),
+              Create.listLayout({ Padding = CELL_INSET, FillDirection = Enum.FillDirection.Horizontal }) })
+            -- the header sits on the root while body rows sit inside Body's padding: inset it the same
+            if header then Create.padding({ left = CELL_INSET, right = CELL_INSET }).Parent = row end
+            if not header then
+              local hv = Recipes.hover(row, { theme = theme, kind = "fill" })
+              rowHovers[#rowHovers + 1] = hv.disconnect
+            end
+            for i, text in ipairs(cells) do
+              local cell = Create.text(Create("TextLabel", { Name = "Cell", BackgroundTransparency = 1, Text = tostring(text),
+                TextColor3 = header and theme.Colors.mutedForeground or theme.Colors.foreground,
+                TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                Size = UDim2.new(0, 0, 1, 0), LayoutOrder = i, Parent = row }), theme, "muted")
+              -- header keeps the muted size but reads Medium (plan 1.2); nil-safe where Font.fromName is absent
+              local face = header and theme.FontFace and theme.FontFace(Enum.FontWeight.Medium)
+              if face then cell.FontFace = face end
+              Create("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill, Parent = cell })
+            end
+            return row
+          end
+
+          makeRow(root, cols, true, 0)
+          local rule = Create("Frame", { Name = "HeaderRule", BackgroundColor3 = theme.Colors.border,
+            BackgroundTransparency = theme.Stroke.divider, BorderSizePixel = 0,
+            Position = UDim2.new(0, 0, 0, BODY_Y - 1), Size = UDim2.new(1, 0, 0, 1), Parent = root })
+          local body = Create("ScrollingFrame", { Name = "Body", BackgroundColor3 = theme.Colors.surface,
+            BackgroundTransparency = 0.5, BorderSizePixel = 0,
+            Position = UDim2.new(0, 0, 0, BODY_Y), Size = UDim2.new(1, 0, 1, -BODY_Y),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(0, 0, 0, 0), Parent = root,
+            Create.corner(theme.Radius.sm), Create.padding({ all = CELL_INSET }), Create.listLayout({ Padding = 2 }) })
+          Recipes.scrollbar(body, theme)
+
+          local order = 0
+          local api = { Frame = root, Body = body }
+          function api.AddRow(cells)
+            order = order + 1
+            local o = order
+            local row
+            Safe.mutate(function() row = makeRow(body, cells, false, o) end)
+            return row
+          end
+          function api.Clear()
+            order = 0
+            Safe.mutate(function()
+              dropRowHovers()
+              for _, c in ipairs(body:GetChildren()) do if c.Name == "Row" then c:Destroy() end end
+            end)
+          end
+          function api.SetData(rows) api.Clear(); for _, r in ipairs(rows or {}) do api.AddRow(r) end end
+          function api.Destroy() maid:DoCleanup(); root:Destroy() end
+
+          api.SetData(opts.Rows)
+          maid:Give(root)
+          maid:Give(dropRowHovers)
+
+          if opts.AccentReg then maid:Give(opts.AccentReg(function()
+            body.BackgroundColor3 = theme.Colors.surface
+            Recipes.scrollbar(body, theme)                 -- scrollbar tint follows the border token
+            rule.BackgroundColor3 = theme.Colors.border
+            local header = root:FindFirstChild("Header")
+            if header then for _, c in ipairs(header:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.mutedForeground end end end
+            for _, row in ipairs(body:GetChildren()) do
+              if row.Name == "Row" then
+                row.BackgroundColor3 = theme.Colors.surface
+                for _, c in ipairs(row:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.foreground end end
+              end
+            end
+          end)) end
+
+          return api
+        end
+
+        return Table
+
+    end
+
+    -- Module: core/acrylic
+    EmbeddedModules["core/acrylic"] = function()
+        -- Deps injected via Init(R). Never call other modules from Init (pairs()-ordered).
+        local Acrylic = {}
+        local Create, Theme, Effects
+
+        function Acrylic.Init(R) Create = R.Create; Theme = R.Theme; Effects = R.Effects end
+
+        -- 2D frosted paint stack (NO Lighting/Workspace mutation): translucent fill + tiled noise grain
+        -- (clipped by a UICorner) + colour sheen + top highlight band + 1px stroke, all readable over any
+        -- background. Two rendering facts drive the shape of this file:
+        --   * UIGradient.Color MULTIPLIES BackgroundColor3. A card-over-background gradient crushed the
+        --     dark shell to ~black (9 * 24/255); the sheen therefore runs white-ish (fx.sheenTop) at the
+        --     top so the multiply LIFTS the fill, and light mode (sheenTop nil) uses theme.Colors.card
+        --     as an identity multiplier. A Transparency gradient on the host would multiply its
+        --     transparency and make the panel see-through, so the highlight is its own child Frame.
+        --   * ZIndexBehavior.Sibling renders children above the parent's fill, so noise/sheen/glint are
+        --     ZIndex 0 children and the rim is a UIGradient on the UIStroke (never a second UIStroke or
+        --     a second direct-child UIGradient: window_test/acrylic_test look those up by class).
+        -- opts (F10 signature, shared by decorate and reskin):
+        --   solid        opaque, no frost layers (dialog card: its UIListLayout would lay them out)
+        --   transparency host BackgroundTransparency (decorate default FROST; reskin leaves it alone)
+        --   base         fill Color3 (default theme.Colors.card); pass the LIVE token each call
+        --   strokeAlpha  UIStroke.Transparency (default theme.Acrylic.strokeAlpha)
+        --   radius       UICorner radius of the noise/sheen layers + glint inset (default Radius.window)
+        --   edge         Effects.rim on the stroke + 'AcrylicGlint' hairline (non-solid hosts only)
+        --   padInset     host UIPadding in px: layers are sized (1,2p,1,2p) at (0,-p,0,-p) so they still
+        --                reach the rounded edge that the padding pushes every child away from
+        -- Today's values; a theme that defines Acrylic.frost / Acrylic.glintFade overrides them.
+        local FROST = 0.12       -- default host BackgroundTransparency
+        local GLINT_FADE = 0.25  -- glint fades out over this fraction at each end
+        local HAIRLINE = 1       -- stroke + glint thickness (px)
+
+        -- Non-colour opts remembered per host (weak) so a later reskin(frame, theme, { base = ... })
+        -- keeps the stroke alpha / radius / inset / edge the host was decorated with instead of
+        -- silently reverting to the defaults. Colours are never stored: applyMode re-assigns the
+        -- theme.Colors tokens, so a stored Color3 would be stale after a mode switch.
+        local meta = setmetatable({}, { __mode = "k" })
+
+        local function tokens(theme) return theme.Acrylic or Theme.Acrylic end
+        local function white() return Color3.new(1, 1, 1) end
+
+        local function resolve(frame, theme, opts)
+          opts = opts or {}
+          local A, m = tokens(theme), meta[frame] or {}
+          local function pick(k, default)
+            local v = opts[k]
+            if v == nil then v = m[k] end
+            if v == nil then v = default end
+            return v
+          end
+          local o = {
+            solid = pick("solid", false) and true or false,
+            strokeAlpha = pick("strokeAlpha", A.strokeAlpha),
+            radius = pick("radius", theme.Radius.window),
+            edge = pick("edge", false) and true or false,
+            padInset = pick("padInset", 0),
+            base = opts.base or theme.Colors.card,
+            transparency = opts.transparency,
+          }
+          meta[frame] = { solid = o.solid, strokeAlpha = o.strokeAlpha, radius = o.radius, edge = o.edge, padInset = o.padInset }
+          return o
+        end
+
+        -- ---- sequences --------------------------------------------------------------------------------
+        local function colorSeq(stops)
+          local kps = {}
+          for i, s in ipairs(stops) do kps[i] = ColorSequenceKeypoint.new(s[1], s[2]) end
+          return ColorSequence.new(kps)
+        end
+
+        local function numberSeq(stops)
+          local kps = {}
+          for i, s in ipairs(stops) do kps[i] = NumberSequenceKeypoint.new(s[1], s[2]) end
+          return NumberSequence.new(kps)
+        end
+
+        local function sheenStops(theme, fx)
+          return { { 0, fx.sheenTop or theme.Colors.card }, { 1, fx.sheenBottom } }
+        end
+
+        -- Highlight band: fx.highlight at the top fading to nothing by Acrylic.highlightBand. The top
+        -- alpha is scaled by the host's own (1 - transparency) so a Transparency 0.6 window is not
+        -- over-bright; highlight 1 (light mode) yields a fully transparent band and the layer hides.
+        local function highlightStops(theme, fx, transparency)
+          local top = 1 - (1 - fx.highlight) * (1 - transparency)
+          return { { 0, top }, { tokens(theme).highlightBand, 1 }, { 1, 1 } }
+        end
+
+        local function glintStops(theme)
+          local fade = tokens(theme).glintFade or GLINT_FADE
+          return { { 0, 1 }, { fade, 0 }, { 1 - fade, 0 }, { 1, 1 } }
+        end
+
+        -- ---- geometry ---------------------------------------------------------------------------------
+        local function layerGeometry(inst, p)
+          inst.Position = UDim2.new(0, -p, 0, -p)
+          inst.Size = UDim2.new(1, 2 * p, 1, 2 * p)
+        end
+
+        -- Hairline inside the top radius: starts r px in from the left edge, spans the width minus both
+        -- radii; -p pulls it out of the host padding like the other layers.
+        local function glintGeometry(inst, r, p)
+          inst.Position = UDim2.new(0, r - p, 0, -p)
+          inst.Size = UDim2.new(1, 2 * p - 2 * r, 0, HAIRLINE)
+        end
+
+        -- ---- creation (idempotent by Name/class) ------------------------------------------------------
+        local function ensureStroke(frame, theme, o)
+          if frame:FindFirstChildOfClass("UIStroke") then return end
+          Create.stroke(theme.Colors.border, HAIRLINE, o.strokeAlpha).Parent = frame
+        end
+
+        local function ensureNoise(frame, theme, o, fx)
+          local A = tokens(theme)
+          if A.noiseId == "" or frame:FindFirstChild("AcrylicNoise") then return end
+          local noise = Create("ImageLabel", {
+            Name = "AcrylicNoise", BackgroundTransparency = 1, Image = A.noiseId, ScaleType = Enum.ScaleType.Tile,
+            TileSize = UDim2.new(0, A.tileSize, 0, A.tileSize), ImageColor3 = fx.grainTint, ImageTransparency = fx.grain,
+            ZIndex = 0, Active = false, Parent = frame, Create.corner(o.radius),
+          })
+          layerGeometry(noise, o.padInset)
+        end
+
+        local function ensureGradient(frame, theme, fx)
+          if frame:FindFirstChildOfClass("UIGradient") then return end
+          Create.gradient({ rotation = 90, stops = sheenStops(theme, fx) }).Parent = frame
+        end
+
+        local function ensureSheen(frame, theme, o, fx, transparency)
+          if frame:FindFirstChild("AcrylicSheen") then return end
+          local sheen = Create("Frame", {
+            Name = "AcrylicSheen", BackgroundColor3 = white(), BackgroundTransparency = 0, BorderSizePixel = 0,
+            Visible = fx.highlight < 1, ZIndex = 0, Active = false, Parent = frame, Create.corner(o.radius),
+            Create.shade({ rotation = 90, stops = highlightStops(theme, fx, transparency) }),
+          })
+          layerGeometry(sheen, o.padInset)
+        end
+
+        local function ensureGlint(frame, theme, o, fx)
+          if frame:FindFirstChild("AcrylicGlint") then return end
+          local glint = Create("Frame", {
+            Name = "AcrylicGlint", BackgroundColor3 = white(), BorderSizePixel = 0, BackgroundTransparency = fx.glint,
+            Visible = fx.glint < 1, ZIndex = 0, Active = false, Parent = frame,
+            Create.shade({ rotation = 0, stops = glintStops(theme) }),
+          })
+          glintGeometry(glint, o.radius, o.padInset)
+        end
+
+        -- ---- paint (re-apply everything that exists) --------------------------------------------------
+        local function paintStroke(frame, theme, o)
+          local stroke = frame:FindFirstChildOfClass("UIStroke")
+          if not stroke then return end
+          stroke.Color = theme.Colors.border
+          stroke.Transparency = o.strokeAlpha
+          -- rim on opt-in, and re-painted whenever one already exists (reskin without the edge opt)
+          if Effects and (o.edge or stroke:FindFirstChildOfClass("UIGradient")) then Effects.rim(stroke, theme) end
+        end
+
+        local function paintFrost(frame, theme, fx, transparency)
+          local grad = frame:FindFirstChildOfClass("UIGradient")
+          if grad then grad.Color = colorSeq(sheenStops(theme, fx)) end
+          local noise = frame:FindFirstChild("AcrylicNoise")
+          if noise then noise.ImageColor3 = fx.grainTint; noise.ImageTransparency = fx.grain end
+          local sheen = frame:FindFirstChild("AcrylicSheen")
+          if sheen then
+            local g = sheen:FindFirstChildOfClass("UIGradient")
+            if g then g.Transparency = numberSeq(highlightStops(theme, fx, transparency)) end
+            sheen.Visible = fx.highlight < 1
+          end
+          local glint = frame:FindFirstChild("AcrylicGlint")
+          if glint then glint.BackgroundTransparency = fx.glint; glint.Visible = fx.glint < 1 end
+        end
+
+        -- Fill + every existing layer. Creates nothing except the glint on edge opt-in, and only on a
+        -- host that already carries the frost stack, so a solid card never grows layers from a reskin.
+        local function paint(frame, theme, o)
+          local fx = Theme.fx(theme)
+          frame.BackgroundColor3 = o.base
+          if o.solid then frame.BackgroundTransparency = 0
+          elseif o.transparency ~= nil then frame.BackgroundTransparency = o.transparency end
+          paintStroke(frame, theme, o)
+          if o.edge and not o.solid and frame:FindFirstChildOfClass("UIGradient") then ensureGlint(frame, theme, o, fx) end
+          paintFrost(frame, theme, fx, frame.BackgroundTransparency or 0)
+          return frame
+        end
+
+        function Acrylic.decorate(frame, theme, opts)
+          local o = resolve(frame, theme, opts)
+          if o.transparency == nil then o.transparency = tokens(theme).frost or FROST end
+          ensureStroke(frame, theme, o)
+          if not o.solid then
+            local fx = Theme.fx(theme)
+            ensureNoise(frame, theme, o, fx)
+            ensureGradient(frame, theme, fx)
+            ensureSheen(frame, theme, o, fx, o.transparency)
+          end
+          return paint(frame, theme, o)
+        end
+
+        -- Live re-skin after SetMode/SetAccent: fill, sheen keypoints, stroke colour + alpha, grain
+        -- alpha + tint, highlight band, rim and glint. The host's BackgroundTransparency is left as the
+        -- owner set it (window SetTransparency writes Main directly) unless opts.transparency is given.
+        function Acrylic.reskin(frame, theme, opts)
+          return paint(frame, theme, resolve(frame, theme, opts))
+        end
+
+        return Acrylic
+
+    end
+
     -- Load module helper function
     local function loadModule(url)
         -- Try embedded module first
@@ -8961,6 +9436,29 @@ EmbeddedModules["showcase/look"] = function()
         "plus a 1px white glint tucked inside the top radius. The whole window rests on a soft " ..
         "9-slice drop shadow, which is what separates it from the game behind it.")
 
+      tab:AddSection("The sidebar")
+      tab:AddParagraph(
+        "Three things live in the strip on the left. The field at the top filters BOTH halves of it: " ..
+        "a tab survives if its own name matches, and it also survives if any control inside it " ..
+        "matches, while every control row that does NOT match is hidden — so searching thins the page " ..
+        "you are standing on as well as the tab list. The overline headers (THE SHELL, THE CONTENTS) " ..
+        "come from grouping the tabs, and one disappears once every tab under it has been filtered " ..
+        "away. The seam between the sidebar and this panel is draggable: rest the pointer on it and a " ..
+        "grip pill fades up out of the hairline, then pull — the panel reflows as you go. And the 3px " ..
+        "pill marking the active tab does not merely move: it stretches tall as it leaves, springs " ..
+        "across on a duration scaled to the distance, and settles back to its rest height on arrival.")
+      -- SearchTabs is the exact entry point the field uses, so a button proves the filter with no
+      -- typing. The query is a word from this button's OWN caption on purpose: the index stores the
+      -- text a control was BUILT with (components/host.lua, registerSearchable), so this row survives
+      -- its own filter and can be clicked again to clear it.
+      local searchBtn, filtered = nil, false
+      searchBtn = tab:AddButton({ Text = "Filter the sidebar for \"toggle\"", Icon = "search", Variant = "secondary",
+        Callback = function()
+          filtered = not filtered
+          window:SearchTabs(filtered and "toggle" or "")
+          searchBtn.SetText(filtered and "Clear the filter" or "Filter the sidebar for \"toggle\"")
+        end })
+
       tab:AddSection("Repaint the shell live")
       -- Mode and accent are separate axes on purpose: a NAMED accent survives a mode switch, while
       -- "Adaptive" follows the mode. Flip both to see that.
@@ -9027,311 +9525,29 @@ EmbeddedModules["showcase/look"] = function()
         "the window in place rather than drifting. Read that confirm dialog with suspicion: it " ..
         "offers to reopen the window with the toggle key or the floating button, and it cannot — " ..
         "Close destroys the GUI and every handler with it. Use minimize while you are still touring.")
-    end
 
-end
-
--- Module: showcase/motion
-EmbeddedModules["showcase/motion"] = function()
-    -- Tab 2 — the controls whose MOVEMENT changed. Each block is a paragraph that names the thing to
-    -- watch, then the one control that does it.
-    return function(window)
-      local tab = window:AddTab({ Name = "Motion", Icon = "activity" })
-
-      tab:AddSection("Toggle")
+      tab:AddSection("The floating toggle")
       tab:AddParagraph(
-        "Hold the switch down before you release it: the knob stretches toward where it is going " ..
-        "(20px wide to 24px) and snaps back on release. The travel itself is a spring with a 1px " ..
-        "overshoot, not a linear slide. When it lands ON, the grey track hairline dissolves so the " ..
-        "accent pill is clean, and an accent glow fades in behind the track. The OFF track is its " ..
-        "own tone now — it used to be the same colour as the row, which made it invisible.")
-      local demoToggle = tab:AddToggle({
-        Text = "Knob spring + accent glow",
-        Description = "Press and hold, then release.",
-        Default = true,
-      })
-
-      tab:AddSection("Slider")
-      tab:AddParagraph(
-        "The grab strip is 24px tall now, not 6 — you no longer have to hit the rail exactly. Hover " ..
-        "the handle and it grows to 1.15; start dragging and it goes to 1.3 with an accent halo " ..
-        "behind it, then springs back when you let go. The empty part of the rail has a hairline so " ..
-        "it reads as a groove rather than a gap.")
-      local demoSlider = tab:AddSlider({
-        Text = "Handle grow + halo",
-        Min = 0, Max = 100, Default = 40,
-        Description = "Hover the handle, then drag it.",
-      })
-      -- SetValue is eased (Quint over `base`) rather than a jump, which is the same path a config
-      -- restore takes. Two buttons make that visible without a drag.
-      tab:AddButton({ Text = "Glide the slider to 10", Variant = "outline",
-        Callback = function() demoSlider.SetValue(10) end })
-      tab:AddButton({ Text = "Glide the slider to 90", Variant = "outline",
-        Callback = function() demoSlider.SetValue(90) end })
-
-      tab:AddSection("Progress")
-      tab:AddParagraph(
-        "The fill flows to its new value with a distance-aware duration — a nudge lands quickly, a " ..
-        "long sweep takes its time. Step this to 100% and watch the completion flash: the fill " ..
-        "lifts to 35% transparent the instant it arrives and fades back to solid.")
-      local bar = tab:AddProgressBar({ Default = 0 })
-      local stepBtn
-      stepBtn = tab:AddButton({ Text = "Step +25%", Icon = "chevron-right", Callback = function()
-        local v = bar.Get()
-        -- wraps back to empty once full, so the button is safe to hammer and the flash is repeatable
-        bar.Set(v >= 1 and 0 or math.min(1, v + 0.25))
-        stepBtn.SetText(bar.Get() >= 1 and "Reset to 0%" or "Step +25%")
-      end })
-
-      tab:AddSection("Field focus")
-      tab:AddParagraph(
-        "Click into the box. Its hairline tweens from 1px border to 2px in the ring colour rather " ..
-        "than snapping, and clicking away tweens it back. The box itself sits at the window-glass " ..
-        "tone — a step BELOW the row it lives in — which is the inset the Look tab talks about. " ..
-        "Type something and the clear button fades in at the right edge.")
-      tab:AddTextBox({
-        Text = "Nickname",
-        Placeholder = "click here",
-        Description = "The ring is its own neutral token, so it does not follow the accent.",
-        Clearable = true,
-        MaxLength = 24,
-      })
-
-      tab:AddSection("Button states")
-      tab:AddParagraph(
-        "Hover any button for the wash, press for the 0.97 scale and the deeper fill, release for " ..
-        "the spring back. The two below are the states you cannot reach by hovering.")
-      -- Loading: the label fades out, a spinner fades in and spins on ONE repeating tween (not a
-      -- Heartbeat loop). The busy flag is the important bit — without it a second click would stack
-      -- another timer and the first one would clear the loading state early.
-      local busy = false
-      local loadBtn
-      loadBtn = tab:AddButton({ Text = "Run a task (loading state)", Icon = "refresh-cw", Variant = "secondary",
-        Callback = function()
-          if busy then return end
-          busy = true
-          loadBtn.SetLoading(true)
-          task.delay(1.8, function()
-            loadBtn.SetLoading(false)
-            busy = false
-            window:ShowSuccess({ Title = "Done", Message = "The spinner was one repeating tween." })
-          end)
-        end })
-
-      -- Disabled: dims the surface, the label and the description, and blocks input — but SetEnabled
-      -- blocks USER input only, so .Set/.SetValue still move the control while it is dimmed. The
-      -- second half of this callback proves that.
-      local off = false
-      local dimBtn
-      dimBtn = tab:AddButton({ Text = "Disable the toggle and slider", Icon = "lock", Variant = "outline",
-        Callback = function()
-          off = not off
-          demoToggle.SetEnabled(not off)
-          demoSlider.SetEnabled(not off)
-          dimBtn.SetText(off and "Enable the toggle and slider" or "Disable the toggle and slider")
-          if off then
-            -- still moves while disabled: dimmed is not frozen, it is just not clickable
-            demoToggle.Set(false)
-            demoSlider.SetValue(65)
-            window:ShowInfo({ Title = "Dimmed, not frozen",
-              Message = "Both are disabled, yet code just moved them. Only YOUR input is blocked." })
-          end
-        end })
-
-      tab:AddButton({ Text = "Born disabled (nothing happens)", Variant = "destructive", Disabled = true,
-        Callback = function() window:ShowError({ Title = "This should never fire" }) end })
-    end
-
-end
-
--- Module: showcase/overlays
-EmbeddedModules["showcase/overlays"] = function()
-    -- Tab 3 — everything that leaves the panel: toasts, the dialog, and the two popovers.
-    return function(window)
-      local tab = window:AddTab({ Name = "Overlays", Icon = "bell" })
-
-      tab:AddSection("Toasts")
-      tab:AddParagraph(
-        "Raise three or four in a row, then put the cursor over the stack. They fan out on a " ..
-        "stagger — each row further back waits a beat longer — and the countdown pauses while you " ..
-        "hover. Move away and they collapse back to a stack with the newest in front. Each toast is " ..
-        "one canvas group, so it fades and exits as a single piece instead of part by part.")
-      tab:AddButton({ Text = "Success", Icon = "circle-check",
-        Callback = function() window:ShowSuccess({ Title = "Saved", Message = "Everything landed." }) end })
-      tab:AddButton({ Text = "Warning", Icon = "triangle-alert", Variant = "secondary",
-        Callback = function() window:ShowWarning({ Title = "Careful", Message = "That one is close to the limit." }) end })
-      tab:AddButton({ Text = "Error", Icon = "circle-x", Variant = "destructive",
-        Callback = function() window:ShowError({ Title = "Failed", Message = "The request came back empty." }) end })
-      tab:AddButton({ Text = "Info", Icon = "info", Variant = "outline",
-        Callback = function() window:ShowInfo({ Title = "Heads up", Message = "Nothing is on fire." }) end })
-      tab:AddButton({ Text = "With an action button", Variant = "ghost", Callback = function()
-        window:Notify({ Title = "Item deleted", Message = "Removed from your inventory.", Type = "warning",
-          Action = { Text = "Undo", Callback = function() window:ShowSuccess({ Title = "Restored" }) end } })
-      end })
-      -- Promise morphs ONE toast: the spinner row becomes the success row in place, with a pulse.
-      -- The busy guard keeps a second click from stacking a second 1.6s task.
-      local promising = false
-      tab:AddButton({ Text = "Loading toast that resolves", Icon = "loader", Variant = "secondary",
-        Callback = function()
-          if promising then return end
-          promising = true
-          window:Promise(function() task.wait(1.6); return 42 end, {
-            Loading = "Fetching…",
-            Success = function(n) return "Fetched " .. tostring(n) .. " rows" end,
-            Error = "Could not fetch",
-            Finally = function() promising = false end,
-          })
-        end })
-
-      tab:AddSection("Dialog")
-      tab:AddParagraph(
-        "The card fades in from 94%, rises about 12px and settles with a spring; the scrim behind it " ..
-        "fades rather than cutting in, and the card has its own drop shadow on top of the scrim. " ..
-        "Press Escape (or gamepad B) and the first non-destructive button fires — the dialog closes " ..
-        "with a fade down instead of vanishing. Return fires the primary button on the right.")
-      tab:AddButton({ Text = "Open a dialog", Icon = "message-square", Callback = function()
-        window:Dialog({ Title = "Delete this loadout?", Message = "This cannot be undone.", Icon = "trash-2",
-          Buttons = {
-            { Text = "Cancel", Variant = "secondary" },
-            { Text = "Delete", Variant = "destructive", Icon = "trash-2",
-              Callback = function() window:ShowSuccess({ Title = "Deleted" }) end },
-          } })
-      end })
-
-      tab:AddSection("Popovers")
-      tab:AddParagraph(
-        "Open the dropdown and watch where it comes FROM: it grows out of its own field, scaling up " ..
-        "with a slide, and the caret rotates 180 degrees while it does. It gets the same frosted " ..
-        "glass and drop shadow as the window, so it floats instead of sitting flat. Close it and it " ..
-        "shrinks back down rather than blinking out. Near the bottom of the screen it flips upward " ..
-        "and grows from the other edge.")
-      -- Eight options: the search field auto-appears above five, so this shows the sticky search
-      -- with its own focus ring without having to pass Searchable.
-      tab:AddSelectBox({ Text = "Region", Default = "eu-west",
-        Description = "More than five options, so the search field appears on its own.",
-        Options = {
-          { Value = "eu-west", Text = "Europe West", Icon = "globe" },
-          { Value = "eu-north", Text = "Europe North", Icon = "globe" },
-          { Value = "us-east", Text = "US East", Icon = "map-pin" },
-          { Value = "us-west", Text = "US West", Icon = "map-pin" },
-          { Divider = true },
-          { Value = "ap-south", Text = "Asia Pacific South", Icon = "navigation" },
-          { Value = "ap-north", Text = "Asia Pacific North", Icon = "navigation" },
-          { Value = "sa-east", Text = "South America East", Icon = "compass" },
-          { Value = "af-south", Text = "Africa South", Icon = "compass" },
-        },
-        Callback = function(v) window:ShowInfo({ Title = "Region", Message = tostring(v), Duration = 2000 }) end })
-
-      -- No AllowNone here: components/selectbox.lua only consults it on the SINGLE-select path
-      -- (a multi list may always be emptied), so passing it would imply a behaviour it does not have.
-      tab:AddSelectBox({ Text = "Modules", Multi = true,
-        Description = "Multi-select: the field summarises, and a clear button appears once something is picked.",
-        Options = { "Aim", "ESP", "Movement", "Render", "Audio", "Network" },
-        -- Multi hands the callback an ARRAY of values, so count it rather than tostring it.
-        Callback = function(list) window:ShowInfo({ Title = "Modules", Message = #list .. " selected", Duration = 2000 }) end })
-
-      tab:AddParagraph(
-        "The colour picker is the same popover machinery. The SV square and the hue strip each have " ..
-        "a dot with a 1px rim so it stays visible over a bright patch, and the swatch on the row " ..
-        "follows live as you drag.")
-      tab:AddColorPicker({ Text = "Highlight colour", Default = Color3.fromRGB(120, 160, 255) })
-
-      tab:AddSection("Keybind")
-      -- The listening state is the FOCUS ring recipe, not the accent: components/keybind.lua paints
-      -- the chip stroke Colors.ring while listening and only flashes Colors.primary on capture.
-      tab:AddParagraph(
-        "Click the chip: it goes into listening state — its hairline thickens to 2px, lifts to the " ..
-        "neutral ring colour and breathes in and out, and the label reads 'Press a key'. The next " ..
-        "key you press is captured with an accent flash on that same hairline as the ring leaves. " ..
-        "Escape cancels and keeps the old binding.")
-      tab:AddKeybind({ Text = "Flash a toast", Default = Enum.KeyCode.G,
-        Callback = function() window:ShowInfo({ Title = "Keybind fired", Duration = 1500 }) end })
-    end
-
-end
-
--- Module: showcase/surfaces
-EmbeddedModules["showcase/surfaces"] = function()
-    -- Tab 4 — the display controls that carry the type hierarchy and the hairlines. Tooltips are
-    -- attached here too: Tooltip is a host-level option, so it works on any Add* control (it does
-    -- NOT work on AddAccordion, which is built outside the host mixin).
-    return function(window)
-      local tab = window:AddTab({ Name = "Surfaces", Icon = "layers" })
-
-      tab:AddSection("Type hierarchy")
-      tab:AddParagraph(
-        "Three weights, three roles. The section heading above is the overline: 11px Medium, " ..
-        "uppercase, muted — it groups without shouting. This paragraph is body Regular in the muted " ..
-        "foreground with a 1.25 line height, so a block of it does not clot together. A label is the " ..
-        "same size in the full foreground, which is why it reads as a value and this reads as prose.")
-      tab:AddLabel({ Text = "A plain label — full foreground, one line.",
-        Tooltip = "Tooltips fade in after a ~0.35s hover intent, and are inverted against the panel." })
-      tab:AddLabel({ Variant = "paragraph",
-        Text = "A paragraph label honours explicit line breaks too:\nthis is the second line,\nand this is the third." })
-
-      tab:AddSection("Hairlines")
-      tab:AddParagraph(
-        "A separator is a 1px rule in the border colour — the same token as the panel edge, the " ..
-        "dialog footer rule and the table header underline, so every divider in the library sits on " ..
-        "one value. Two of them around this row:")
-      tab:AddSeparator()
-      tab:AddLabel("Between two separators.")
-      tab:AddSeparator()
-
-      tab:AddSection("Card")
-      tab:AddParagraph(
-        "A card is the row surface one step up from the panel, with its own hairline and radius. Its " ..
-        "action buttons size to their own text instead of stretching edge to edge.")
-      tab:AddCard({
-        Title = "Depth, honestly",
-        Body = "Shadow and glow are siblings rendered UNDER their host; the rim light and the sheen " ..
-               "are clipped children on top. That ordering is what keeps a glow behind a toggle " ..
-               "instead of washing over it.",
-        Tooltip = "Cards accept a Tooltip as well — it attaches to the whole card frame.",
-        Buttons = {
-          { Text = "Nice", Callback = function() window:ShowSuccess({ Title = "Agreed", Duration = 1500 }) end },
-          { Text = "Show me a toast", Variant = "secondary",
-            Callback = function() window:ShowInfo({ Title = "Here you go", Duration = 1500 }) end },
-          { Text = "Dismiss", Variant = "ghost" },
-        },
-      })
-
-      tab:AddSection("Table")
-      tab:AddParagraph(
-        "The header row is pinned and the body scrolls under it. Rows answer hover with a fill wash " ..
-        "only — the row colour itself stays a pure token, so a theme switch cannot drift it.")
-      tab:AddTable({
-        Columns = { "Layer", "Rendered as", "Sits" },
-        Rows = {
-          { "Drop shadow", "9-slice image", "under" },
-          { "Accent glow", "9-slice image", "under" },
-          { "Rim light", "gradient on stroke", "on top" },
-          { "Sheen", "gradient frame", "on top" },
-          { "Grain", "tiled noise", "clipped" },
-        },
-        Height = 110,
-        Tooltip = "Scroll the body — the header stays put.",
-      })
-
-      tab:AddSection("Accordion")
-      tab:AddParagraph(
-        "Open and close it a couple of times: the collapse is the mirror of the expand, not a faster " ..
-        "cut, and the caret turns at the same pace rather than snapping. The header answers hover " ..
-        "with its own wash while the card body keeps its colour.")
-      local acc = tab:AddAccordion({ Title = "Nested controls", Icon = "rows-3", Expanded = false })
-      acc:AddToggle({ Text = "A toggle in here", Default = true, Description = "Same spring as on the Motion tab." })
-      acc:AddSlider({ Text = "And a slider", Min = 0, Max = 10, Default = 6 })
-      acc:AddButton({ Text = "And a button", Variant = "secondary",
-        Tooltip = "Controls inside an accordion get the full host API, tooltips included.",
-        Callback = function() window:ShowInfo({ Title = "From inside the accordion", Duration = 1500 }) end })
-
-      tab:AddSection("Image")
-      tab:AddParagraph(
-        "The image control takes a Lucide name as well as an asset id. Rendered as a glyph it is " ..
-        "tinted to the theme foreground, so it re-tints itself when you switch mode on the Look tab " ..
-        "— no second asset for light mode.")
-      tab:AddImage({ Lucide = "layers", Height = 72,
-        Tooltip = "Switch to light mode on the Look tab and come back — this glyph follows." })
+        "The button that brings the window back has three shapes. Simple is a chevron tab that docks " ..
+        "flush to the screen edge with a few pixels peeking out; circle is a round accent button and " ..
+        "square a rounded surface tile — those two wear the same brand glyph as the title bar, tinted " ..
+        "to the foreground token so the logo follows dark and light instead of shipping twice. The " ..
+        "button auto-hides, so switching type changes nothing you can see while the window is up: " ..
+        "press RightControl (or minimize) FIRST, then drag it. Only the simple tab magnets — drop it " ..
+        "anywhere and it slides to whichever side of the screen its centre was nearest, docking with " ..
+        "a few pixels peeking out and its chevron spun round to face outward; rest a pointer on it " ..
+        "and it leans a little further out. Circle and square are free-floating and stay where you " ..
+        "drop them.")
+      local fabLabel = tab:AddLabel("Floating toggle: simple")
+      -- SetFloatingToggle merges over the current options (components/window.lua), so changing Type
+      -- keeps the Image/Adaptive/AutoHide set in example/showcase.lua. Rebuilding is idempotent.
+      local function setFab(kind)
+        window:SetFloatingToggle({ Type = kind })
+        fabLabel.SetText("Floating toggle: " .. window:GetFloatingToggleType())
+      end
+      tab:AddButton({ Text = "Simple — chevron tab", Variant = "outline", Callback = function() setFab("simple") end })
+      tab:AddButton({ Text = "Circle — accent button", Variant = "outline", Callback = function() setFab("circle") end })
+      tab:AddButton({ Text = "Square — logo tile", Variant = "outline", Callback = function() setFab("square") end })
     end
 
 end
@@ -9351,35 +9567,65 @@ end
 --[[
   EzUI — visual showcase. A LOOK at the phase 1 + 2 polish, not an API playground.
 
-  Build to one pasteable file:
-    lua-bundler -e ./example/showcase.lua -o ./release/showcase.lua
-  Then paste release/showcase.lua into an executor (or loadstring it).
+  Build to one pasteable file — this is what `make showcase` runs. dist/ is the ONE build output
+  that is committed (release/ is gitignored), so a raw GitHub URL can serve the tour directly:
+    lua-bundler -e ./example/showcase.lua -o ./dist/showcase.lua
+  Then paste dist/showcase.lua into an executor (or loadstring it).
 ]]
 local EzUI = loadModule("../output/bundle")
+
+-- The EzUI brand mark as a WHITE-on-transparent PNG on the docs site. It is a single-colour glyph,
+-- so `*Adaptive` tints it to the theme foreground (near-white in dark, near-black in light) and
+-- re-tints it on SetMode — one asset that reads in both modes. Downloading it needs the executor's
+-- writefile + getcustomasset; where those are missing Asset.resolvable says so and the title bar is
+-- built with no logo at all, exactly as in example/main.lua. Nothing here depends on it landing.
+local LOGO = "https://alfin-efendy.github.io/ez-rbx-ui/brand/ezui-blade-zu-icon.png"
 
 local window = EzUI:CreateWindow({
   Title = "EzUI Showcase",
   Subtitle = "A tour of the visual polish",
+  Image = LOGO,                                    -- title-bar logo, left of the title
+  ImageAdaptive = true,                            -- mono glyph: tint it to the foreground token
   -- Big enough that the drop shadow, the lit top edge and the sidebar indicator all have room
   -- to read, small enough that the shadow spread is still visible against the game behind it.
   Ratio = { Width = 0.46, Height = 0.62 },
   Transparency = 0.12,                             -- the default frost; the Look tab moves it live
   ToggleKey = Enum.KeyCode.RightControl,
-  FloatingToggle = { Type = "simple", AutoHide = true },
+  -- The same mark on the floating button. "simple" is a chevron tab and ignores an Image, but the
+  -- Look tab switches the type live and circle/square both wear it — Adaptive tinted, so the FAB
+  -- logo follows dark/light too.
+  FloatingToggle = { Type = "simple", Image = LOGO, Adaptive = true, AutoHide = true },
   -- NO Config on purpose. Window.new only builds a Config object when config.Config is present
   -- (components/window.lua: `if cfgOpts and ...`), so with it omitted nothing is ever written to
   -- the executor's workspace folder. Every control below is therefore Flag-less and in-memory.
 })
 
+-- Sidebar categories. Every page is `function(window)` and calls `window:AddTab`, so each one is
+-- handed a stand-in whose AddTab lands inside the group; every other method forwards to the real
+-- window untouched. Grouping is what puts the overline headers in the sidebar — and what lets
+-- SearchTabs hide a header once every tab under it has been filtered out.
+local function category(name)
+  local group = window:AddTabGroup(name)
+  return setmetatable({ AddTab = function(_, o) return group:AddTab(o) end }, {
+    __index = function(_, k)
+      local v = window[k]
+      if type(v) ~= "function" then return v end
+      return function(_, ...) return v(window, ...) end
+    end,
+  })
+end
+
 -- literal requires only — the bundler rewrites nothing else
-loadModule("showcase/look")(window)
-loadModule("showcase/motion")(window)
-loadModule("showcase/overlays")(window)
-loadModule("showcase/surfaces")(window)
+local shell = category("The shell")
+loadModule("showcase/look")(shell)
+local contents = category("The contents")
+loadModule("showcase/motion")(contents)
+loadModule("showcase/overlays")(contents)
+loadModule("showcase/surfaces")(contents, LOGO)
 
 window:Tag({ Text = "polish", Icon = "sparkles" })
 window:ShowInfo({
   Title = "EzUI Showcase",
-  Message = "Four tabs. Start on Look — it explains what changed in the window itself.",
+  Message = "Four tabs under two sidebar headers. Start on Look — it explains the window itself.",
   Duration = 6000,
 })

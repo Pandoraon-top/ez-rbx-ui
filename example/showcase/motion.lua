@@ -1,5 +1,5 @@
 -- Tab 2 — the controls whose MOVEMENT changed. Each block is a paragraph that names the thing to
--- watch, then the one control that does it.
+-- watch, then the one control that does it. The last section turns all of it off.
 return function(window)
   local tab = window:AddTab({ Name = "Motion", Icon = "activity" })
 
@@ -48,18 +48,65 @@ return function(window)
     stepBtn.SetText(bar.Get() >= 1 and "Reset to 0%" or "Step +25%")
   end })
 
-  tab:AddSection("Field focus")
+  tab:AddSection("Text field")
   tab:AddParagraph(
     "Click into the box. Its hairline tweens from 1px border to 2px in the ring colour rather " ..
     "than snapping, and clicking away tweens it back. The box itself sits at the window-glass " ..
     "tone — a step BELOW the row it lives in — which is the inset the Look tab talks about. " ..
-    "Type something and the clear button fades in at the right edge.")
+    "Type something and the clear button fades in at the right edge. It also judges you on the " ..
+    "way out: put a SPACE in the name and click away. The box shakes on its own X offset and " ..
+    "lands back on the exact pixel it started from, the hairline turns destructive red, and an " ..
+    "error line fades in underneath while the row grows for it. Remove the space, click away, " ..
+    "and all three reverse.")
   tab:AddTextBox({
     Text = "Nickname",
     Placeholder = "click here",
     Description = "The ring is its own neutral token, so it does not follow the accent.",
     Clearable = true,
     MaxLength = 24,
+    -- Validate runs on focus-loss and returns (ok, message). An empty field stays valid on
+    -- purpose: an untouched box should not nag, so only a typed-in space is ever rejected.
+    Validate = function(text)
+      if text == "" or not text:find("%s") then return true end
+      return false, "No spaces — that is the rule this field rejects."
+    end,
+  })
+  tab:AddParagraph(
+    "The field below is the read-only half of the same kit. Press the copy glyph: it becomes a " ..
+    "green check for just over a second, then falls back on its own. Press it again mid-check " ..
+    "and the second press takes the window over — a generation counter owns the revert, so the " ..
+    "first one cannot cut the second one short.")
+  tab:AddTextBox({
+    Text = "Share code",
+    Description = "Copyable makes it non-editable; the glyph is the only control.",
+    Default = "EZUI-7F3A-22",
+    Copyable = true,
+  })
+
+  tab:AddSection("Number field")
+  tab:AddParagraph(
+    "The same focus ring, plus four movements of its own. HOLD − or + instead of tapping: the " ..
+    "first step lands at once, then after a third of a second it repeats, accelerating while " ..
+    "you hold. Push a box against its Min or Max and the refusal is visible — it bumps 2px " ..
+    "toward the side you pushed and returns to the exact position it left, while the glyph at " ..
+    "that end fades to the disabled alpha rather than changing colour. Type a shorthand into " ..
+    "the first one — 1k, 4.4m — and it expands on the way in; the $ is stripped for you, and " ..
+    "while the caret is in the field you see the raw number, not the compact one. Last, roll " ..
+    "the wheel over a box: the value only follows it while the pointer is really over the box, " ..
+    "which is why the panel behind still scrolls everywhere else.")
+  tab:AddNumberBox({
+    Text = "Budget",
+    Description = "Compact display with a $ prefix. Try typing 4.4m.",
+    -- 1.5M, not 1.25M: compact carries ONE decimal, and 1.25 formats as "1.2" (%.1f rounds an
+    -- exactly-representable half to even). A tour about polish should not open on a number that
+    -- reads like a rounding bug, so the default sits on a step that survives the round trip.
+    Default = 1500000, Min = 0, Max = 10000000, Step = 250000,
+    Format = "compact", Prefix = "$",
+  })
+  tab:AddNumberBox({
+    Text = "Retries",
+    Description = "Plain, 0–5. It starts AT Min, so − is already dimmed.",
+    Default = 0, Min = 0, Max = 5, Step = 1,
   })
 
   tab:AddSection("Button states")
@@ -105,4 +152,21 @@ return function(window)
 
   tab:AddButton({ Text = "Born disabled (nothing happens)", Variant = "destructive", Disabled = true,
     Callback = function() window:ShowError({ Title = "This should never fire" }) end })
+
+  tab:AddSection("Reduced motion")
+  tab:AddParagraph(
+    "Every movement on this tab is one switch away from being instant. Turn it on, then come " ..
+    "back up and click the same controls: the knob teleports, the slider fill jumps to its new " ..
+    "width, the completion flash never appears, and the two REFUSALS — the number box bump and " ..
+    "the field shake — do not run at all, because a pure there-and-back has no end state worth " ..
+    "snapping to. Turn it off and the tab animates again.")
+  -- SetAnimationsEnabled is process-wide and explicit: last writer wins, so this toggle also
+  -- overrides the OS default the window booted with. Inverted on purpose — the switch reads
+  -- "reduce", the library flag reads "animate".
+  tab:AddToggle({
+    Text = "Reduce motion",
+    Description = "The same switch the OS reduce-motion setting drives by default.",
+    Default = false,
+    Callback = function(on) window:SetAnimationsEnabled(not on) end,
+  })
 end
