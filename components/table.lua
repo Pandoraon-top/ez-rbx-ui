@@ -61,13 +61,24 @@ function Table.new(opts)
     Create.corner(theme.Radius.sm), Create.padding({ all = CELL_INSET }), Create.listLayout({ Padding = 2 }) })
   Recipes.scrollbar(body, theme)
 
+  -- Empty state (3.4): the block must NOT live inside Body. Body has a UIListLayout (a Frame
+  -- parented there becomes a row) and AutomaticCanvasSize (a full-height child plus Body's own
+  -- padding would grow the canvas past the window and raise a scrollbar over an empty table), and
+  -- Recipes.empty needs a layout-free parent that already has the shape of the area to fill. So it
+  -- gets its own hit-through holder on the root, laid exactly over the Body rect with a higher
+  -- ZIndex -- under ZIndexBehavior.Sibling that puts it above Body and everything inside it.
+  local emptyArea = Create("Frame", { Name = "EmptyArea", BackgroundTransparency = 1, Active = false,
+    Position = UDim2.new(0, 0, 0, BODY_Y), Size = UDim2.new(1, 0, 1, -BODY_Y), ZIndex = 2, Parent = root })
+  local empty = Recipes.empty(emptyArea, { theme = theme, text = "No rows", icon = "inbox", zIndex = 2 })
+
   local order = 0
   local api = { Frame = root, Body = body }
   function api.AddRow(cells)
     order = order + 1
     local o = order
     local row
-    Safe.mutate(function() row = makeRow(body, cells, false, o) end)
+    -- the toggle rides the existing mutate so the row and the block never disagree on screen
+    Safe.mutate(function() row = makeRow(body, cells, false, o); empty.SetVisible(false) end)
     return row
   end
   function api.Clear()
@@ -75,6 +86,7 @@ function Table.new(opts)
     Safe.mutate(function()
       dropRowHovers()
       for _, c in ipairs(body:GetChildren()) do if c.Name == "Row" then c:Destroy() end end
+      empty.SetVisible(true)
     end)
   end
   function api.SetData(rows) api.Clear(); for _, r in ipairs(rows or {}) do api.AddRow(r) end end
@@ -88,6 +100,7 @@ function Table.new(opts)
     body.BackgroundColor3 = theme.Colors.surface
     Recipes.scrollbar(body, theme)                 -- scrollbar tint follows the border token
     rule.BackgroundColor3 = theme.Colors.border
+    empty.reskin()                                 -- muted icon + label follow the mode
     local header = root:FindFirstChild("Header")
     if header then for _, c in ipairs(header:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.mutedForeground end end end
     for _, row in ipairs(body:GetChildren()) do

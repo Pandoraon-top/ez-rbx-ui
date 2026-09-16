@@ -48,6 +48,21 @@ local IND_TRAVEL_PX = 900
 -- Sidebar grip pill alphas: invisible at rest behind a pointer, a hint on hover, solid while
 -- dragging, and permanently half-lit on touch where there is no hover to reveal it.
 local GRIP_ALPHA = { rest = 1, hover = 0.3, drag = 0, touch = 0.5 }
+-- Top of the sidebar band: the search field (24px) plus its 6px inset and a 6px gutter. The
+-- sidebar, its empty state and every resize read this ONE number.
+local SIDEBAR_TOP = 36
+-- 3.2 FAB attention pulse (opt-in). The ring lives HALO_OUT px outside the button (half of it
+-- per side) and breathes HALO_CYCLES times before resting -- FINITE on purpose: an endless tween
+-- on a floating button is a battery tax for a hint nobody needs after the first few breaths.
+-- The alphas are theme.Stroke.pulse, the same pair a listening keybind chip breathes between, so
+-- the whole library asks for attention in one voice; only the geometry and the count live here.
+local HALO_OUT, HALO_CYCLES = 12, 5
+-- 3.4 Sidebar empty state. 'search' (not 'search-x', which the Lucide atlas does not carry).
+local SIDEBAR_EMPTY_ICON, SIDEBAR_EMPTY_TEXT = "search", "No matches"
+-- 3.1 how long the title logo's slot may stand empty before the wait is called off. No theme
+-- token holds a fetch budget (reported as a deviation), so a module-local fallback in the style
+-- core/animate.lua uses for FALLBACK, carrying the 60s selectbox.lua gives its loader.
+local RESOLVE_TIMEOUT = 60
 local function clamp(v, lo, hi) return math.max(lo, math.min(v, hi)) end
 local FAB_ANCHORS = { TopLeft = true, MidLeft = true, BottomLeft = true, TopRight = true, MidRight = true, BottomRight = true }
 -- Map a named anchor + the FAB kind/size to a Position UDim2 (S = theme.Sizes.fab).
@@ -139,6 +154,7 @@ function Window.new(config)
   local selectedIndex = 0  -- index of the active tab; drives the carousel direction on switch
   local visible = true
   local fab, fabScale, fabFullSize, fabSnap, fabMaid, showFab, hideFab, fabFade
+  local fabPulse  -- { start, stop } for the opt-in attention ring; nil until the FAB is built
   local fabEnabled, autoHide
   local sidebarW = SIDEBAR_W
   local closed = false
@@ -277,10 +293,55 @@ function Window.new(config)
     elseif imageIsModal then titleImg.ImageColor3 = Color3.fromRGB(255, 255, 255) end -- render the tile's own colors
     -- Fill it (and re-fill on mode change) with the active variant. URLs download off the construction
     -- thread, so the window never blocks on game:HttpGet; the write is marshalled to a capability ctx.
+    -- 3.1: while the logo is still resolving, a shimmer block stands in its slot. The gate is
+    -- "an image is EXPECTED but no id has arrived yet" -- never IsLoaded on its own: a URL that
+    -- is still downloading leaves Image at '', and IsLoaded reads true for '', so an IsLoaded
+    -- gate would be false exactly during the fetch the block exists for. It stops once an id is
+    -- written AND the sprite has decoded (IsLoaded nil -- headless, older clients -- counts as
+    -- decoded, so the block can never outlive the image there).
+    local titleSkel, titleLoadConn
+    local function titleLoaded() return titleImg.Image ~= "" and titleImg.IsLoaded ~= false end
+    local function stopTitleSkeleton()
+      if titleLoadConn then titleLoadConn:Disconnect(); titleLoadConn = nil end
+      if titleSkel then titleSkel.Stop(); titleSkel = nil end   -- Stop is idempotent
+    end
+    local function startTitleSkeleton()
+      if titleSkel or titleLoaded() then return end
+      titleSkel = Effects.skeleton(titleBar, theme, { name = "TitleImageSkeleton", radius = theme.Radius.md,
+        size = UDim2.new(0, imgSize, 0, imgSize), position = UDim2.new(0, 0, 0.5, 0) })
+      titleSkel.Frame.AnchorPoint = Vector2.new(0, 0.5)   -- the pivot of the image it stands in for
+      -- IsLoaded flips on an engine thread when the sprite finishes decoding
+      titleLoadConn = titleImg:GetPropertyChangedSignal("IsLoaded"):Connect(function()
+        Safe.mutate(function() if titleLoaded() then stopTitleSkeleton() end end)
+      end)
+      -- Neither exit above is guaranteed: Asset.imageAsync only ever reports SUCCESS, so a
+      -- download that dies (404, HttpGet blocked, no writefile, or a URL already cached as failed)
+      -- calls nothing back and leaves Image at '' forever, while IsLoaded never moves for an image
+      -- that has none. Without a deadline the block would shimmer in the title bar for the life of
+      -- the window; on expiry the slot falls back to the empty box it showed before 3.1. Guarded
+      -- on THIS block so a mode-change re-arm is not cut short, and by identity rather than
+      -- task.cancel, which throws on an already finished thread (see textbox.lua). The timer
+      -- thread holds no GUI capability -> Safe.mutate.
+      local mine = titleSkel
+      task.delay(RESOLVE_TIMEOUT, function()
+        Safe.mutate(function() if titleSkel == mine then stopTitleSkeleton() end end)
+      end)
+    end
+    maid:Give(stopTitleSkeleton)
     applyTitleImage = function()
       Asset.imageAsync(srcFor(titleSrc, theme.Mode), function(id)
-        Safe.mutate(function() if titleImg.Parent then titleImg.Image = id end end)
+        Safe.mutate(function()
+          if titleImg.Parent then titleImg.Image = id end
+          if titleLoaded() then stopTitleSkeleton() end
+        end)
+      end, function()
+        -- a download that will never arrive: end the wait on that signal rather than on the
+        -- deadline below, which now only covers a sprite that resolves but never decodes
+        Safe.mutate(stopTitleSkeleton)
       end)
+      -- after the call, never before: an instant id (rbxassetid) resolves synchronously, so the
+      -- common case never builds a block just to destroy it one line later
+      startTitleSkeleton()
     end
     applyTitleImage()
     titleTextX = imgSize + 8
@@ -298,8 +359,10 @@ function Window.new(config)
     Parent = titleBar,
   })
   Create.text(titleLabel, theme, "title")
+  -- held as a local (not re-found by name) so the entrance cascade can slide it with the title
+  local subtitleLabel
   if hasSubtitle then
-    local subtitle = Create("TextLabel", {
+    subtitleLabel = Create("TextLabel", {
       Name = "Subtitle",
       BackgroundTransparency = 1,
       Text = config.Subtitle,
@@ -311,7 +374,7 @@ function Window.new(config)
       Size = UDim2.new(1, -(titleTextX + 60), 0.5, 0),
       Parent = titleBar,
     })
-    Create.text(subtitle, theme, "muted")
+    Create.text(subtitleLabel, theme, "muted")
   end
   -- The 18px glyphs stay the glyphs; Recipes.iconButton hangs a transparent Sizes.iconButton
   -- sibling (touchHit on touch) over each one so a finger has somewhere to land, and binds the
@@ -390,16 +453,28 @@ function Window.new(config)
     Name = "Sidebar",
     BackgroundTransparency = 1,
     BorderSizePixel = 0,
-    ScrollBarThickness = 3,
-    ScrollBarImageColor3 = theme.Colors.border,
-    Position = UDim2.new(0, 0, 0, 36),
-    Size = UDim2.new(0, sidebarW, 1, -36),
+    Position = UDim2.new(0, 0, 0, SIDEBAR_TOP),
+    Size = UDim2.new(0, sidebarW, 1, -SIDEBAR_TOP),
     AutomaticCanvasSize = Enum.AutomaticSize.Y,
     CanvasSize = UDim2.new(0, 0, 0, 0),
     Parent = body,
     Create.listLayout({ Padding = 4 }),
     Create.padding({ all = 8 }),
   })
+  -- 3.7: one pill for every scrollbar in the library (thickness Sizes.scrollbar, border tint,
+  -- Scrollbar.alpha). The rail used to be a pixel thinner here than in the content panel and the
+  -- table for no reason anyone recorded -- three bars side by side now agree.
+  Recipes.scrollbar(sidebar, theme)
+  -- 3.4: the "no matches" block for a search that filters every tab away. It belongs to BODY,
+  -- never to the sidebar: the sidebar owns a UIListLayout, so an Empty child there would be laid
+  -- out as one more tab row. Body positions its children by hand (like the indicator), so the
+  -- block is sized over the sidebar band and applySidebarWidth keeps it in step.
+  local sidebarEmpty = Recipes.empty(body, { theme = theme, text = SIDEBAR_EMPTY_TEXT,
+    icon = SIDEBAR_EMPTY_ICON, zIndex = 4 })
+  sidebarEmpty.Frame.Position = UDim2.new(0, 0, 0, SIDEBAR_TOP)
+  sidebarEmpty.Frame.Size = UDim2.new(0, sidebarW, 1, -SIDEBAR_TOP)
+  -- the label wraps inside a 150px rail; a UIPadding is not laid out by the block's own list layout
+  Create.padding({ left = theme.Spacing.gap, right = theme.Spacing.gap }).Parent = sidebarEmpty.Frame
   local cgap = theme.Spacing.gap
   -- A frosted shell must not hold an opaque slab: the panel -- and its edge fades, which are the
   -- same card colour -- carry PANEL_FOLLOW of the window's own transparency.
@@ -430,8 +505,6 @@ function Window.new(config)
     Name = "Content",
     BackgroundTransparency = 1,
     BorderSizePixel = 0,
-    ScrollBarThickness = 4,
-    ScrollBarImageColor3 = theme.Colors.border,
     Position = UDim2.new(0, 0, 0, 0),
     Size = UDim2.new(1, 0, 1, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.None,
@@ -439,6 +512,7 @@ function Window.new(config)
     ClipsDescendants = true,
     Parent = contentPanel,
   })
+  Recipes.scrollbar(contentScroll, theme)   -- 3.7: same pill as the sidebar, the table and the dropdown
   -- Scroll edge fades: card-coloured slabs pinned to the PANEL, never to the scrolling Content
   -- (whose CanvasSize maths and MountRow order must not move), each dissolving away from its own
   -- edge. ZIndex 2 puts them over the rows (Sibling behaviour); Active false keeps them out of
@@ -507,7 +581,8 @@ function Window.new(config)
   })
   local function applySidebarWidth(wpx)
     sidebarW = math.max(SIDEBAR_MIN, math.min(SIDEBAR_MAX, wpx))
-    sidebar.Size = UDim2.new(0, sidebarW, 1, -36)
+    sidebar.Size = UDim2.new(0, sidebarW, 1, -SIDEBAR_TOP)
+    sidebarEmpty.Frame.Size = UDim2.new(0, sidebarW, 1, -SIDEBAR_TOP)   -- 3.4: stays over the rail
     searchBox.Size = UDim2.new(0, sidebarW - 16, 0, 24)
     contentPanel.Position = UDim2.new(0, sidebarW + cgap, 0, cgap)
     contentPanel.Size = UDim2.new(1, -(sidebarW + cgap * 2), 1, -cgap * 2)
@@ -697,6 +772,7 @@ function Window.new(config)
       s.frame.Visible = (query == "" or (s.text ~= "" and s.text:find(query, 1, true) ~= nil))
     end
     -- 2) tab buttons: visible if the tab name matches OR any of its components match
+    local anyTab = false
     for _, e in ipairs(tabEntries) do
       local match = (query == "" or e.name:lower():find(query, 1, true) ~= nil)
       if not match then
@@ -705,6 +781,7 @@ function Window.new(config)
         end
       end
       e.button.Visible = match
+      if match then anyTab = true end
     end
     -- 3) group headers: visible if any grouped tab is visible
     for _, g in ipairs(groups) do
@@ -712,6 +789,9 @@ function Window.new(config)
       for _, e in ipairs(g._entries) do if e.button.Visible then anyVisible = true break end end
       g._header.Visible = anyVisible
     end
+    -- 4) 3.4: a query that filtered every tab away leaves a blank rail -- say so instead. Only
+    -- when there ARE tabs: a window between construction and its first AddTab is not "no matches".
+    sidebarEmpty.SetVisible(#tabEntries > 0 and not anyTab)
     if activeTabButton then moveIndicatorTo(activeTabButton) end
   end
 
@@ -781,6 +861,11 @@ function Window.new(config)
       if shadowScale then shadowScale.Scale = winScale.Scale end
       syncShadow()
       materialise(true, "release", { bg = transp })
+      -- 3.2: the window is on screen, so the FAB has nothing left to ask for -- even when AutoHide
+      -- is off and the button stays put. INSIDE the mutate: stopping the ring writes a UIStroke
+      -- under the protected overlay root, which throws on a caller thread without the GUI
+      -- capability (a Show() from task.spawn/task.delay) -- the very hazard this block exists for.
+      if fabPulse then fabPulse.stop() end
     end)
     if autoHide and hideFab then hideFab() end
   end
@@ -991,6 +1076,9 @@ function Window.new(config)
     local si = searchBox:FindFirstChild("SearchInput")
     if si then si.TextColor3 = theme.Colors.foreground; si.PlaceholderColor3 = theme.Colors.mutedForeground end
     paintPanel()   -- fill, hairline, inset shade and both scroll fades from one place
+    Recipes.scrollbar(sidebar, theme)        -- 3.7: idempotent, so a re-skin just re-tints the rail
+    Recipes.scrollbar(contentScroll, theme)
+    sidebarEmpty.reskin()                    -- 3.4: muted icon + label follow the mode
     activeIndicator.BackgroundColor3 = theme.Colors.primary
     halo.BackgroundColor3 = theme.Colors.primary
     sidebarGrip.BackgroundColor3 = theme.Colors.border
@@ -1055,15 +1143,19 @@ function Window.new(config)
       ZIndex = Overlay.Z.fab, Parent = Overlay.get(gui) })
     fab:SetAttribute("FabType", kind)
     fabScale = Create("UIScale", { Scale = 1, Parent = fab })
+    local fabRadius   -- the corner this FAB was built with; the attention ring follows it
     if kind == "square" then
+      fabRadius = theme.Radius.lg
       fab.BackgroundColor3 = theme.Colors.surface
       Create("UICorner", { CornerRadius = UDim.new(0, theme.Radius.lg), Parent = fab })
       fabImg = makeFabImg(theme.Radius.lg); applyFabImage(fabImg)
     elseif kind == "circle" then
+      fabRadius = F.size / 2
       fab.BackgroundColor3 = theme.Colors.primary
       Create("UICorner", { CornerRadius = UDim.new(0, F.size / 2), Parent = fab })
       fabImg = makeFabImg(F.size / 2); applyFabImage(fabImg)
     else -- simple: F.simple square chevron tab, neutral surface (follows the mode)
+      fabRadius = F.radius
       fab.Size = UDim2.new(0, F.simple, 0, F.simple)
       fab.Position = UDim2.new(0, -F.peek, 0.5, -F.simple / 2) -- dock at the left edge, peeking F.peek px (magnet)
       fab.BackgroundColor3 = theme.Colors.surface
@@ -1146,6 +1238,49 @@ function Window.new(config)
     end
     mirrorFab(); paintFabLayers()
 
+    -- 3.2 attention pulse, opt-in via FloatingToggle.Pulse (default off: an existing caller sees
+    -- no change at all). An accent ring OUTSIDE the button -- a Frame child HALO_OUT px bigger
+    -- than the FAB on both axes, so only its stroke shows, around the face instead of over it
+    -- (a child renders above its parent's fill under ZIndexBehavior.Sibling, which is exactly why
+    -- the depth layers above are siblings and this ring is not a filled one). The UIStroke hangs
+    -- on the HALO, never on the FAB: fab:FindFirstChildOfClass('UIStroke') is the docked tab's
+    -- own hairline, and window_test plus verify_bundle R9 both read it there.
+    local haloStroke, haloLoop
+    if fabOpts.Pulse == true then
+      local fabHalo = Create("Frame", {
+        Name = "Halo", BackgroundTransparency = 1, BorderSizePixel = 0, Active = false,
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(1, HALO_OUT, 1, HALO_OUT), Parent = fab,
+        Create.corner(fabRadius + HALO_OUT / 2),   -- concentric with the face it rings
+      })
+      haloStroke = Create.stroke(theme.Colors.primary, theme.Stroke.focusThickness, theme.Stroke.pulse.high)
+      haloStroke.Parent = fabHalo
+    end
+    -- The ring RESTS at Stroke.pulse.high and breathes up to Stroke.pulse.low, so the ping-pong
+    -- ends on its own rest alpha: a finite pulse needs no completion callback to tidy up after
+    -- itself, and a cancel mid-breath is one tween back. Hover is the same call (the window is
+    -- already found, stop asking for it) and lands on the lit alpha instead.
+    local function haloRest() return fabHover and theme.Stroke.pulse.low or theme.Stroke.pulse.high end
+    local function stopPulse()
+      if haloLoop then haloLoop.Cancel(); haloLoop = nil end
+      if not haloStroke then return end
+      -- a no-op tween is still a tween (and Show/Hide counts them): only spend one on a real move
+      local goal = haloRest()
+      if haloStroke.Transparency ~= goal then Animate.to(haloStroke, "hover", { Transparency = goal }) end
+    end
+    fabPulse = {
+      start = function()
+        if not haloStroke then return end
+        if haloLoop then haloLoop.Cancel(); haloLoop = nil end   -- never two loops on one stroke
+        haloStroke.Transparency = theme.Stroke.pulse.high
+        if not Animate.isEnabled() then return end   -- reduced motion: a still ring, no tween at all
+        haloLoop = Animate.pulse(haloStroke, "pulse", { Transparency = theme.Stroke.pulse.low },
+          Enum.EasingStyle.Sine, HALO_CYCLES)
+      end,
+      stop = stopPulse,
+    }
+    fabMaid:Give(function() if haloLoop then haloLoop.Cancel(); haloLoop = nil end end)
+
     -- Only the "simple" slide-out tab magnets to an edge. circle/square FABs are free-floating:
     -- they stay wherever the user drops them (no snap), so this is a no-op for them.
     fabSnap = function()
@@ -1207,18 +1342,21 @@ function Window.new(config)
       if fabImg and fabAdaptive and hasImage then fabImg.ImageColor3 = theme.Colors.foreground end
       -- swap to the active-mode tile; an accent change never changes the tile, so skip the fetch
       if fabImg and fabImageModal and reason ~= "accent" then applyFabImage(fabImg) end
+      if haloStroke then haloStroke.Color = theme.Colors.primary end   -- 3.2: the ring is accent
       paintFabLayers()   -- the glow is accent-tinted, the shadow per-mode
     end))
     fabMaid:Give(fab.MouseEnter:Connect(function()
       fabHover = true
       Animate.to(fabScale, "fast", { Scale = theme.Motion.hoverScale })
       fadeLayer(fabGlow, "fast", glowRest())
+      stopPulse()        -- 3.2: found it -- the ring snaps lit and stops breathing
       hoverPeek(true)
     end))
     fabMaid:Give(fab.MouseLeave:Connect(function()
       fabHover = false
       Animate.to(fabScale, "fast", { Scale = 1 })
       fadeLayer(fabGlow, "fast", glowRest())
+      stopPulse()        -- ...and settles back to its rest alpha, NOT into another pulse
       hoverPeek(false)
     end))
     fabMaid:Give(fab.MouseButton1Down:Connect(function() Animate.to(fabScale, "fast", { Scale = 0.92 }) end))
@@ -1234,6 +1372,7 @@ function Window.new(config)
       fab.Visible = true
       fabScale.Scale = S.fab.popFrom
       if fabFade then fabFade(true) end   -- the depth layers fade in WITH the pop, not after it
+      if fabPulse then fabPulse.start() end   -- 3.2: opt-in ring; a no-op when it was not asked for
       Animate.toThen(fabScale, "slow", { Scale = 1 }, function()
         if fabSnap and fab:GetAttribute("FabType") == "simple" then fabSnap() end
       end, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
@@ -1242,6 +1381,7 @@ function Window.new(config)
   hideFab = function()
     Safe.mutate(function()
       if not fab or not fab.Visible then return end
+      if fabPulse then fabPulse.stop() end   -- 3.2: nothing to draw attention to while it is gone
       if fabFade then fabFade(false) end
       Animate.toThen(fabScale, "fast", { Scale = S.fab.popFrom }, function()
         fab.Visible = false; fabScale.Scale = 1
@@ -1393,6 +1533,32 @@ function Window.new(config)
   end
   function api:SetFloatingToggleVisible(b) if b then showFab() else hideFab() end end
 
+  -- 3.6 entrance cascade, beats 1-3: once the shell has materialised the title (and its subtitle)
+  -- fade in from Motion.cascade.x to the left of their rest position, then the content panel
+  -- rises Motion.cascade.y -- each beat one Motion.stagger behind the last through the ENGINE-side
+  -- `delay` argument of Animate.to, so there is no task.delay chain to cancel if the window closes
+  -- mid-entrance (the tweens die with the instances). The rejected beat 4 (cascading the tab rows)
+  -- is deliberately absent. Skipped on touch, where the window is opened and closed all day, and
+  -- under reduced motion, where nothing may start a tween at all.
+  local function entranceCascade()
+    if Device.IsTouch() or not Animate.isEnabled() then return end
+    local stagger, cascade = theme.Motion.stagger, theme.Motion.cascade
+    local function slideIn(label, beat)
+      if not label then return end
+      local rest = label.Position
+      label.TextTransparency = 1
+      label.Position = UDim2.new(rest.X.Scale, rest.X.Offset - cascade.x, rest.Y.Scale, rest.Y.Offset)
+      Animate.to(label, "enter", { TextTransparency = 0, Position = rest },
+        Animate.EASING.enter, Animate.DIR.Out, beat * stagger)
+    end
+    slideIn(titleLabel, 1); slideIn(subtitleLabel, 1)   -- one line of type: one beat
+    local rest = contentPanel.Position
+    contentPanel.BackgroundTransparency = 1
+    contentPanel.Position = UDim2.new(rest.X.Scale, rest.X.Offset, rest.Y.Scale, rest.Y.Offset + cascade.y)
+    Animate.to(contentPanel, "enter", { BackgroundTransparency = panelAlpha(), Position = rest },
+      Animate.EASING.enter, Animate.DIR.Out, 2 * stagger)
+  end
+
   if startHidden then
     -- start collapsed to just the FAB: no entrance animation; pre-set the REST value of every
     -- layer (scale, background, hairline, shadow) so the first api:Show() (FAB tap or toggle key)
@@ -1412,6 +1578,7 @@ function Window.new(config)
     if shadow then shadow.ImageTransparency = 1 end
     if shadowScale then shadowScale.Scale = winScale.Scale end
     materialise(true, "enter", { bg = transp })
+    entranceCascade()   -- 3.6: the contents arrive after the shell, not with it
   end
 
   maid:Give(gui)
