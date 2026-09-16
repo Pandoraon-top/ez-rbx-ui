@@ -147,7 +147,11 @@ Tokens live in `EzUI.Theme` (zinc dark palette, monochrome white primary). Overr
 EzUI:CreateWindow({ Theme = { Colors = { primary = Color3.fromRGB(59, 130, 246) } } })
 ```
 
-Token groups: `Colors` (`background, card, surface, border, input, ring, foreground, mutedForeground, primary, primaryForeground, destructive, success, warning, info, switchTrackOff`), `Radius`, `Spacing`, `Font`, `Motion`. A partial override is deep-merged onto the defaults, so you only specify what you change.
+Token groups: `Colors` (`background, card, surface, border, input, ring, foreground, mutedForeground, primary, primaryForeground, destructive, success, warning, info, switchTrackOff`), `Radius`, `Spacing`, `Font`, `Motion`, `Effect`, `Stroke`, `Opacity`, `Acrylic`, `Scrollbar`, `Sizes`, `Icon`, `Tooltip`, `Toast`. A partial override is deep-merged onto the defaults (nested groups merge leaf by leaf), so you only specify what you change.
+
+Per-mode values live in `{ dark, light }` leaves (e.g. `Stroke.panel`) and in `EzUI.Theme.MODE_EFFECTS`; the helpers `Theme.mix(a, b, t)`, `Theme.fx(theme)`, `Theme.modeVal(theme, tok)` and `Theme.FontFace(weight)` (BuilderSans, no 600 weight) read them. `Window:SetMode("light")` and `Window:SetAccent("Indigo" | Color3)` re-skin the live window, including open toasts and dialogs. A per-window `Theme.Motion` override is honoured but process-wide (last window wins), like `SetAnimationsEnabled`.
+
+Motion defaults to the player's OS reduce-motion setting (`EzUI.Device.PrefersReducedMotion()`); an explicit `Animations = true/false` or `Window:SetAnimationsEnabled(b)` always wins and is never overridden. Full token tables: `docs/guide/theming.md`.
 
 ---
 

@@ -49,6 +49,8 @@ window:Notify({
 
 Toasts have a countdown indicator that pauses while the cursor is hovering over them.
 
+Toasts that are on screen follow `Window:SetMode` and `Window:SetAccent` live: the toast re-skins in place instead of keeping the old palette until it expires. There is nothing to opt into — `Notify`, the `Show*` helpers, `ShowLoading` and `Promise` register an internal re-skin hook (`AccentReg`) with the window for the toast's lifetime and release it on dismiss.
+
 ### Dismissing Notifications
 
 `Notify` returns an id. Use it to dismiss a specific notification programmatically:
@@ -182,6 +184,8 @@ window:Dialog({
 | `Width` | `number` | `320` | Card width in px, clamped to the viewport/window minus margins |
 
 The footer right-aligns its buttons on desktop and stacks them full-width (primary action on top) on touch devices.
+
+An open dialog follows `Window:SetMode` / `Window:SetAccent` too: the card (fill and stroke), title, message, icon badge and buttons re-skin in place through the same internal `AccentReg` hook, which is released when the dialog closes.
 
 ### Button Descriptor
 
