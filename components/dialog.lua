@@ -27,48 +27,59 @@ local function resolveWidth(opts)
   return want
 end
 
+-- Card surface opts shared by decorate (build) and reskin (SetMode/SetAccent): opaque, with the
+-- floating hairline alpha rather than the acrylic default so the card reads as a solid sheet.
+local function cardSkin(theme) return { solid = true, strokeAlpha = theme.Stroke.floating } end
+
+-- Header title: one TextLabel in every header shape, differing only in alignment + geometry.
+local function titleLabel(parent, theme, opts, xAlign, props)
+  local lbl = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "Dialog",
+    TextColor3 = theme.Colors.foreground, TextXAlignment = xAlign, ZIndex = 1502, Parent = parent })
+  for k, v in pairs(props) do lbl[k] = v end
+  return Create.text(lbl, theme, "title")
+end
+
 -- Header: one of three shapes -- badge (icon square above a centred title), inline (small icon left
 -- of the title), or a plain left-aligned title. Returns whether the header is centred so the
--- message can match its alignment.
+-- message can match its alignment, plus the coloured parts the reskin closure repaints.
 local function buildHeader(card, theme, opts)
-  local iconColor = opts.IconColor or theme.Colors.foreground
+  -- IconColor is a caller override; without one the tint follows theme.Colors.foreground live
+  local function iconColor() return opts.IconColor or theme.Colors.foreground end
+  local parts = { iconColor = iconColor }
   if opts.Icon and opts.IconBadge then
     local header = Create("Frame", { Name = "Header", BackgroundTransparency = 1,
       Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 1, ZIndex = 1502, Parent = card })
     Create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, theme.Spacing.gap),
       HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = header })
-    local badge = Create("Frame", { Name = "IconBadge", BackgroundColor3 = theme.Colors.surface,
+    parts.badge = Create("Frame", { Name = "IconBadge", BackgroundColor3 = theme.Colors.surface,
       Size = UDim2.new(0, 40, 0, 40), LayoutOrder = 1, ZIndex = 1502, Parent = header, Create.corner(theme.Radius.md) })
-    local img = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5),
-      Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(0, 20, 0, 20), ZIndex = 1503, Parent = badge })
-    Icons.apply(img, opts.Icon, iconColor)
-    Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "Dialog",
-      TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Center, TextSize = theme.Font.title.Size,
-      Font = Enum.Font.BuilderSans, Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 2, ZIndex = 1502, Parent = header })
-    return true
+    parts.icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5),
+      Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(0, 20, 0, 20), ZIndex = 1503, Parent = parts.badge })
+    Icons.apply(parts.icon, opts.Icon, iconColor())
+    parts.title = titleLabel(header, theme, opts, Enum.TextXAlignment.Center,
+      { Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 2 })
+    return true, parts
   elseif opts.Icon then
     local gap = theme.Spacing.icon
     local header = Create("Frame", { Name = "Header", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22),
       LayoutOrder = 1, ZIndex = 1502, Parent = card })
-    local img = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5),
+    parts.icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5),
       Position = UDim2.new(0, 0, 0.5, 0), Size = UDim2.new(0, 16, 0, 16), ZIndex = 1502, Parent = header })
-    Icons.apply(img, opts.Icon, iconColor)
-    Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "Dialog",
-      TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left, TextSize = theme.Font.title.Size,
-      Font = Enum.Font.BuilderSans, Position = UDim2.new(0, 16 + gap, 0, 0), Size = UDim2.new(1, -(16 + gap), 1, 0),
-      ZIndex = 1502, Parent = header })
-    return false
+    Icons.apply(parts.icon, opts.Icon, iconColor())
+    parts.title = titleLabel(header, theme, opts, Enum.TextXAlignment.Left,
+      { Position = UDim2.new(0, 16 + gap, 0, 0), Size = UDim2.new(1, -(16 + gap), 1, 0) })
+    return false, parts
   else
-    Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "Dialog",
-      TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left, TextSize = theme.Font.title.Size,
-      Font = Enum.Font.BuilderSans, Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 1, ZIndex = 1502, Parent = card })
-    return false
+    parts.title = titleLabel(card, theme, opts, Enum.TextXAlignment.Left,
+      { Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 1 })
+    return false, parts
   end
 end
 
 -- Footer: non-touch -> right-aligned, content-width buttons (Action rightmost). Touch -> full-width
 -- buttons stacked vertically and reversed, so the primary Action sits on top (shadcn flex-col-reverse).
-local function buildFooter(card, theme, buttons, touch, handle, maid)
+-- Buttons own their themer registration (AccentReg) and release it through the dialog maid.
+local function buildFooter(card, theme, buttons, touch, handle, maid, accentReg)
   local n = #buttons
   local row = Create("Frame", { Name = "Buttons", BackgroundTransparency = 1,
     Size = UDim2.new(1, 0, 0, touch and 0 or 34),
@@ -81,7 +92,7 @@ local function buildFooter(card, theme, buttons, touch, handle, maid)
   for i, b in ipairs(buttons) do
     local order = touch and (n - i + 1) or i
     local btn = Button.new({ Parent = row, LayoutOrder = order, Theme = theme, Text = b.Text or "OK",
-      Variant = b.Variant, Icon = b.Icon, AutoWidth = not touch,
+      Variant = b.Variant, Icon = b.Icon, AutoWidth = not touch, AccentReg = accentReg,
       Callback = function() if b.Callback then b.Callback() end; handle.Close() end })
     maid:Give(btn)
   end
@@ -103,16 +114,28 @@ function Dialog.open(opts)
     AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), ZIndex = 1501, Parent = dim,
     Create.corner(theme.Radius.lg), Create.padding({ all = theme.Spacing.pad }),
     Create.listLayout({ Padding = theme.Spacing.gap }) })
-  Acrylic.decorate(card, theme, { solid = true })
+  Acrylic.decorate(card, theme, cardSkin(theme))
 
-  local centered = buildHeader(card, theme, opts)
+  local centered, parts = buildHeader(card, theme, opts)
+  local message
   if opts.Message then
-    Create("TextLabel", { Name = "Message", BackgroundTransparency = 1, Text = opts.Message,
+    message = Create("TextLabel", { Name = "Message", BackgroundTransparency = 1, Text = opts.Message,
       TextColor3 = theme.Colors.mutedForeground,
       TextXAlignment = centered and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left, TextWrapped = true,
-      TextYAlignment = Enum.TextYAlignment.Top, TextSize = theme.Font.body.Size, Font = Enum.Font.BuilderSans,
+      TextYAlignment = Enum.TextYAlignment.Top,
       Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, ZIndex = 1502, Parent = card })
+    Create.text(message, theme, "body")
   end
+
+  -- Live re-skin (SetMode/SetAccent) while the dialog is open: card fill + stroke through the
+  -- acrylic painter, then every text/icon part from the live palette. Released with the maid on Close.
+  if opts.AccentReg then maid:Give(opts.AccentReg(function()
+    Acrylic.reskin(card, theme, cardSkin(theme))
+    parts.title.TextColor3 = theme.Colors.foreground
+    if message then message.TextColor3 = theme.Colors.mutedForeground end
+    if parts.badge then parts.badge.BackgroundColor3 = theme.Colors.surface end
+    if parts.icon then Icons.apply(parts.icon, opts.Icon, parts.iconColor()) end
+  end)) end
 
   local closing = false
   function handle.Close()
@@ -124,7 +147,7 @@ function Dialog.open(opts)
     if us then Animate.to(us, "fast", { Scale = 0.92 }) end
     Animate.toThen(dim, "fast", { BackgroundTransparency = 1 }, function() maid:DoCleanup(); dim:Destroy() end)
   end
-  buildFooter(card, theme, buttons, touch, handle, maid)
+  buildFooter(card, theme, buttons, touch, handle, maid, opts.AccentReg)
 
   maid:Give(dim)
   -- Scope the backdrop to the owning window when one is given (its api exposes .Main), so the

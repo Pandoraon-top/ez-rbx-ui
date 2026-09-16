@@ -24,6 +24,9 @@ return function(window)
     Callback = function(v) window:SetUIScale(v / 100) end })
   tab:AddSlider({ Text = "Window transparency (%)", Min = 0, Max = 60, Default = 12,
     Callback = function(v) window:SetTransparency(v / 100) end })
+  -- Explicit choice: wins over the OS reduce-motion default (Animate.setEnabled marks it explicit)
+  tab:AddToggle({ Text = "Reduce motion", Description = "Disable UI animations", Flag = "reduce_motion", Default = false,
+    Callback = function(on) window:SetAnimationsEnabled(not on) end })
 
   tab:AddSection("Behavior")
   tab:AddToggle({ Text = "Enable notifications", Flag = "notif", Default = true,

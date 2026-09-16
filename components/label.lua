@@ -52,27 +52,28 @@ function Label.new(opts)
   local interval = opts.Interval or 1
 
   local color = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
-  local size = (variant == "section") and 11 or theme.Font.body.Size
+  -- section = overline role (Medium 11, uppercased below); everything else reads at body size
+  local role = (variant == "section") and "overline" or "body"
+  local size = theme.Font[role].Size
 
-  local frame = Create("TextLabel", {
+  local frame = Create.text(Create("TextLabel", {
     Name = "Label",
     BackgroundTransparency = 1,
     Text = "",                            -- set by setSource below (static value, or first eval)
     TextColor3 = color,
     TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = Enum.TextYAlignment.Top,
-    TextSize = size,
     TextWrapped = variant == "paragraph",
-    Font = Enum.Font.BuilderSans,
     Size = UDim2.new(1, 0, 0, size + 6),
     AutomaticSize = (variant == "paragraph") and Enum.AutomaticSize.Y or Enum.AutomaticSize.None,
     LayoutOrder = opts.LayoutOrder or 0,
     Parent = opts.Parent,
-  })
+  }), theme, role)
 
-  if opts.AccentReg then opts.AccentReg(function()
+  -- keep the unregister so Destroy drops the closure (one used to leak per destroyed label)
+  local unreg = opts.AccentReg and opts.AccentReg(function()
     frame.TextColor3 = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
-  end) end
+  end)
 
   local lastText, erroring, entry = nil, false, nil
 
@@ -148,7 +149,7 @@ function Label.new(opts)
   return {
     Frame = frame,
     SetText = function(v) setSource(v, false) end,   -- a user call may arrive on a coroutine -> Safe path
-    Destroy = function() stopReactive(); frame:Destroy() end,
+    Destroy = function() stopReactive(); if unreg then unreg() end; frame:Destroy() end,
   }
 end
 

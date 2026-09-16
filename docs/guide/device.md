@@ -25,6 +25,18 @@ EzUI.Device.Configure({ TabletMaxAspect = 1.55, TabletMinDiagonal = math.huge })
 EzUI.Device.GetInput()  -- "Touch" | "KeyboardMouse" | "Gamepad" (the most recent input)
 ```
 
+## Capability probes {#capability-probes}
+
+```lua
+EzUI.Device.SupportsHover()         -- true when a mouse is present (UserInputService.MouseEnabled)
+EzUI.Device.PrefersReducedMotion()  -- true when the OS reduce-motion flag is on (GuiService.ReducedMotionEnabled)
+```
+
+Both read their service lazily under `pcall` and return `false` when the service or property is missing (older clients, exotic executors), so they never throw inside an input handler.
+
+- `SupportsHover()` gates every hover affordance in the library (hover wash, tooltip intent, halos): touch-only devices skip them instead of keeping a hover state stuck after the first tap.
+- `PrefersReducedMotion()` is the **default** for library motion: a window created without an `Animations` config starts with instant transitions when the flag is on. It is only a default — an explicit `Animations = true/false` or `Window:SetAnimationsEnabled(b)` always wins and is never overridden afterwards. See [Reduced motion](/api/window#reduced-motion).
+
 ## Reacting to changes
 
 ```lua

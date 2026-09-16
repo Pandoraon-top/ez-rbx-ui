@@ -50,6 +50,8 @@ function H.loadLib()
   R.Themer = H.requireModule("core/themer")
   R.Device = H.requireModule("core/device")
   R.Drag = H.requireModule("core/drag")
+  R.Effects = H.requireModule("core/effects")
+  R.Recipes = H.requireModule("core/recipes")
   R.Separator = H.requireModule("components/separator")
   R.Label = H.requireModule("components/label")
   R.Button = H.requireModule("components/button")
@@ -90,6 +92,13 @@ function H.expect(v)
   function E.toBeNil() if v ~= nil then error("expected nil got " .. tostring(v), 2) end end
   function E.toBeTruthy() if not v then error("expected truthy got " .. tostring(v), 2) end end
   function E.toHaveLength(n) if #v ~= n then error("expected length " .. n .. " got " .. #v, 2) end end
+  -- numeric tolerance for eased/derived values (default 1e-6)
+  function E.toBeCloseTo(x, eps)
+    eps = eps or 1e-6
+    if type(v) ~= "number" or math.abs(v - x) > eps then
+      error("expected " .. tostring(x) .. " (+-" .. tostring(eps) .. ") got " .. tostring(v), 2)
+    end
+  end
   function E.toEqual(x)
     local function deep(a, b)
       if type(a) ~= "table" or type(b) ~= "table" then return a == b end
@@ -107,6 +116,30 @@ function H.expect(v)
     end
   end
   return E
+end
+
+-- Run fn with motion disabled (Animate.setEnabled(false)) and restore the previous state even
+-- if fn throws. Takes the registry from H.loadLib() so the helper never requires core modules.
+function H.withReducedMotion(R, fn)
+  local Animate = R and R.Animate
+  if type(fn) ~= "function" or not Animate then error("withReducedMotion(R, fn): R.Animate and fn required", 2) end
+  local prev = Animate.isEnabled()
+  Animate.setEnabled(false)
+  local ok, err = pcall(fn)
+  Animate.setEnabled(prev)
+  if not ok then error(err, 0) end
+end
+
+-- Run fn with task.delay parked in mock.timers (fire them with mock.advance(dt)); restores the
+-- previous timer mode and drops any leftover queued callbacks so later tests start clean.
+function H.withQueuedTimers(fn)
+  local prev = H.mock.timerMode
+  H.mock.timerMode = "queued"
+  H.mock.resetTimers()
+  local ok, err = pcall(fn)
+  H.mock.timerMode = prev
+  H.mock.resetTimers()
+  if not ok then error(err, 0) end
 end
 
 function H.run()

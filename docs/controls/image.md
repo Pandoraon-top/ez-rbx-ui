@@ -39,7 +39,7 @@ tab:AddImage({ Image = "rbxassetid://0", Height = 80 })
 
 -- Swap the image at runtime
 local img = tab:AddImage({ Image = "rbxassetid://0", Height = 80 })
-img:SetImage("rbxassetid://12345678")
+img.SetImage("rbxassetid://12345678")
 
 -- Inside an accordion
 local acc = tab:AddAccordion({ Title = "Preview", Icon = "rows-3" })

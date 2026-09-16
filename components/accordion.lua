@@ -47,14 +47,17 @@ function Accordion.new(opts)
     Position = UDim2.new(0, 0, 0.5, -8),
     Parent = header,
   })
-  Icons.apply(caret, "chevron-right", theme.Colors.primary)
+  -- Structural glyph: Icon.structural (muted) collapsed, Icon.structuralActive (foreground) expanded;
+  -- resolved by token name at paint time so SetMode/SetAccent re-tint by name. Accent stays on the lead icon.
+  local function caretColor() return theme.Colors[expanded and theme.Icon.structuralActive or theme.Icon.structural] end
+  Icons.apply(caret, "chevron-right", caretColor())
   caret.Rotation = expanded and 90 or 0
 
   local leadIcon
   if opts.Icon then
     leadIcon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
       Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(0, 24, 0.5, -8), Parent = header })
-    Icons.apply(leadIcon, opts.Icon, theme.Colors.primary)
+    Icons.apply(leadIcon, opts.Icon, theme.Colors[theme.Icon.accent])
   end
   local titleX = opts.Icon and 46 or 24
   local title = Create("TextLabel", {
@@ -63,12 +66,11 @@ function Accordion.new(opts)
     Text = opts.Title or "Section",
     TextColor3 = theme.Colors.foreground,
     TextXAlignment = Enum.TextXAlignment.Left,
-    TextSize = theme.Font.label.Size,
-    Font = Enum.Font.BuilderSans,
     Size = UDim2.new(1, -titleX, 1, 0),
     Position = UDim2.new(0, titleX, 0, 0),
     Parent = header,
   })
+  Create.text(title, theme, "label")
 
   local content = Create("Frame", {
     Name = "Content",
@@ -79,7 +81,7 @@ function Accordion.new(opts)
     Visible = expanded,
     Parent = container,
     Create.listLayout({ Padding = theme.Spacing.gap }),
-    Create.padding({ left = theme.Spacing.inputY, right = theme.Spacing.inputY, bottom = theme.Spacing.inputY }),
+    Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, bottom = theme.Spacing.inputY }),
   })
   local layout = content:FindFirstChildOfClass("UIListLayout")
 
@@ -107,6 +109,7 @@ function Accordion.new(opts)
   local function applyHeight(animated)
     if animated then
       Animate.rotateTo(caret, "base", expanded and 90 or 0)
+      Icons.tint(caret, caretColor(), "fast")
       if expanded then
         -- reveal: animate the height open + slide the content in, then hand sizing to the engine
         -- (AutomaticSize.Y) so dynamic content keeps fitting with no further script write. This runs
@@ -141,6 +144,7 @@ function Accordion.new(opts)
         container.Size = UDim2.new(1, 0, 0, HEADER_H)
       end
       caret.Rotation = expanded and 90 or 0
+      caret.ImageColor3 = caretColor()
     end
   end
 
@@ -149,7 +153,7 @@ function Accordion.new(opts)
   function api:Collapse() if expanded then expanded = false; applyHeight(true) end end
   function api:IsExpanded() return expanded end
   function api:SetTitle(s) Safe.mutate(function() title.Text = s end) end
-  function api:SetIcon(name) if leadIcon then Safe.mutate(function() Icons.apply(leadIcon, name, theme.Colors.primary) end) end end
+  function api:SetIcon(name) if leadIcon then Safe.mutate(function() Icons.apply(leadIcon, name, theme.Colors[theme.Icon.accent]) end) end end
 
   function api.MountRow(child)
     order = order + 1
@@ -170,9 +174,9 @@ function Accordion.new(opts)
     container.BackgroundColor3 = theme.Colors.card
     local st = container:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
     title.TextColor3 = theme.Colors.foreground
-    Icons.apply(caret, "chevron-right", theme.Colors.primary)
+    Icons.apply(caret, "chevron-right", caretColor())
     caret.Rotation = expanded and 90 or 0
-    if leadIcon then Icons.apply(leadIcon, opts.Icon, theme.Colors.primary) end
+    if leadIcon then Icons.apply(leadIcon, opts.Icon, theme.Colors[theme.Icon.accent]) end
     divider.BackgroundColor3 = theme.Colors.border
   end)) end
 

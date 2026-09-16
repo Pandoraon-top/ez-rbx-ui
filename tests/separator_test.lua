@@ -11,6 +11,17 @@ h.describe("separator", function()
     h.expect(s.Frame.BackgroundColor3.R8).toBe(63)  -- border
     h.expect(s.Frame.Size.Y.Offset).toBe(1)
   end)
+  h.it("uses the divider stroke alpha token", function()
+    local s = Separator.new({})
+    h.expect(s.Frame.BackgroundTransparency).toBe(R.Theme.Stroke.divider)
+  end)
+  h.it("Destroy unregisters the AccentReg closure", function()
+    local unregs = 0
+    local reg = function(fn) return function() unregs = unregs + 1 end end
+    local s = Separator.new({ AccentReg = reg })
+    s.Destroy()
+    h.expect(unregs).toBe(1)
+  end)
 end)
 
 h.run()

@@ -1,10 +1,10 @@
 -- Deps injected via Init(R).
-local TweenService = game:GetService("TweenService")
 local TextBox = {}
-local Create, DefaultTheme, Maid, Icons, Flag, Animate, Safe
+local Create, DefaultTheme, Maid, Icons, Flag, Animate, Safe, Recipes
 
 function TextBox.Init(R)
   Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Icons = R.Icons; Flag = R.Flag; Animate = R.Animate; Safe = R.Safe
+  Recipes = R.Recipes
 end
 
 -- compact inline-button palette (mirrors components/button.lua)
@@ -66,18 +66,19 @@ function TextBox.new(opts)
     local title = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
       TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
       TextYAlignment = (hasDesc or fullWidth) and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-      TextSize = theme.Font.label.Size, Font = Enum.Font.BuilderSans,
       Position = fullWidth and UDim2.new(0, 0, 0, titleTop) or UDim2.new(0, 0, 0, hasDesc and 6 or 0),
       Size = fullWidth and UDim2.new(1, 0, 0, 18)
         or UDim2.new(0.5, -8, hasDesc and 0 or 1, hasDesc and 18 or 0),
       Parent = root })
+    Create.text(title, theme, "label")
     themed[#themed + 1] = function() title.TextColor3 = theme.Colors.foreground end
     if hasDesc then
       local desc = Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
         TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-        TextYAlignment = Enum.TextYAlignment.Top, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
+        TextYAlignment = Enum.TextYAlignment.Top,
         Position = fullWidth and UDim2.new(0, 0, 0, descTop) or UDim2.new(0, 0, 0, 26),
         Size = fullWidth and UDim2.new(1, 0, 0, 18) or UDim2.new(0.5, -8, 0, 26), Parent = root })
+      Create.text(desc, theme, "muted")
       themed[#themed + 1] = function() desc.TextColor3 = theme.Colors.mutedForeground end
     end
   end
@@ -88,7 +89,7 @@ function TextBox.new(opts)
     -- clip so a long value doesn't overflow past the field edge (a TextBox doesn't clip its own text;
     -- while editing, Roblox scrolls the text to keep the caret visible inside the clipped box).
     ClipsDescendants = true,
-    Position = boxX, Size = boxW, Parent = root, Create.corner(theme.Radius.md),
+    Position = boxX, Size = boxW, Parent = root, Create.corner(theme.Radius.input),
     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }),
     Create.listLayout({ FillDirection = Enum.FillDirection.Horizontal, Padding = 6 }),
   })
@@ -108,14 +109,14 @@ function TextBox.new(opts)
     Name = "Input", BackgroundTransparency = 1, Text = real,
     PlaceholderText = opts.Placeholder or "", PlaceholderColor3 = theme.Colors.mutedForeground,
     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Center,
-    TextSize = theme.Font.body.Size, Font = Enum.Font.BuilderSans, ClearTextOnFocus = false,
+    TextYAlignment = Enum.TextYAlignment.Center, ClearTextOnFocus = false,
     -- LayoutOrder 3 sits between leading addons (icon=1, prefix=2) and all trailing
     -- addons (suffix=4, trailing icon=5, buttons=6+, eye/clear/copy, spinner). The
     -- UIFlexItem makes it grow to fill the gap, pushing trailing addons to the right.
     TextEditable = not opts.Copyable, LayoutOrder = 3, Size = UDim2.new(0, 0, 1, 0), Parent = box,
     Create("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill }),
   })
+  Create.text(input, theme, "body")
   themed[#themed + 1] = function()
     input.TextColor3 = theme.Colors.foreground; input.PlaceholderColor3 = theme.Colors.mutedForeground
   end
@@ -176,8 +177,8 @@ function TextBox.new(opts)
     local lbl = Create("TextLabel", { Name = name, BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.X,
       Text = text, TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left,
       TextYAlignment = Enum.TextYAlignment.Center,
-      TextSize = theme.Font.body.Size, Font = Enum.Font.BuilderSans,
       Size = UDim2.new(0, 0, 1, 0), LayoutOrder = order, Parent = box })
+    Create.text(lbl, theme, "body")
     themed[#themed + 1] = function() lbl.TextColor3 = theme.Colors.mutedForeground end
     return lbl
   end
@@ -197,9 +198,10 @@ function TextBox.new(opts)
     local bg, fg, line = btnPalette(theme, spec.Variant or "default")
     local btn = Create("TextButton", { Name = "Button" .. order, AutoButtonColor = false,
       BackgroundColor3 = bg, AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 0, 22),
-      Text = spec.Text, TextColor3 = fg, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
+      Text = spec.Text, TextColor3 = fg,
       LayoutOrder = order, Parent = box, Create.corner(theme.Radius.sm),
       Create.padding({ left = 8, right = 8 }) })
+    Create.text(btn, theme, "muted")
     if line then Create("UIStroke", { Color = line, Thickness = 1, Parent = btn }) end
     themed[#themed + 1] = function()
       local b2, f2, l2 = btnPalette(theme, spec.Variant or "default")
@@ -233,7 +235,8 @@ function TextBox.new(opts)
     maid:Give(input:GetPropertyChangedSignal("Text"):Connect(sync))
   end
 
-  local spinner, spinTween
+  local spinner, spin -- spin: Animate.spin handle while loading; Cancel rests the glyph at Rotation 0
+  local function stopSpin() if spin then spin.Cancel(); spin = nil end end
   local function mkSpinner()
     if spinner then return spinner end
     spinner = Create("ImageLabel", { Name = "Spinner", BackgroundTransparency = 1, Visible = false,
@@ -246,15 +249,8 @@ function TextBox.new(opts)
     Safe.mutate(function()
       local s = mkSpinner()
       s.Visible = b and true or false
-      if spinTween then spinTween:Cancel(); spinTween = nil end
-      if b then
-        spinTween = TweenService:Create(s,
-          TweenInfo.new(0.8, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1),
-          { Rotation = 360 })
-        spinTween:Play()
-      else
-        s.Rotation = 0
-      end
+      stopSpin()
+      if b then spin = Animate.spin(s) end
     end)
   end
   if opts.Loading then setLoading(true) end
@@ -275,12 +271,15 @@ function TextBox.new(opts)
   end
 
   -- @states (Tasks 4,5 insert focus-ring / validation wiring here)
-  maid:Give(input.Focused:Connect(function()
-    state.focused = true; Animate.to(stroke, "fast", { Color = strokeColor() })
-  end))
-  maid:Give(input.FocusLost:Connect(function()
-    state.focused = false; Animate.to(stroke, "fast", { Color = strokeColor() })
-  end))
+  -- The focus recipe binds Focused/FocusLost and tweens Thickness 1 <-> Stroke.focusThickness;
+  -- the colour still comes from strokeColor() so invalid > focused > border holds everywhere.
+  -- The flag is recorded inside the colour callback rather than in a second handler on the
+  -- same signals, so it is current whatever order Roblox runs the connections in.
+  local focus = Recipes.focus(stroke, input, function(focused)
+    state.focused = focused
+    return strokeColor()
+  end, { theme = theme })
+  maid:Give(focus.disconnect)
   local function setDisabled(b)
     b = b and true or false
     Safe.mutate(function()
@@ -296,9 +295,9 @@ function TextBox.new(opts)
     message = Create("TextLabel", { Name = "Error", BackgroundTransparency = 1, Visible = false,
       Text = "", TextColor3 = theme.Colors.destructive, TextXAlignment = Enum.TextXAlignment.Left,
       TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true,
-      TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
       Position = UDim2.new(boxX.X.Scale, boxX.X.Offset, 0, boxTop + boxH + 2),
       Size = UDim2.new(boxW.X.Scale, boxW.X.Offset, 0, 16), Parent = root })
+    Create.text(message, theme, "muted")
     themed[#themed + 1] = function() message.TextColor3 = theme.Colors.destructive end
     return message
   end
@@ -326,7 +325,7 @@ function TextBox.new(opts)
   maid:Give(input.FocusLost:Connect(runValidate))
 
   if opts.AccentReg then maid:Give(opts.AccentReg(reTheme)) end
-  maid:Give(function() if spinTween then spinTween:Cancel(); spinTween = nil end end)
+  maid:Give(stopSpin)
   maid:Give(root)
 
   -- ---- public api -----------------------------------------------------------

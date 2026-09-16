@@ -30,8 +30,8 @@ local Window = EzUI:CreateWindow({
 | `Image` | `string` \| `{ dark, light }` | — | Title-bar logo — `rbxassetid://` / `rbxthumb://` / `http(s)://` URL. A `{ dark = ..., light = ... }` table swaps per color mode on `SetMode` (for full-color logo tiles) |
 | `ImageAdaptive` | `bool` | `false` | Treat a single-string `Image` as a monochrome glyph: tint it to the `foreground` token so it follows dark/light and re-tints on `SetMode`. Use a white-on-transparent PNG (`ImageColor3` multiplies). Ignored for a `{ dark, light }` table |
 | `Ratio` | `{ Width, Height }` \| `number` | `{ 0.45, 0.6 }` | Window size as a fraction of the viewport — `{ Width = 0.4, Height = 0.55 }` = 40% × 55% (a single number = same fraction both axes); capped at 92% per axis; auto-fits and stays responsive |
-| `Transparency` | `number` | `0.12` | Window background transparency `0..1`; `0` = opaque |
-| `Animations` | `bool` | `true` | Enable entrance/transition motion (FAB pop, window open/close, accordion + tab transitions); pass `false` for reduced/instant motion on low-end devices or for accessibility |
+| `Transparency` | `number` | `0.12` (`Acrylic.frost`) | Window background transparency `0..1`; `0` = opaque |
+| `Animations` | `bool` | OS setting | Enable entrance/transition motion (FAB pop, window open/close, accordion + tab transitions). Omitted → follows `GuiService.ReducedMotionEnabled` (`EzUI.Device.PrefersReducedMotion()`), but only as a default: an earlier explicit `Animations` / `SetAnimationsEnabled` is never overridden. `true` / `false` = explicit choice (low-end devices, accessibility). Process-wide |
 | `ToggleKey` | `Enum.KeyCode` | `RightControl` | Show/hide keyboard key |
 | `FloatingToggle` | `table` \| `false` | enabled | Floating toggle button config — see [FloatingToggle](#floatingtoggle) below. Pass `false` to disable |
 | `StartHidden` | `bool` | `false` | Start collapsed to just the floating toggle: the window loads hidden and the FAB is shown so the player can open it (also openable via `ToggleKey`) |
@@ -57,10 +57,11 @@ local Window = EzUI:CreateWindow({
 | `SetTitle(s)` | Update the title-bar text |
 | `SetSubtitle(s)` | Update the subtitle text |
 | `SetImage(v)` | Update the title-bar image (`rbxassetid://` / URL, or a `{ dark, light }` table that keeps swapping on `SetMode`) |
-| `SetTransparency(n)` | Set background transparency `0..1` |
+| `SetTransparency(n)` | Set background transparency `0..1`; re-paints the acrylic shell so the sheen/rim/grain rescale too |
 | `GetMode()` | Returns the current color mode: `"dark"` or `"light"` |
-| `SetMode(mode)` | Switch the color palette live (`"dark"` or `"light"`); controls re-skin immediately |
-| `SetAnimationsEnabled(b)` | Toggle all library motion at runtime (`true` = animated, `false` = instant) |
+| `SetMode(mode)` | Switch the color palette live (`"dark"` or `"light"`); re-skins controls, the acrylic shell, content-panel/search hairlines, icon tints and any open toast or dialog (internal `AccentReg` hook — nothing to opt into) |
+| `SetAccent(nameOrColor)` | Swap `primary`/`primaryForeground` live: `"Adaptive"` (default, follows the mode), `"Indigo"`, `"Violet"`, `"Emerald"`, `"Sky"`, `"Rose"`, or any `Color3` (foreground picked for contrast). Re-tints open toasts/dialogs; a named/custom accent survives `SetMode` |
+| `SetAnimationsEnabled(b)` | Toggle all library motion at runtime (`true` = animated, `false` = instant). Explicit and process-wide: last writer wins, and a later window created without `Animations` (or the OS reduce-motion default) never flips it back |
 | `AdaptToViewport()` | Re-fit the window to the current viewport (also runs automatically) |
 | `SetFloatingToggle(opts)` | Rebuild the floating toggle button with new options |
 | `SetFloatingToggleVisible(b)` | Show (`true`) or hide (`false`) the floating toggle button |
@@ -71,6 +72,8 @@ local Window = EzUI:CreateWindow({
 **Dialog method:** `Dialog(opts)` — see [Dialog](#dialog).
 
 **Config methods:** `ResetConfiguration(opts)`, `ResetFlag(flag)`, `.Config` — see `reference/config-flags.md`.
+
+**Reduced motion:** one process-wide switch. Explicit `Animations = true/false` or `SetAnimationsEnabled(b)` wins and is never overridden (last explicit writer wins); a window created without `Animations` only applies the OS default (`EzUI.Device.PrefersReducedMotion()`), so it cannot re-enable motion the player switched off. With motion off, tweens apply their goal instantly and loops are no-ops. Hover affordances are gated separately by `EzUI.Device.SupportsHover()` (touch-only devices skip them). A settings toggle is one line: `tab:AddToggle({ Text = "Reduce motion", Callback = function(on) Window:SetAnimationsEnabled(not on) end })`.
 
 ---
 

@@ -10,11 +10,17 @@ function Image.new(opts)
     Image = opts.Image or "", ImageColor3 = opts.Color or Color3.fromRGB(255, 255, 255),
     Size = UDim2.new(1, 0, 0, opts.Height or 80), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
   })
-  if opts.Lucide then Icons.apply(img, opts.Lucide, opts.Color or theme.Colors.foreground) end
+  -- A Lucide glyph without an explicit Color follows the foreground token, so it must re-tint on
+  -- SetMode; a caller-owned Color3 is left alone. Plain images never register.
+  local glyphColor = function() return opts.Color or theme.Colors.foreground end
+  if opts.Lucide then Icons.apply(img, opts.Lucide, glyphColor()) end
+  local unreg = (opts.Lucide and not opts.Color and opts.AccentReg) and opts.AccentReg(function()
+    Icons.apply(img, opts.Lucide, glyphColor())
+  end)
   return {
     Frame = img,
     SetImage = function(v) Safe.mutate(function() img.Image = v end) end,
-    Destroy = function() img:Destroy() end,
+    Destroy = function() if unreg then unreg() end; img:Destroy() end,
   }
 end
 return Image

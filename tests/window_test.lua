@@ -641,6 +641,20 @@ h.describe("window", function()
     f.MouseLeave:Fire(); h.expect(sc.Scale).toBe(1)
     w:Show(); h.expect(fab().Visible).toBe(false)
   end)
+  -- Runs BEFORE any explicit Animations/SetAnimationsEnabled in this file: the explicit latch is
+  -- process-wide and, once set, applyDefault never writes again.
+  h.it("OS reduce-motion is the default when no Animations config was given (not an explicit choice)", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local guiService = h.roblox.game:GetService("GuiService")
+    h.expect(R.Animate.isExplicit()).toBe(false)
+    guiService.ReducedMotionEnabled = true
+    R.Window.new({ Title = "M", Parent = screen })
+    h.expect(R.Animate.isEnabled()).toBe(false)     -- OS preference applied
+    h.expect(R.Animate.isExplicit()).toBe(false)    -- ...but only as a default
+    guiService.ReducedMotionEnabled = false
+    R.Window.new({ Title = "M2", Parent = screen })
+    h.expect(R.Animate.isEnabled()).toBe(true)      -- default follows the OS flag while nobody chose
+  end)
   h.it("Animations=false flips the Animate choke point off; SetAnimationsEnabled toggles it", function()
     local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
     R.Window.new({ Title = "M", Parent = screen, Animations = false })
@@ -779,6 +793,192 @@ h.describe("window", function()
     h.expect(w.Main.Size.Y.Offset >= 260).toBeTruthy()  -- MIN_H
     cam.ViewportSize = h.roblox.Vector2.new(1280, 720)   -- restore shared mock state
     uis.TouchEnabled = false; uis.MouseEnabled = true
+  end)
+  h.it("Animations=false is explicit; a later Window.new without Animations does not flip it back on", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    R.Window.new({ Title = "M", Parent = screen, Animations = false })
+    h.expect(R.Animate.isEnabled()).toBe(false)
+    h.expect(R.Animate.isExplicit()).toBe(true)
+    R.Window.new({ Title = "M2", Parent = screen })   -- e.g. a second demo window with no config
+    h.expect(R.Animate.isEnabled()).toBe(false)       -- applyDefault must not override the explicit choice
+    R.Animate.setEnabled(true)                         -- restore the global default for later suites
+  end)
+  h.it("a Theme.Motion override is routed into Animate.useMotion", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    R.Window.new({ Title = "M", Parent = screen, Theme = { Motion = { fast = 0.5 } } })
+    local f = h.roblox.Instance.new("Frame")
+    R.Animate.to(f, "fast", { BackgroundTransparency = 0.2 })
+    h.expect(h.mock.lastTween.Info.Time).toBe(0.5)
+    R.Animate.useMotion(nil)
+    R.Animate.to(f, "fast", { BackgroundTransparency = 0.3 })
+    h.expect(h.mock.lastTween.Info.Time).toBe(R.Theme.Motion.fast)
+  end)
+  h.it("Main acrylic sheen: dark top is MODE_EFFECTS.sheenTop, light top falls back to card, one UIGradient/UIStroke", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local grad = w.Main:FindFirstChildOfClass("UIGradient")
+    h.expect(grad.Color.color[1].Value).toBe(R.Theme.MODE_EFFECTS.dark.sheenTop)
+    h.expect(grad.Color.color[2].Value).toBe(R.Theme.MODE_EFFECTS.dark.sheenBottom)
+    h.expect(w.Main.BackgroundColor3.R8).toBe(R.Theme.Colors.background.R8)
+    w:SetMode("light")
+    h.expect(grad.Color.color[1].Value).toBe(R.Theme.PALETTES.light.card)
+    h.expect(w.Main.BackgroundColor3).toBe(R.Theme.PALETTES.light.background)
+    h.expect(w.Main:FindFirstChildOfClass("UIStroke").Color).toBe(R.Theme.PALETTES.light.border)
+    w:SetMode("dark")
+    h.expect(grad.Color.color[1].Value).toBe(R.Theme.MODE_EFFECTS.dark.sheenTop)
+    local grads, strokes = 0, 0
+    for _, c in ipairs(w.Main:GetChildren()) do
+      if c.ClassName == "UIGradient" then grads = grads + 1 elseif c.ClassName == "UIStroke" then strokes = strokes + 1 end
+    end
+    h.expect(grads).toBe(1); h.expect(strokes).toBe(1)
+  end)
+  h.it("SetTransparency reskins through Acrylic: background updated, sheen band rescaled, still one UIGradient", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    h.expect(w.Main.BackgroundTransparency).toBe(R.Theme.Acrylic.frost)   -- default frost token
+    w:SetTransparency(0.5)
+    h.expect(w.Main.BackgroundTransparency).toBe(0.5)
+    local grads = 0
+    for _, c in ipairs(w.Main:GetChildren()) do if c.ClassName == "UIGradient" then grads = grads + 1 end end
+    h.expect(grads).toBe(1)
+    local band = w.Main:FindFirstChild("AcrylicSheen"):FindFirstChildOfClass("UIGradient").Transparency.keypoints[1].Value
+    h.expect(band).toBeCloseTo(1 - (1 - R.Theme.MODE_EFFECTS.dark.highlight) * (1 - 0.5))
+    w:SetMode("light")                                   -- the shell closure keeps the user's transparency
+    h.expect(w.Main.BackgroundTransparency).toBe(0.5)
+  end)
+  h.it("ContentPanel carries one hairline stroke at Stroke.panel for the mode", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local panel = w.Main:FindFirstChild("Body"):FindFirstChild("ContentPanel")
+    local strokes = 0
+    for _, c in ipairs(panel:GetChildren()) do if c.ClassName == "UIStroke" then strokes = strokes + 1 end end
+    h.expect(strokes).toBe(1)
+    local st = panel:FindFirstChildOfClass("UIStroke")
+    h.expect(st.Thickness).toBe(1)
+    h.expect(st.Color.R8).toBe(R.Theme.Colors.border.R8)
+    h.expect(st.Transparency).toBe(R.Theme.Stroke.panel.dark)
+    w:SetMode("light")
+    h.expect(st.Color).toBe(R.Theme.PALETTES.light.border)
+    h.expect(st.Transparency).toBe(R.Theme.Stroke.panel.light)
+  end)
+  h.it("sidebar search stroke: Stroke.search per mode, focus ring thickens to ring colour and re-derives on SetMode", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local search = w.Main:FindFirstChild("Body"):FindFirstChild("Search")
+    local st = search:FindFirstChildOfClass("UIStroke")
+    local input = search:FindFirstChild("SearchInput")
+    h.expect(st.Thickness).toBe(1)
+    h.expect(st.Transparency).toBe(R.Theme.Stroke.search.dark)
+    h.expect(st.Color.R8).toBe(R.Theme.Colors.border.R8)
+    input.Focused:Fire()
+    h.expect(st.Thickness).toBe(R.Theme.Stroke.focusThickness)   -- 2
+    h.expect(st.Color.R8).toBe(R.Theme.Colors.ring.R8)
+    -- the ring goes opaque while focused: drawn at the hairline's 0.8 it would barely read
+    h.expect(st.Transparency).toBe(R.Theme.Stroke.control)
+    w:SetMode("light")                                           -- still focused: ring in the light palette
+    h.expect(st.Color).toBe(R.Theme.PALETTES.light.ring)
+    h.expect(st.Transparency).toBe(R.Theme.Stroke.control)       -- a reskin must not fade a live ring
+    input.FocusLost:Fire()
+    h.expect(st.Thickness).toBe(1)
+    h.expect(st.Color).toBe(R.Theme.PALETTES.light.border)
+    h.expect(st.Transparency).toBe(R.Theme.Stroke.search.light)  -- blurred: back to the mode's hairline
+  end)
+  h.it("Title/Subtitle use the title/muted roles with end truncation", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "Hub", Subtitle = "v3", Parent = screen })
+    local bar = w.Main:FindFirstChild("TitleBar")
+    local title, sub = bar:FindFirstChild("Title"), bar:FindFirstChild("Subtitle")
+    h.expect(title.TextSize).toBe(R.Theme.Font.title.Size)
+    h.expect(title.FontFace.Weight.Name).toBe(R.Theme.Font.title.Weight.Name)   -- Bold (enum copied by deepMerge)
+    h.expect(title.TextTruncate.Name).toBe("AtEnd")
+    h.expect(sub.TextSize).toBe(R.Theme.Font.muted.Size)
+    h.expect(sub.TextTruncate.Name).toBe("AtEnd")
+    local input = w.Main:FindFirstChild("Body"):FindFirstChild("Search"):FindFirstChild("SearchInput")
+    h.expect(input.TextSize).toBe(R.Theme.Font.muted.Size)
+  end)
+  h.it("GroupHeader is an overline row (Font.overline, bottom-aligned) whose colour re-derives on SetMode", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local g = w:AddTabGroup("Main"); g:AddTab({ Name = "Home" })
+    local sidebar = w.Main:FindFirstChild("Body"):FindFirstChild("Sidebar")
+    local header; for _, c in ipairs(sidebar:GetChildren()) do if c.Name == "GroupHeader" then header = c end end
+    h.expect(header ~= nil).toBeTruthy()
+    h.expect(header.Text).toBe("MAIN")
+    h.expect(header.TextSize).toBe(R.Theme.Font.overline.Size)
+    h.expect(header.TextYAlignment.Name).toBe("Bottom")
+    h.expect(header.Size.Y.Offset).toBe(R.Theme.Spacing.major)
+    h.expect(header.TextColor3.R8).toBe(R.Theme.Colors.mutedForeground.R8)
+    w:SetMode("light")
+    h.expect(header.TextColor3).toBe(R.Theme.PALETTES.light.mutedForeground)
+  end)
+  h.it("Tag width is measured through TextService (x fudge) and falls back to the per-char estimate without it", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local bar = w.Main:FindFirstChild("TitleBar")
+    local function lastPill() local r; for _, c in ipairs(bar:GetChildren()) do if c.Name == "Tag" then r = c end end return r end
+    local size = R.Theme.Font.muted.Size
+    local measured = h.roblox.game:GetService("TextService"):GetTextSize("Beta", size, h.roblox.Enum.Font.BuilderSans, h.roblox.Vector2.new(1e4, size)).X
+    w:Tag({ Text = "Beta" })
+    local expected = 8 + math.ceil(measured * R.Theme.Sizes.tagMeasureFudge) + 8
+    h.expect(lastPill().Size.X.Offset).toBe(expected)
+    h.expect(expected ~= 8 + #"Beta" * 7 + 8).toBeTruthy()      -- the measured path really ran
+    h.expect(lastPill():FindFirstChild("TagText").TextSize).toBe(size)
+    h.mock.hidden = { TextService = true }                       -- executor without TextService
+    w:Tag({ Text = "Beta" })
+    h.mock.hidden = nil
+    h.expect(lastPill().Size.X.Offset).toBe(8 + #"Beta" * 7 + 8)
+  end)
+  h.it("Notify/ShowLoading/Dialog pass an AccentReg hook backed by the window themer", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local seen = {}
+    local origShow, origLoading, origDialog = R.Notification.show, R.Notification.loading, R.Dialog.open
+    R.Notification.show = function(o) seen.show = o; return origShow(o) end
+    R.Notification.loading = function(o) seen.loading = o; return origLoading(o) end
+    R.Dialog.open = function(o) seen.dialog = o; return origDialog(o) end
+    w:Notify({ Title = "x", Duration = 0 })
+    w:ShowLoading({ Title = "l" })
+    local dlg = w:Dialog({ Title = "d", Buttons = { { Text = "OK" } } })
+    R.Notification.show, R.Notification.loading, R.Dialog.open = origShow, origLoading, origDialog
+    for _, k in ipairs({ "show", "loading", "dialog" }) do
+      h.expect(type(seen[k].AccentReg)).toBe("function")
+      h.expect(seen[k].Theme ~= nil).toBeTruthy()
+    end
+    local n = 0
+    local unreg = seen.show.AccentReg(function() n = n + 1 end)
+    w:SetMode("light"); h.expect(n).toBe(1)
+    w:SetAccent("Indigo"); h.expect(n).toBe(2)
+    unreg(); w:SetMode("dark"); h.expect(n).toBe(2)   -- unregistered closure is left alone
+    if dlg and dlg.Close then dlg.Close() end
+    R.Notification.clearAll()
+  end)
+  h.it("themer closures receive the reason: SetAccent does not re-fetch a { dark, light } title tile", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local calls, orig = 0, R.Asset.imageAsync
+    R.Asset.imageAsync = function(...) calls = calls + 1; return orig(...) end
+    local w = R.Window.new({ Title = "Hub", Parent = screen, Image = { dark = "rbxassetid://11", light = "rbxassetid://22" },
+      FloatingToggle = { Type = "square", Image = { dark = "rbxassetid://31", light = "rbxassetid://32" } } })
+    local base = calls
+    w:SetAccent("Indigo")
+    h.expect(calls).toBe(base)                        -- accent never swaps a tile
+    w:SetMode("light")
+    h.expect(calls).toBe(base + 2)                    -- title + FAB tile re-resolved for the new mode
+    R.Asset.imageAsync = orig
+    h.expect(w.Main:FindFirstChild("TitleBar"):FindFirstChild("TitleImage").Image).toBe("rbxassetid://22")
+  end)
+  h.it("circle FAB placeholder glyph is primaryForeground (readable on the primary fill) and follows the mode", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen, FloatingToggle = { Type = "circle" } })
+    local fab; for _, c in ipairs(R.Overlay.get(screen):GetChildren()) do if c.Name == "FloatingToggle" then fab = c end end
+    local img = fab:FindFirstChild("Img")
+    h.expect(img.ImageColor3.R8).toBe(R.Theme.PALETTES.dark.primaryForeground.R8)   -- 24, not primary-on-primary
+    h.expect(fab.Size.X.Offset).toBe(R.Theme.Sizes.fab.size)
+    w:SetMode("light")
+    h.expect(img.ImageColor3).toBe(R.Theme.PALETTES.light.primaryForeground)
+    h.expect(fab.BackgroundColor3).toBe(R.Theme.PALETTES.light.primary)
+    local w2 = R.Window.new({ Title = "M2", Parent = h.roblox.Instance.new("ScreenGui"), FloatingToggle = { Type = "square" } })
+    local fab2; for _, c in ipairs(R.Overlay.get(w2.Gui):GetChildren()) do if c.Name == "FloatingToggle" then fab2 = c end end
+    h.expect(fab2:FindFirstChild("Img").ImageColor3.R8).toBe(R.Theme.PALETTES.dark.primary.R8)  -- square: primary on surface
   end)
 end)
 

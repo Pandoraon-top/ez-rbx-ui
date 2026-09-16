@@ -40,6 +40,21 @@ function Device.IsDesktop() return Device.GetType() == "Desktop" end
 function Device.IsConsole() return Device.GetType() == "Console" end
 function Device.IsTouch() return UserInputService.TouchEnabled == true end
 
+-- Capability probes resolve the service lazily under pcall: an exotic executor may hand back nil
+-- from GetService or lack a newer property (GuiService.ReducedMotionEnabled on older clients),
+-- and a probe must degrade to its conservative default instead of throwing inside a hover bind.
+local function readService(name, prop)
+  local ok, v = pcall(function() return game:GetService(name)[prop] end)
+  if ok then return v end
+  return nil
+end
+
+-- Hover affordances (wash, tooltip intent, halo) only make sense with a pointer; touch-only
+-- devices skip them rather than getting a stuck hover state after the first tap.
+function Device.SupportsHover() return readService("UserInputService", "MouseEnabled") == true end
+-- OS-level accessibility flag; Animate reads it to default reduced-motion users to instant goals.
+function Device.PrefersReducedMotion() return readService("GuiService", "ReducedMotionEnabled") == true end
+
 function Device.GetInput()
   local t = UserInputService.GetLastInputType and UserInputService:GetLastInputType()
   local name = (t and t.Name) or ""

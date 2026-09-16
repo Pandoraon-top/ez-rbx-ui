@@ -69,10 +69,10 @@ function Button.new(opts)
         Size = UDim2.new(0, 16, 0, 16), LayoutOrder = 1, Parent = surface })
       Icons.apply(img, opts.Icon, fg)
     end
-    label = Create("TextLabel", { Name = "Label", BackgroundTransparency = 1,
-      Text = opts.Text or "Button", TextColor3 = fg, TextSize = theme.Font.label.Size,
-      Font = Enum.Font.BuilderSans, AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 1, 0),
-      LayoutOrder = 2, Parent = surface })
+    label = Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1,
+      Text = opts.Text or "Button", TextColor3 = fg,
+      AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 1, 0),
+      LayoutOrder = 2, Parent = surface }), theme, "label")
   else
     if hasIcon then
       local img = Create("ImageLabel", {
@@ -82,13 +82,12 @@ function Button.new(opts)
       })
       Icons.apply(img, opts.Icon, fg)
     end
-    label = Create("TextLabel", {
+    label = Create.text(Create("TextLabel", {
       Name = "Label", BackgroundTransparency = 1,
-      Text = opts.Text or "Button", TextColor3 = fg, TextSize = theme.Font.label.Size,
-      Font = Enum.Font.BuilderSans, Size = UDim2.new(1, 0, 1, 0),
+      Text = opts.Text or "Button", TextColor3 = fg, Size = UDim2.new(1, 0, 1, 0),
       Position = UDim2.new(0, hasIcon and 12 or 0, 0, 0),
       Parent = surface,
-    })
+    }), theme, "label")
   end
 
   maid:Give(btn.MouseEnter:Connect(function()

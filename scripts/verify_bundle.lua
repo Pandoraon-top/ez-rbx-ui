@@ -77,7 +77,7 @@ local rz = t:AddResizable({ Panes = { { Default = 0.5 }, { Default = 0.5 } } })
 rz.Panes[1]:AddButton({ Text = "L" }); rz.Panes[2]:AddButton({ Text = "R" })
 w:Notify({ Title = "Undo me", Type = "warning", Duration = 0, Action = { Text = "Undo", Callback = function() end } })
 -- R3 Plan A: square FAB with image, card accordion divider, header separator
-local w2 = EzUI:CreateWindow({ Title = "FAB", Parent = screen,
+local w2 = EzUI:CreateWindow({ Title = "FAB", Parent = _G.Instance.new("ScreenGui"),
   FloatingToggle = { Type = "square", Image = "rbxassetid://1", Draggable = false },
   Config = { FileName = "Verify2", AutoSave = false } })
 assert(w2.Main:FindFirstChild("Body"):FindFirstChild("ContentPanel"), "no content panel")
@@ -88,7 +88,7 @@ assert(accCard.Container:FindFirstChild("Divider"), "no accordion divider")
 
 -- R4 Plan A: invisible sidebar drag handle (grip/line removed), simple pill FAB with size/pos
 assert(w.Main:FindFirstChild("Body"):FindFirstChild("SidebarHandle"), "no sidebar handle")
-local w3 = EzUI:CreateWindow({ Title = "Pill", Parent = screen, FloatingToggle = true,
+local w3 = EzUI:CreateWindow({ Title = "Pill", Parent = _G.Instance.new("ScreenGui"), FloatingToggle = true,
   Config = { FileName = "Verify3", AutoSave = false } })
 w3:SetFloatingToggle({ Type = "simple", Size = { Width = 140, Height = 38 }, Position = "BottomLeft" })
 
@@ -126,7 +126,7 @@ assert(type(w:LoadConfiguration()) == "boolean", "LoadConfiguration")
 w:SetMode("light")
 assert(w.Main:FindFirstChildOfClass("UIGradient"), "no acrylic gradient")
 w:SetMode("dark")
-local w4 = EzUI:CreateWindow({ Title = "FabRef", Parent = screen, FloatingToggle = true,
+local w4 = EzUI:CreateWindow({ Title = "FabRef", Parent = _G.Instance.new("ScreenGui"), FloatingToggle = true,
   Config = { FileName = "Verify4", AutoSave = false } })
 local fab4; for _, c in ipairs(w4.Overlay:GetChildren()) do if c.Name == "FloatingToggle" then fab4 = c end end
 assert(fab4 and fab4:FindFirstChild("Chevron"), "no simple FAB chevron")
@@ -141,14 +141,14 @@ do
   tg.Destroy()
 end
 w:SetMode("dark")
-local w5 = EzUI:CreateWindow({ Title = "Dock", Parent = screen, FloatingToggle = true,
+local w5 = EzUI:CreateWindow({ Title = "Dock", Parent = _G.Instance.new("ScreenGui"), FloatingToggle = true,
   Config = { FileName = "Verify5", AutoSave = false } })
 local fab5; for _, c in ipairs(w5.Overlay:GetChildren()) do if c.Name == "FloatingToggle" then fab5 = c end end
 assert(fab5 and fab5.Position.X.Offset == -15, "simple FAB not docked at edge")
 
 -- R7: FAB reopen-button (hidden when shown) + selectbox Text title.
 -- Use a dedicated window created last so its FAB is the last FloatingToggle in the shared overlay.
-local w6 = EzUI:CreateWindow({ Title = "FabR7", Parent = screen, FloatingToggle = true,
+local w6 = EzUI:CreateWindow({ Title = "FabR7", Parent = _G.Instance.new("ScreenGui"), FloatingToggle = true,
   Config = { FileName = "Verify6", AutoSave = false } })
 do
   local fab; for _, c in ipairs(w6.Overlay:GetChildren()) do if c.Name == "FloatingToggle" then fab = c end end

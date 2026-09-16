@@ -97,7 +97,7 @@ See [Config & Flags](/guide/config-and-flags) for usage in the context of a wind
 
 ## `EzUI.Theme` {#theme}
 
-The global design-token table. Tokens are grouped into five sub-tables: `Colors`, `Radius`, `Spacing`, `Font`, and `Motion`.
+The global design-token table. Tokens are grouped into sub-tables: `Colors`, `Radius`, `Spacing`, `Font`, `Motion`, `Effect`, `Stroke`, `Opacity`, `Acrylic`, `Scrollbar`, `Sizes`, `Icon`, `Tooltip` and `Toast`. Alongside them sit `Theme.PALETTES` (the `dark` / `light` colour sets), `Theme.MODE_EFFECTS` (per-mode sheen / grain / shadow values) and the helpers `Theme.mix`, `Theme.fx`, `Theme.modeVal` and `Theme.FontFace`.
 
 ```lua
 -- Read a token:
@@ -138,7 +138,7 @@ Semantic color tokens (all `Color3`):
 
 #### `Radius`
 
-Corner-rounding values in pixels: `sm` (6), `md` (8), `lg` (10), `xl` (14), `window` (12).
+Corner-rounding values in pixels: `sm` (6), `md` (8), `lg` (10), `xl` (14), `window` (12), `input` (6), `xs` (2).
 
 #### `Spacing`
 
@@ -146,11 +146,28 @@ Layout spacing values in pixels: `pad` (16), `padLg` (24), `inputX` (12), `input
 
 #### `Font`
 
-Font weight and size descriptors for each text role: `title`, `header`, `label`, `body`, `muted`. Each is a `{ Weight, Size }` table where `Weight` is an `Enum.FontWeight`.
+Font weight and size descriptors for each text role: `title`, `header`, `label`, `body`, `muted`, `overline` (Medium 11 px, used by `AddSection` and sidebar group headers). Each is a `{ Weight, Size }` table where `Weight` is an `Enum.FontWeight`; `body` also carries `LineHeight` (1.25). Weights are rendered through `Theme.FontFace(weight)` → `Font.fromName("BuilderSans", weight)`; BuilderSans has no 600, so `SemiBold` resolves to `Bold`.
 
 #### `Motion`
 
-Animation duration constants in seconds: `fast` (0.12), `base` (0.18), `slow` (0.28).
+Animation duration constants in seconds: `fast` (0.12), `base` (0.18), `slow` (0.28), plus the motion grammar (`enter`, `exit`, `hover`, `press`, `release`, `stagger`, scale factors such as `enterScale` / `pressScale`, pixel offsets such as `popSlide` / `dialogRise`, and the nested `shake` / `cascade` tables). A per-window `Motion` override is applied through `Animate.useMotion` and is process-wide (last window wins).
+
+#### `Effect`, `Stroke`, `Opacity`, `Acrylic`, `Scrollbar`, `Sizes`, `Icon`, `Tooltip`, `Toast`
+
+Shadow / glow geometry, `UIStroke` transparencies, interaction-state opacities, the acrylic shell, scrollbar look, pixel sizes, icon tint roles and the tooltip / toast geometry. Every key and default is listed in [Theming — Token Groups](/guide/theming#token-groups).
+
+#### Per-mode values and helpers
+
+`{ dark, light }` leaves (`Stroke.panel`, `Stroke.search`, `Opacity.dialogScrim`) and the module-level `Theme.MODE_EFFECTS` table flip with the colour mode; `Theme.MODE_EFFECTS` is not part of the per-window override.
+
+| Helper | Behaviour |
+|---|---|
+| `Theme.mix(a, b, t)` | New `Color3` lerped between `a` and `b` on `.R/.G/.B`; `t` clamped to `0..1` |
+| `Theme.fx(theme)` | `MODE_EFFECTS[theme.Mode]`; unset or unknown mode reads as `dark` |
+| `Theme.modeVal(theme, tok)` | `tok[theme.Mode]` for a `{ dark, light }` table (missing side → `dark`); other values pass through |
+| `Theme.FontFace(weight)` | BuilderSans face via `Font.fromName`; `nil` → Regular, `SemiBold` → Bold; `nil` when `Font` is unavailable |
+
+The same helpers are attached to every window's merged theme instance (`theme.mix`, `theme.fx`, `theme.modeVal`, `theme.FontFace`).
 
 See [Theming](/guide/theming) for the full override guide and palette reference.
 
