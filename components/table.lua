@@ -16,6 +16,15 @@ function Table.new(opts)
   local root = Create("Frame", { Name = "Table", BackgroundTransparency = 1,
     Size = UDim2.new(1, 0, 0, (opts.Height or 120) + BODY_Y), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
 
+  -- Body rows answer hover through the FILL kind of the hover recipe: the Row lays its cells out
+  -- with a horizontal UIListLayout, so a wash Frame would be laid out as an extra column. `fill`
+  -- tweens the Row's own BackgroundTransparency and never writes BackgroundColor3 (theme_test
+  -- pins the first row's colour by identity). Handles are dropped with the rows on Clear().
+  local rowHovers = {}
+  local function dropRowHovers()
+    for i = #rowHovers, 1, -1 do rowHovers[i](); rowHovers[i] = nil end
+  end
+
   local function makeRow(parent, cells, header, order)
     local row = Create("Frame", { Name = header and "Header" or "Row",
       BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = header and 1 or 0,
@@ -24,6 +33,10 @@ function Table.new(opts)
       Create.listLayout({ Padding = CELL_INSET, FillDirection = Enum.FillDirection.Horizontal }) })
     -- the header sits on the root while body rows sit inside Body's padding: inset it the same
     if header then Create.padding({ left = CELL_INSET, right = CELL_INSET }).Parent = row end
+    if not header then
+      local hv = Recipes.hover(row, { theme = theme, kind = "fill" })
+      rowHovers[#rowHovers + 1] = hv.disconnect
+    end
     for i, text in ipairs(cells) do
       local cell = Create.text(Create("TextLabel", { Name = "Cell", BackgroundTransparency = 1, Text = tostring(text),
         TextColor3 = header and theme.Colors.mutedForeground or theme.Colors.foreground,
@@ -60,6 +73,7 @@ function Table.new(opts)
   function api.Clear()
     order = 0
     Safe.mutate(function()
+      dropRowHovers()
       for _, c in ipairs(body:GetChildren()) do if c.Name == "Row" then c:Destroy() end end
     end)
   end
@@ -68,6 +82,7 @@ function Table.new(opts)
 
   api.SetData(opts.Rows)
   maid:Give(root)
+  maid:Give(dropRowHovers)
 
   if opts.AccentReg then maid:Give(opts.AccentReg(function()
     body.BackgroundColor3 = theme.Colors.surface

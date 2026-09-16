@@ -1,5 +1,18 @@
 local h = require("tests.helper")
 local R = h.loadLib(); local ProgressBar, Create = R.ProgressBar, R.Create
+local M = R.Theme.Motion
+
+local function parts(pb)
+  local track = pb.Frame:FindFirstChild("Track")
+  return track, track:FindFirstChild("Fill")
+end
+local function goalOf(inst, key)
+  for i = #h.mock.tweens, 1, -1 do
+    local tw = h.mock.tweens[i]
+    if tw.Instance == inst and tw.Goal[key] ~= nil then return tw end
+  end
+end
+
 h.describe("progressbar", function()
   h.it("Set clamps and maps fill scale; Get returns value", function()
     local pb = ProgressBar.new({ Parent = Create("Frame", {}), Default = 0.25 })
@@ -7,6 +20,72 @@ h.describe("progressbar", function()
     pb.Set(2); h.expect(pb.Get()).toBe(1)
     pb.Set(-1); h.expect(pb.Get()).toBe(0)
     pb.Set(0.5); h.expect(pb.Get()).toBe(0.5)
+  end)
+
+  -- ---- 2.20 -----------------------------------------------------------------
+  h.it("the track gains a hairline stroke like the slider rail (2.20)", function()
+    local pb = ProgressBar.new({ Parent = Create("Frame", {}), Default = 0.5 })
+    local track = parts(pb)
+    local stroke = track:FindFirstChildOfClass("UIStroke")
+    h.expect(stroke ~= nil).toBeTruthy()
+    h.expect(stroke.Color).toBe(R.Theme.Colors.border)
+    h.expect(stroke.Transparency).toBe(0.5)
+  end)
+  h.it("Set flows with a distance-aware Quint duration (2.20)", function()
+    local pb = ProgressBar.new({ Parent = Create("Frame", {}), Default = 0 })
+    local _, fill = parts(pb)
+    h.mock.resetTweens()
+    pb.Set(0.5)
+    local tw = goalOf(fill, "Size")
+    h.expect(tw.Info.EasingStyle).toBe(h.roblox.Enum.EasingStyle.Quint)
+    h.expect(tw.Info.Time).toBeCloseTo(M.base + 0.5 * (M.slow - M.base))
+    h.expect(fill.Size.X.Scale).toBe(0.5)
+    h.mock.resetTweens()
+    pb.Set(0.6)                                   -- a short hop stays near `base`
+    h.expect(goalOf(fill, "Size").Info.Time).toBeCloseTo(M.base + 0.1 * (M.slow - M.base))
+  end)
+  h.it("reaching 1 from below flashes the fill and settles opaque (2.20)", function()
+    local pb = ProgressBar.new({ Parent = Create("Frame", {}), Default = 0.4 })
+    local _, fill = parts(pb)
+    h.mock.resetTweens()
+    pb.Set(1)
+    local flash = goalOf(fill, "BackgroundTransparency")
+    h.expect(flash ~= nil).toBeTruthy()
+    h.expect(flash.Info.Time).toBe(M.base)
+    h.expect(fill.BackgroundTransparency).toBe(0)  -- the flash always ends opaque
+    h.mock.resetTweens()
+    pb.Set(1)                                      -- already complete -> no second flash
+    h.expect(goalOf(fill, "BackgroundTransparency")).toBeNil()
+  end)
+  h.it("a small non-zero value keeps a minimum width but a true zero stays empty (2.20)", function()
+    local pb = ProgressBar.new({ Parent = Create("Frame", {}), Default = 0 })
+    local _, fill = parts(pb)
+    local con = fill:FindFirstChildOfClass("UISizeConstraint")
+    h.expect(con ~= nil).toBeTruthy()
+    h.expect(con.MinSize.X).toBe(R.Theme.Sizes.progress)
+    h.expect(fill.Visible).toBe(false)             -- the 8px floor must not render at 0
+    pb.Set(0.01)
+    h.expect(fill.Visible).toBe(true)
+    h.expect(fill.Size.X.Scale).toBe(0.01)
+    pb.Set(0)
+    h.expect(fill.Visible).toBe(false)
+    h.expect(fill.Size.X.Scale).toBe(0)            -- Size still returns to 0 so 0 -> 0.5 flows
+  end)
+  h.it("a non-zero Default builds visible", function()
+    local _, fill = parts(ProgressBar.new({ Parent = Create("Frame", {}), Default = 0.3 }))
+    h.expect(fill.Visible).toBe(true)
+  end)
+  h.it("reduced motion applies Set instantly with no tween (2.20)", function()
+    h.withReducedMotion(R, function()
+      local pb = ProgressBar.new({ Parent = Create("Frame", {}), Default = 0 })
+      local _, fill = parts(pb)
+      h.mock.resetTweens()
+      pb.Set(1)
+      h.expect(#h.mock.tweensFor(fill)).toBe(0)
+      h.expect(fill.Size.X.Scale).toBe(1)
+      h.expect(fill.BackgroundTransparency).toBe(0)
+      h.expect(fill.Visible).toBe(true)
+    end)
   end)
 end)
 h.run()

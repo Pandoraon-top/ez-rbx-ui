@@ -11,10 +11,18 @@ Identical API on both. Any control with a `Flag` auto-persists when the window h
 | Text | string | `"Toggle"` | label |
 | Default | boolean | `false` | initial state |
 | Description | string | nil | muted secondary line below label |
+| Disabled | boolean | `false` | starts dimmed and non-interactive |
 | Flag | string | nil | persists when window has Config |
 | Callback | function | nil | receives the new boolean |
 
-**Returns:** `{ Get() -> boolean, Set(v: boolean), OnChanged(fn), Destroy() }`
+**Returns:** `{ Get() -> boolean, Set(v: boolean), OnChanged(fn), SetEnabled(b), Destroy() }`
+
+> **`SetEnabled` / `SetDisabled` contract** (shared by Toggle, Slider, Keybind, NumberBox, TextBox,
+> ColorPicker and Button). It blocks **user input only**: `Set` / `SetValue` / `SetText` /
+> `SetColor` and `Flag` restores from `Config` still update the value and the visuals while the
+> control is disabled. An in-flight Slider or ColorPicker drag is forced to finish with its last
+> value rather than left hanging. It is independent of the host's `SetLocked` scrim — the two may
+> overlap, and clearing one does not clear the other.
 
 ```lua
 local t = tab:AddToggle({ Text = "Auto Farm", Default = false, Flag = "autofarm",
@@ -141,6 +149,7 @@ tab:AddLabel("Below the separator")
 | Text | string | `"Button"` | label displayed on the button |
 | Variant | string | `"default"` | `"default"`, `"secondary"`, `"outline"`, `"ghost"`, `"destructive"` |
 | Icon | string | nil | Lucide icon name rendered left of the label |
+| Disabled | boolean | `false` | starts dimmed and non-interactive |
 | Callback | function | nil | called with no arguments when clicked |
 | Action | string | nil | pass `"ResetConfig"` to wire built-in config-reset without a callback |
 
@@ -176,7 +185,7 @@ tab:AddButton({ Text = "Run", Variant = "default", Icon = "play",
 | Flag | string | nil | persists when window has Config |
 | Callback | function | nil | `(text, ctl)` — called on focus-loss |
 
-**Returns:** `{ GetText(), SetText(s), Focus(), Clear(), SetLoading(b), SetValid(), SetInvalid(msg), SetDisabled(b), Destroy() }`
+**Returns:** `{ GetText(), SetText(s), Focus(), Clear(), SetLoading(b), SetValid(), SetInvalid(msg), SetEnabled(b), SetDisabled(b), Destroy() }`
 
 ```lua
 local tb = tab:AddTextBox({ Text = "Name", Placeholder = "Type your name…", Flag = "username" })
@@ -198,10 +207,11 @@ print(tb.GetText())
 | Prefix | string | nil | non-editable text before value (e.g. `"$"`) |
 | Suffix | string | nil | non-editable text after value (e.g. `"%"`) |
 | Description | string | nil | muted secondary line below label |
+| Disabled | boolean | `false` | starts dimmed and non-interactive |
 | Flag | string | nil | persists when window has Config |
 | Callback | function | nil | receives the new number after each confirmed change |
 
-**Returns:** `{ GetValue(), SetValue(n), SetMin(n), SetMax(n), Destroy() }`
+**Returns:** `{ GetValue(), SetValue(n), SetMin(n), SetMax(n), SetEnabled(b), Destroy() }`
 
 ```lua
 local nb = tab:AddNumberBox({ Text = "Speed", Default = 50, Min = 0, Max = 200, Step = 5,
@@ -220,10 +230,11 @@ nb.SetMax(300)
 | Default | number | Min | initial value, snapped to nearest Step |
 | Step | number | `1` | snap increment |
 | Description | string | nil | muted secondary line below label |
+| Disabled | boolean | `false` | starts dimmed and non-interactive |
 | Flag | string | nil | persists when window has Config |
 | Callback | function | nil | receives the new number after each drag or SetValue |
 
-**Returns:** `{ GetValue(), SetValue(n), OnChanged(fn), Destroy() }`
+**Returns:** `{ GetValue(), SetValue(n), OnChanged(fn), SetEnabled(b), Destroy() }`
 
 ```lua
 local s = tab:AddSlider({ Text = "Volume", Min = 0, Max = 100, Default = 80, Flag = "volume",
@@ -239,10 +250,11 @@ s.SetValue(50)
 | Text | string | `"Keybind"` | label left of the key badge |
 | Default | Enum.KeyCode | `Enum.KeyCode.Unknown` | initial key binding |
 | Description | string | nil | muted secondary line below label |
+| Disabled | boolean | `false` | starts dimmed; the click that arms listening is blocked |
 | Flag | string | nil | persists when window has Config |
 | Callback | function | nil | called (no arguments) when the bound key is pressed |
 
-**Returns:** `{ GetKey() -> Enum.KeyCode, SetKey(k), OnPressed(fn), Destroy() }`
+**Returns:** `{ GetKey() -> Enum.KeyCode, SetKey(k), OnPressed(fn), SetEnabled(b), Destroy() }`
 
 ```lua
 local kb = tab:AddKeybind({ Text = "Toggle UI", Default = Enum.KeyCode.RightShift, Flag = "toggleKey",
@@ -258,10 +270,11 @@ kb.SetKey(Enum.KeyCode.P)
 | Text | string | `"Color"` | label left of the swatch |
 | Default | Color3 | `Color3.fromRGB(255,255,255)` | initial color |
 | Description | string | nil | muted secondary line below label |
+| Disabled | boolean | `false` | starts dimmed; opening the picker is blocked |
 | Flag | string | nil | persists as `{r,g,b}` (0–255) when window has Config |
 | Callback | function | nil | receives the new `Color3` on every change |
 
-**Returns:** `{ GetColor() -> Color3, SetColor(c), Destroy() }`
+**Returns:** `{ GetColor() -> Color3, SetColor(c), Open(), Close(), SetDisabled(b), Destroy() }`
 
 ```lua
 local cp = tab:AddColorPicker({ Text = "Tint", Default = Color3.fromRGB(120, 160, 255), Flag = "tint",

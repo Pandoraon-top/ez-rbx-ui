@@ -1,11 +1,47 @@
 -- Deps injected via Init(R).
 local RunService = game:GetService("RunService")
 local SelectBox = {}
-local Create, DefaultTheme, Animate, Maid, Icons, Overlay, Flag, Safe, Recipes
+local Create, DefaultTheme, Animate, Maid, Icons, Overlay, Flag, Safe, Recipes, Effects, Acrylic
 
 function SelectBox.Init(R)
   Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid
   Icons = R.Icons; Overlay = R.Overlay; Flag = R.Flag; Safe = R.Safe; Recipes = R.Recipes
+  Effects = R.Effects; Acrylic = R.Acrylic
+end
+
+-- A popover is frosted one step LIGHTER than the window shell: content must stay readable
+-- through it. theme.Acrylic.frost (0.12) is the window's value, so a theme may define
+-- Acrylic.popoverFrost and this is the fallback until that token lands (reported as a deviation).
+local POPOVER_FROST = 0.04
+local CARET_OPEN = 180 -- chevron-down reads as chevron-up while the list is open
+
+local function frostAlpha(theme)
+  local a = theme.Acrylic and theme.Acrylic.popoverFrost
+  return type(a) == "number" and a or POPOVER_FROST
+end
+
+-- Popover open/close motion. Animate.popIn/popOut rest a popover's UIScale at 1, which is right
+-- until the window forwards a UI scale (2.22): a scaled popover must rest at Overlay.scale(), so
+-- the scaled case runs the same curves and the same Motion tokens against `scale` instead.
+local function popOpen(frame, theme, edge, scale)
+  if scale == 1 then return Animate.popIn(frame, edge) end
+  local us = frame:FindFirstChildOfClass("UIScale")
+  if not us then return nil end
+  if not Animate.isEnabled() then us.Scale = scale; return nil end
+  local target = frame.Position
+  us.Scale = scale * theme.Motion.exitScale
+  local dy = (edge == "up") and theme.Motion.popSlide or -theme.Motion.popSlide
+  frame.Position = UDim2.new(target.X.Scale, target.X.Offset, target.Y.Scale, target.Y.Offset + dy)
+  Animate.to(frame, "fast", { Position = target }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+  return Animate.springTo(us, "base", { Scale = scale })
+end
+
+local function popShut(frame, theme, scale, onDone)
+  if scale == 1 then return Animate.popOut(frame, onDone) end
+  local us = frame:FindFirstChildOfClass("UIScale")
+  if not us then if onDone then onDone() end; return nil end
+  return Animate.toThen(us, "exit", { Scale = scale * theme.Motion.exitScale }, onDone,
+    Animate.EASING.exit, Animate.DIR.In)
 end
 
 local function contains(arr, v) for _, x in ipairs(arr) do if x == v then return true end end return false end
@@ -43,9 +79,12 @@ function SelectBox.new(opts)
   local function firstValue() return options[1] ~= nil and normOpt(options[1]).value or nil end
   local value = multi and (opts.Default or {}) or (opts.Default ~= nil and opts.Default or firstValue())
   local dropdown
+  local shadow -- overlay sibling under the open dropdown; nil while Effect.shadowId is ''
+  local ddScale = 1 -- UI scale the open popover was built with (Close must fold back to IT, not to 1)
   local posConn -- repositions the open dropdown when the control scrolls
   local searchFocus -- focus ring of the dropdown search; torn down with the dropdown
-  local optButtons = {} -- { { btn = TextButton, text = optionName } } for live search
+  local ddUnreg -- 2.11: themer registration the OPEN popover holds; released in teardown
+  local optButtons = {} -- { { btn, text (live search), sel, hover (row hover handle) }, ... }
   local buildDropdown, rebuild, computePos, refresh
   local onChanged = opts.Callback
 
@@ -93,25 +132,24 @@ function SelectBox.new(opts)
       Create.text(desc, theme, "muted")
     end
   end
-  -- flip-aware, viewport-clamped dropdown position for the current control bounds
-  function computePos(width, ddH)
-    local pos = btn.AbsolutePosition or { X = 0, Y = 0 }
+  -- Flip-aware, viewport-clamped dropdown position for the current control bounds. The popover
+  -- carries the window UI scale on its own root (2.22), so placePopover is asked about the
+  -- ON-SCREEN size (w*scale, h*scale) — otherwise a scaled popover flips and clamps too late.
+  function computePos(width, ddH, scale)
     local sz = btn.AbsoluteSize or { X = 140, Y = 38 }
-    local vp = Overlay.viewport()
-    local below = (pos.Y or 0) + (sz.Y or 38) + 4
-    local openUp = (below + ddH > (vp.Y or 1080)) and ((pos.Y or 0) - 4 - ddH >= 0)
-    local y = openUp and ((pos.Y or 0) - 4 - ddH) or below
-    local x = math.max(0, math.min(pos.X or 0, (vp.X or 1920) - width - 4))
-    return x, y
+    return Overlay.placePopover(btn.AbsolutePosition, sz, width * (scale or 1), ddH * (scale or 1))
   end
 
+  -- BackgroundTransparency/TextTransparency are written explicitly: they are the rest values the
+  -- disabled recipe returns to (DIM below), so the enabled state is stated, not inherited.
   local field = Create("Frame", { Name = "Field", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0, Active = false,
+    BackgroundTransparency = 0,
     Size = opts.Text and UDim2.new(0.5, -4, 0, 26) or UDim2.new(1, 0, 0, 26),
     Position = opts.Text and UDim2.new(0.5, 4, 0.5, -13) or UDim2.new(0, 0, 0.5, -13),
     Parent = btn, Create.corner(theme.Radius.sm) })
   local fieldStroke = Create.stroke(theme.Colors.border, 1); fieldStroke.Parent = field
   local valueLabel = Create("TextLabel", { Name = "Value", BackgroundTransparency = 1, Text = display(),
-    TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+    TextColor3 = theme.Colors.foreground, TextTransparency = 0, TextXAlignment = Enum.TextXAlignment.Left,
     -- a long value must end with "…" inside the label, not overflow under the caret (a TextLabel does
     -- NOT clip its own text to its bounds; relayout() keeps the label's width clear of the caret).
     TextTruncate = Enum.TextTruncate.AtEnd,
@@ -140,6 +178,9 @@ function SelectBox.new(opts)
     if open == b then return end
     open = b
     Icons.tint(caret, caretColor())
+    -- The glyph turns over instead of swapping to chevron-up: Icons.apply (themer closure,
+    -- SetLoading) never writes Rotation, so a re-skin while open keeps the caret turned.
+    Animate.rotateTo(caret, "base", open and CARET_OPEN or 0, Animate.EASING.smooth, Animate.DIR.Out)
     fieldFocus.set(open)
   end
 
@@ -164,15 +205,23 @@ function SelectBox.new(opts)
     valueLabel.Size = UDim2.new(1, -(left + right), 1, 0)
   end
 
-  -- Colours derived from the disabled flag, painted instantly; the themer closure replays this
-  -- after a mode/accent change, while setDisabled adds the caret tween for the state change.
-  local function paintDisabled()
+  -- Parts the disabled state dims to Opacity.disabled, each with the value it rests at while
+  -- enabled (2.8d: Recipes.disabled restores exactly that rest, so re-enabling is lossless).
+  local DIM = { { field, "BackgroundTransparency", 0 }, { valueLabel, "TextTransparency", 0 } }
+  -- Colours + dim derived from the disabled flag. `animated` = the state change (tweened through
+  -- the recipe); instant = the themer closure replay, which must not tween inside a re-skin.
+  local function paintDisabled(animated)
     valueLabel.TextColor3 = disabled and theme.Colors.mutedForeground or theme.Colors.foreground
-    field.BackgroundTransparency = disabled and 0.4 or 0
+    if animated then
+      Recipes.disabled(DIM, disabled, theme)
+    else
+      local a = disabled and theme.Opacity.disabled or 0
+      for _, p in ipairs(DIM) do p[1][p[2]] = a end
+    end
   end
   local function setDisabled(b)
     disabled = b and true or false
-    Safe.mutate(function() paintDisabled(); Icons.tint(caret, caretColor()) end)
+    Safe.mutate(function() paintDisabled(true); Icons.tint(caret, caretColor()) end)
   end
 
   local loading = false
@@ -238,19 +287,41 @@ function SelectBox.new(opts)
 
   local function isSelected(opt) return multi and contains(value, opt) or (value == opt) end
 
+  -- Row hover answers on transparency ONLY: the row keeps the pure surface token as its
+  -- BackgroundColor3 (identity assertions) and the recipe captures its current transparency as
+  -- the rest it returns to — 0 for a selected row, 1 for an unselected one.
+  local function bindRowHover(o)
+    return Recipes.hover(o, { theme = theme, kind = "fill", hoverAlpha = theme.Opacity.optionHover })
+  end
+
   -- Re-tint the open option rows in place to match the current selection. Used for multi
   -- picks so the dropdown is NOT torn down and rebuilt — that reset the scroll position
   -- and wiped any active search query. Each row already owns a Check icon child.
+  -- Every colour is re-read from the live palette here, so the open popover's themer closure
+  -- (2.11) reuses this one loop instead of duplicating it.
   local function retintRows()
     for _, e in ipairs(optButtons) do
       local o = e.btn
       local sel = isSelected(o:GetAttribute("OptValue"))
+      o.BackgroundColor3 = theme.Colors.surface
       o.BackgroundTransparency = sel and 0 or 1
+      -- The hover recipe captured the row's rest transparency when it bound, so a row whose
+      -- selection just flipped is re-bound against its new rest (a pointer leaving it would
+      -- otherwise clear a fresh selection, or re-tint a row that was just deselected).
+      if sel ~= e.sel then
+        if e.hover then e.hover.disconnect() end
+        e.hover = bindRowHover(o)
+        e.sel = sel
+      end
       local check = o:FindFirstChild("Check")
       if check then
         if sel then Icons.apply(check, "check", theme.Colors.foreground) end
         check.Visible = sel
       end
+      local lead = o:FindFirstChild("Lead")
+      if lead and e.icon then Icons.apply(lead, e.icon, theme.Colors.foreground) end
+      local lab = o:FindFirstChild("OptLabel"); if lab then lab.TextColor3 = theme.Colors.foreground end
+      local desc = o:FindFirstChild("Desc"); if desc then desc.TextColor3 = theme.Colors.mutedForeground end
     end
   end
 
@@ -292,7 +363,11 @@ function SelectBox.new(opts)
     local sz = btn.AbsoluteSize or { X = 140, Y = 38 }
     local width = math.max(140, sz.X or 140)
     local ddH = math.min((loading and 28 or (#options * 28)) + (searchable and 44 or 8), 240)
-    local x, y = computePos(width, ddH)
+    -- The window's UI scale reaches overlay children through Overlay.scale() (2.22): the UIScale
+    -- goes on the popover's own root (never the overlay root, whose catcher must stay full-screen).
+    local scale = Overlay.scale()
+    ddScale = scale
+    local x, y, openUp = computePos(width, ddH, scale)
     -- Outer popover container. Active so clicks on its chrome don't fall through to the
     -- overlay catcher (which would close it). The search bar is pinned here (sticky); the
     -- options live in a nested ScrollingFrame so the search stays put while the list scrolls.
@@ -300,30 +375,52 @@ function SelectBox.new(opts)
       Name = "SelectDropdown", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0, Active = true,
       Position = UDim2.new(0, x, 0, y),
       Size = UDim2.new(0, width, 0, ddH),
-      ClipsDescendants = true, ZIndex = 1001,
+      ClipsDescendants = true, ZIndex = Overlay.Z.popover,
       Create.corner(theme.Radius.md),
+      Create("UIScale", { Scale = scale }),
     })
     local ddStroke = Create.stroke(theme.Colors.border, 1, theme.Stroke.floating); ddStroke.Parent = dropdown -- floating surface: opaque hairline (1.5)
+    -- Frost: the same material as the window shell, one step lighter. decorate is idempotent, so
+    -- it adopts the hairline above (strokeAlpha keeps it opaque) and only adds the ZIndex-0
+    -- noise/sheen/glint layers, which stay under the list (ZIndex 1001+).
+    Acrylic.decorate(dropdown, theme, {
+      transparency = frostAlpha(theme), edge = true, radius = theme.Radius.md, strokeAlpha = theme.Stroke.floating,
+    })
+    -- Depth: a SIBLING of the popover in the overlay root at the catcher layer (a child would
+    -- render above the dropdown's own fill). The popover never moves while open — posConn closes
+    -- it as soon as the control scrolls — so one Effects.place before mounting is enough.
+    local overlayRoot = Overlay.peek()
+    shadow = overlayRoot and Effects.shadow(overlayRoot, theme,
+      { name = "SelectDropdownShadow", level = "popover", zIndex = Overlay.Z.catcher }) or nil
+    Effects.place(shadow, x, y, width * scale, ddH * scale, "popover", theme)
 
     -- sticky search box (filters options live) — only for longer lists, or when forced
+    -- Hoisted out of the branch so the popover's themer closure below can repaint them.
+    local searchBox, searchInput, searchStroke, searchRest
+    local searchFocused = false
+    local dividers, loadingRow = {}, nil
     local listTop = 4
     if searchable then
       listTop = 34 -- 4 top pad + 26 search + 4 gap
-      local searchBox = Create("Frame", { Name = "Search", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
+      searchBox = Create("Frame", { Name = "Search", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
         Position = UDim2.new(0, 4, 0, 4), Size = UDim2.new(1, -8, 0, 26), ZIndex = 1003, Parent = dropdown,
         Create.corner(theme.Radius.sm), Create.padding({ left = 8, right = 8 }) })
-      local searchInput = Create("TextBox", { Name = "Input", BackgroundTransparency = 1, Text = "",
+      searchInput = Create("TextBox", { Name = "Input", BackgroundTransparency = 1, Text = "",
         PlaceholderText = "Search…", PlaceholderColor3 = theme.Colors.mutedForeground, TextColor3 = theme.Colors.foreground,
         TextXAlignment = Enum.TextXAlignment.Left,
         ClearTextOnFocus = false, ZIndex = 1003, Size = UDim2.new(1, 0, 1, 0), Parent = searchBox })
       Create.text(searchInput, theme, "muted")
       -- Hairline at Stroke.search (as the sidebar search) that thickens into the ring while typing.
       -- A ring at the hairline's alpha would barely read, so the alpha follows focus as well.
-      local restAlpha = theme.modeVal(theme, theme.Stroke.search)
-      local searchStroke = Create.stroke(theme.Colors.border, 1, restAlpha); searchStroke.Parent = searchBox
+      -- restAlpha is a FUNCTION so a SetMode mid-focus restores the new mode's hairline, and
+      -- getColor doubles as the focus latch the themer closure reads back (there is no other
+      -- source: the recipe owns the state, not the caller).
+      searchRest = function() return theme.modeVal(theme, theme.Stroke.search) end
+      searchStroke = Create.stroke(theme.Colors.border, 1, searchRest()); searchStroke.Parent = searchBox
       searchFocus = Recipes.focus(searchStroke, searchInput, function(focused)
+        searchFocused = focused
         return focused and theme.Colors.ring or theme.Colors.border
-      end, { theme = theme, restAlpha = restAlpha })   -- the recipe fades the hairline to opaque while focused
+      end, { theme = theme, restAlpha = searchRest })   -- the recipe fades the hairline to opaque while focused
       searchInput:GetPropertyChangedSignal("Text"):Connect(function() Safe.mutate(function() api.Filter(searchInput.Text) end) end)
     end
 
@@ -340,15 +437,15 @@ function SelectBox.new(opts)
     })
 
     if loading then
-      local row = Create("TextLabel", { Name = "Loading", BackgroundTransparency = 1, Text = "Loading…", ZIndex = 1002,
+      loadingRow = Create("TextLabel", { Name = "Loading", BackgroundTransparency = 1, Text = "Loading…", ZIndex = 1002,
         TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Center,
         Size = UDim2.new(1, 0, 0, 26), LayoutOrder = 1, Parent = list })
-      Create.text(row, theme, "body")
+      Create.text(loadingRow, theme, "body")
     else
     for i, raw in ipairs(options) do
       local e = normOpt(raw)
       if e.divider then
-        Create("Frame", { Name = "Divider", BackgroundColor3 = theme.Colors.border, BorderSizePixel = 0,
+        dividers[#dividers + 1] = Create("Frame", { Name = "Divider", BackgroundColor3 = theme.Colors.border, BorderSizePixel = 0,
           Size = UDim2.new(1, -8, 0, 1), LayoutOrder = i, ZIndex = 1002, Parent = list })
       else
         local rowH = e.desc and 38 or 26
@@ -380,7 +477,8 @@ function SelectBox.new(opts)
           Create.text(desc, theme, "muted")
         end
         o.MouseButton1Click:Connect(function() pick(e.value) end)
-        optButtons[#optButtons + 1] = { btn = o, text = tostring(e.value) .. " " .. tostring(e.label or "") .. " " .. tostring(e.desc or "") }
+        optButtons[#optButtons + 1] = { btn = o, sel = sel, hover = bindRowHover(o), icon = e.icon,
+          text = tostring(e.value) .. " " .. tostring(e.label or "") .. " " .. tostring(e.desc or "") }
       end
     end
     end
@@ -391,26 +489,63 @@ function SelectBox.new(opts)
     posConn = btn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function() Safe.mutate(api.Close) end)
     Overlay.mount(dropdown)
     Overlay.trackPopover(api.Close)
+    -- 2.11: while it is open the popover holds a themer registration of its OWN. The control's
+    -- closure only knows the field; everything built here (frost stack, rim, shadow alpha, search
+    -- box, rows) would otherwise keep the palette it was born with until the next open. Paints
+    -- instantly -- a re-skin replays the current state, it is not a transition.
+    local ddFrame, ddShadow = dropdown, shadow
+    ddUnreg = opts.AccentReg and opts.AccentReg(function()
+      Acrylic.reskin(ddFrame, theme, { transparency = frostAlpha(theme), edge = true,
+        radius = theme.Radius.md, strokeAlpha = theme.Stroke.floating })   -- fill + hairline + rim + frost
+      Effects.reskin(ddShadow, theme, "shadow")        -- nil-tolerant: Effect.shadowId is '' by default
+      list.ScrollBarImageColor3 = theme.Colors.border
+      if searchBox then
+        searchBox.BackgroundColor3 = theme.Colors.surface
+        searchInput.TextColor3 = theme.Colors.foreground
+        searchInput.PlaceholderColor3 = theme.Colors.mutedForeground
+        searchStroke.Color = searchFocused and theme.Colors.ring or theme.Colors.border
+        searchStroke.Transparency = searchFocused and theme.Stroke.control or searchRest()
+      end
+      for _, d in ipairs(dividers) do d.BackgroundColor3 = theme.Colors.border end
+      if loadingRow then loadingRow.TextColor3 = theme.Colors.mutedForeground end
+      retintRows()                                     -- rows: fill, check, lead, label, description
+    end) or nil
     setOpen(true)
+    -- Grows out of the field: the final Position is the one written above, so layout code
+    -- reading dropdown.Position right after Open still sees the computed spot.
+    popOpen(dropdown, theme, openUp and "up" or "down", scale)
   end
 
   function api.Open()
-    if dropdown then return end
+    if disabled or dropdown then return end
     if opts.OnOpen then opts.OnOpen(api) end
     buildDropdown()
   end
 
   -- Drop the popover and its connections; the open state (caret tint, field ring) is left to
   -- the caller so a rebuild swaps the list without flickering the field back to rest.
-  local function teardown()
+  --
+  -- Synchronous for the CALLER: the reference is dropped, the reposition connection cut and the
+  -- popover untracked before any motion starts, so a catcher click, a scroll or a second Close
+  -- sees no dropdown while the DETACHED frame is still folding away. `instant` (rebuild) skips
+  -- the exit entirely — animating a frame that is being replaced would show two popovers.
+  local function teardown(instant)
+    local dd, sh = dropdown, shadow
+    dropdown, shadow = nil, nil
     if posConn then posConn:Disconnect(); posConn = nil end
+    -- Released here, BEFORE the `not dd` early return and before any exit motion, so a re-skin
+    -- landing mid-fold can never paint the frame that is being destroyed.
+    if ddUnreg then ddUnreg(); ddUnreg = nil end
     if searchFocus then searchFocus.disconnect(); searchFocus = nil end
-    if dropdown then dropdown:Destroy(); dropdown = nil end
+    for _, e in ipairs(optButtons) do if e.hover then e.hover.disconnect() end end
     optButtons = {}
     Overlay.untrackPopover(api.Close)
+    if not dd then return end
+    local function drop() dd:Destroy(); if sh then sh:Destroy() end end
+    if instant then drop() else popShut(dd, theme, ddScale, drop) end
   end
   function rebuild()
-    if dropdown then teardown() end
+    if dropdown then teardown(true) end
     buildDropdown()
   end
   function api.Close() teardown(); setOpen(false) end

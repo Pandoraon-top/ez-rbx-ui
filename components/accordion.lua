@@ -1,10 +1,10 @@
 -- Deps injected via Init(R) (bundler cannot rewrite require() inside embedded modules).
 local Accordion = {}
-local Create, DefaultTheme, Animate, Maid, Icons, Host, REG, Safe
+local Create, DefaultTheme, Animate, Maid, Icons, Host, REG, Safe, Recipes
 
 function Accordion.Init(R)
   Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Icons = R.Icons
-  Host = R.Host; REG = R; Safe = R.Safe
+  Host = R.Host; REG = R; Safe = R.Safe; Recipes = R.Recipes
 end
 
 local HEADER_H = 34
@@ -39,6 +39,9 @@ function Accordion.new(opts)
     Parent = container,
     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }),
   })
+  -- The container clips SQUARE (ClipsDescendants), so the header cannot inherit the card's
+  -- rounded top corners: it carries its own radius, and the hover wash inside it matches.
+  Create.corner(theme.Radius.md).Parent = header
 
   local caret = Create("ImageLabel", {
     Name = "Caret",
@@ -52,6 +55,9 @@ function Accordion.new(opts)
   local function caretColor() return theme.Colors[expanded and theme.Icon.structuralActive or theme.Icon.structural] end
   Icons.apply(caret, "chevron-right", caretColor())
   caret.Rotation = expanded and 90 or 0
+  -- Pop on click: the glyph itself is 16px, so the acknowledgement is a scale dip, not a
+  -- rotation overshoot (a Back curve on a 16px chevron jitters -- see applyHeight).
+  local caretScale = Create("UIScale", { Scale = 1, Parent = caret })
 
   local leadIcon
   if opts.Icon then
@@ -93,6 +99,17 @@ function Accordion.new(opts)
 
   local api = { Container = container, Header = header, Content = content, Maid = maid }
 
+  local GAP = theme.Spacing.gap
+  local REST_Y = HEADER_H + GAP          -- content's resting Y; expand starts (and collapse ends) one gap lower
+
+  -- contentHeight() adds the bottom padding, so it is never 0 even with no rows -- the RAW
+  -- AbsoluteContentSize is the only honest "is there anything to measure" signal (and it is nil
+  -- under the headless mock, where no layout ever runs).
+  local function hasContent()
+    local acs = layout.AbsoluteContentSize
+    return acs ~= nil and (acs.Y or 0) > 0
+  end
+
   local function contentHeight()
     -- real Roblox: UIListLayout.AbsoluteContentSize.Y; mock returns nil -> 0
     local acs = layout.AbsoluteContentSize
@@ -108,25 +125,46 @@ function Accordion.new(opts)
   -- the Size down). Toggle animations run on the header-click handler, which keeps capability.
   local function applyHeight(animated)
     if animated then
-      Animate.rotateTo(caret, "base", expanded and 90 or 0)
+      -- Quint/Out, NOT the rotateTo default (Back/Out): a Back overshoot swings a 16px glyph past
+      -- its stop and back, which reads as a jitter rather than a flourish at that size. The pop
+      -- lives on the caret's UIScale instead, where an overshoot is invisible but felt.
+      Animate.rotateTo(caret, "base", expanded and 90 or 0, Animate.EASING.smooth, Animate.DIR.Out)
       Icons.tint(caret, caretColor(), "fast")
+      caretScale.Scale = theme.Motion.popFrom
+      Animate.springTo(caretScale, "release", { Scale = 1 })
       if expanded then
-        -- reveal: animate the height open + slide the content in, then hand sizing to the engine
-        -- (AutomaticSize.Y) so dynamic content keeps fitting with no further script write. This runs
-        -- on the header-click handler, which keeps the GUI capability even where Heartbeat does not.
-        content.Visible = true; divider.Visible = true
-        container.AutomaticSize = Enum.AutomaticSize.None
-        local target = HEADER_H + theme.Spacing.gap + contentHeight()
-        container.Size = UDim2.new(1, 0, 0, HEADER_H)
-        content.Position = UDim2.new(0, 0, 0, HEADER_H + theme.Spacing.gap + 8)
-        Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, target) }, function()
-          if expanded then container.AutomaticSize = Enum.AutomaticSize.Y end
-        end)
-        Animate.to(content, "base", { Position = UDim2.new(0, 0, 0, HEADER_H + theme.Spacing.gap) })
+        -- reveal: fade the divider in, slide the content up one gap into place, animate the height
+        -- open and then hand sizing to the engine (AutomaticSize.Y) so dynamic content keeps
+        -- fitting with no further script write. This runs on the header-click handler, which keeps
+        -- the GUI capability even where Heartbeat does not.
+        content.Visible = true
+        divider.Visible = true; divider.BackgroundTransparency = 1
+        Animate.to(divider, "fast", { BackgroundTransparency = 0 })
+        content.Position = UDim2.new(0, 0, 0, REST_Y + GAP)
+        Animate.to(content, "base", { Position = UDim2.new(0, 0, 0, REST_Y) })
+        if hasContent() then
+          container.AutomaticSize = Enum.AutomaticSize.None
+          local target = REST_Y + contentHeight()
+          container.Size = UDim2.new(1, 0, 0, HEADER_H)
+          Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, target) }, function()
+            if expanded then container.AutomaticSize = Enum.AutomaticSize.Y end
+          end)
+        else
+          -- nothing to measure: contentHeight() would still report the bottom padding, so the
+          -- tween would open to a slab of empty card and snap shut again. Hand the height straight
+          -- to the engine; it grows the moment a row is mounted.
+          container.AutomaticSize = Enum.AutomaticSize.Y
+          container.Size = UDim2.new(1, 0, 0, HEADER_H)
+        end
       else
-        -- collapse: freeze the current engine-fit height, switch AutomaticSize off, animate down
+        -- collapse mirrors expand: the divider fades BEFORE it hides and the content slides back
+        -- down one gap (where the expand started) instead of snapping out with the height.
+        Animate.to(divider, "fast", { BackgroundTransparency = 1 })
+        Animate.to(content, "exit", { Position = UDim2.new(0, 0, 0, REST_Y + GAP) },
+          Animate.EASING.exit, Animate.DIR.In)
+        -- freeze the current engine-fit height, switch AutomaticSize off, animate down
         local sz = container.AbsoluteSize
-        local from = (sz and sz.Y and sz.Y > HEADER_H) and sz.Y or (HEADER_H + theme.Spacing.gap + contentHeight())
+        local from = (sz and sz.Y and sz.Y > HEADER_H) and sz.Y or (REST_Y + contentHeight())
         container.AutomaticSize = Enum.AutomaticSize.None
         container.Size = UDim2.new(1, 0, 0, from)
         Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, HEADER_H) }, function()
@@ -134,6 +172,8 @@ function Accordion.new(opts)
         end)
       end
     else
+      content.Position = UDim2.new(0, 0, 0, REST_Y)
+      divider.BackgroundTransparency = 0
       if expanded then
         content.Visible = true; divider.Visible = true
         container.AutomaticSize = Enum.AutomaticSize.Y
@@ -145,6 +185,7 @@ function Accordion.new(opts)
       end
       caret.Rotation = expanded and 90 or 0
       caret.ImageColor3 = caretColor()
+      caretScale.Scale = 1
     end
   end
 
@@ -170,6 +211,13 @@ function Accordion.new(opts)
     nextOrder = function() order = order + 1; return order end,
   })
 
+  -- Header hover wash (plan 2.7): the wash Frame lives INSIDE the header, so the container's own
+  -- card colour is never touched; its inset cancels the header's UIPadding so the wash covers the
+  -- full row, and its corner matches the one the header carries (the container clips square).
+  local hover = Recipes.hover(header, { theme = theme, host = header, kind = "wash",
+    corner = theme.Radius.md, inset = { x = theme.Spacing.inputX, y = 0 } })
+  maid:Give(hover.disconnect)
+
   if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function()
     container.BackgroundColor3 = theme.Colors.card
     local st = container:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
@@ -178,6 +226,7 @@ function Accordion.new(opts)
     caret.Rotation = expanded and 90 or 0
     if leadIcon then Icons.apply(leadIcon, opts.Icon, theme.Colors[theme.Icon.accent]) end
     divider.BackgroundColor3 = theme.Colors.border
+    hover.reskin()                       -- the wash is foreground-tinted: re-read it by name
   end)) end
 
   maid:Give(header.MouseButton1Click:Connect(function() api:Toggle() end))

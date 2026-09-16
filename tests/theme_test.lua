@@ -183,7 +183,8 @@ h.describe("theme tokens (F1)", function()
     h.expect(Theme.Stroke.window).toBe(0.3)         -- acrylic stroke
     h.expect(Theme.Acrylic.tileSize).toBe(128)
     h.expect(Theme.Acrylic.noiseId).toBe("rbxassetid://9968344105")
-    h.expect(Theme.Effect.shadowId).toBe("")        -- shadow off until the asset is verified in Studio
+    -- an uploaded 9-slice sprite (assets/shadow-9slice.png); "" would switch every depth layer off
+    h.expect(Theme.Effect.shadowId:sub(1, 13)).toBe("rbxassetid://")
     h.expect(Theme.Effect.slice.x1).toBe(450)
     h.expect(Theme.Radius.input).toBe(6)
     h.expect(Theme.Radius.xs).toBe(2)

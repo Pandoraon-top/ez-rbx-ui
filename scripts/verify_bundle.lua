@@ -153,7 +153,10 @@ local w6 = EzUI:CreateWindow({ Title = "FabR7", Parent = _G.Instance.new("Screen
 do
   local fab; for _, c in ipairs(w6.Overlay:GetChildren()) do if c.Name == "FloatingToggle" then fab = c end end
   assert(fab and fab.Visible == false, "FAB should be hidden while window shown")
-  assert(not fab:FindFirstChild("FloatingToggleShadow"), "no shadow expected")
+  -- Depth layers are overlay-root siblings, never children of the FAB (ZIndexBehavior.Sibling:
+  -- a child would render over the glyph). Names must match what components/window.lua builds.
+  assert(not fab:FindFirstChild("FabShadow"), "no shadow expected as a FAB child")
+  assert(not fab:FindFirstChild("FabGlow"), "no glow expected as a FAB child")
   w6:Hide(); assert(fab.Visible == true, "FAB should show on hide"); w6:Show()
 end
 local stx = t:AddSelectBox({ Text = "Mode", Options = { "A", "B" }, Default = "A" })
