@@ -208,5 +208,204 @@ h.describe("notification", function()
     R.Notification.setPosition("bottom-right")           -- restore process-wide state
     R.Notification.clearAll()
   end)
+
+  -- ---- visual-polish phase 1 (1.2 font roles, 1.3 AccentReg, 1.5 floating stroke, 1.9 spin) ----
+  local function firstToast(root)
+    for _, c in ipairs(root:GetChildren()) do if c.Name == "ToastContainer" then
+      for _, t in ipairs(c:GetChildren()) do if t.Name == "Toast" then return t end end end end
+  end
+  -- Fake themer: hands the closure back so a test can fire it, and counts registrations/releases.
+  local function fakeReg()
+    local reg = { fns = {}, count = 0, released = 0 }
+    reg.AccentReg = function(fn)
+      reg.count = reg.count + 1; reg.fns[#reg.fns + 1] = fn
+      return function() reg.released = reg.released + 1 end
+    end
+    function reg.fire() for _, fn in ipairs(reg.fns) do fn("mode") end end
+    return reg
+  end
+
+  h.it("toast stroke uses the floating alpha and its text parts use Font roles", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    R.Notification.show({ Title = "t", Message = "m", Duration = 0, Action = { Text = "Undo" } })
+    local toast = firstToast(root)
+    local stroke = toast:FindFirstChildOfClass("UIStroke")
+    h.expect(stroke.Transparency).toBe(R.Theme.Stroke.floating)
+    h.expect(stroke.Color).toBe(R.Theme.Colors.border)
+    local title = toast:FindFirstChild("TitleRow"):FindFirstChild("Title")
+    h.expect(title.TextSize).toBe(R.Theme.Font.label.Size)
+    h.expect(title.Font).toBe(h.roblox.Enum.Font.BuilderSans)
+    h.expect(title.TextTruncate).toBe(h.roblox.Enum.TextTruncate.AtEnd)
+    h.expect(toast:FindFirstChild("Message").TextSize).toBe(R.Theme.Font.muted.Size)
+    h.expect(toast:FindFirstChild("Action").TextSize).toBe(R.Theme.Font.muted.Size)
+    R.Notification.clearAll()
+  end)
+
+  h.it("AccentReg: the registered closure re-skins a live toast from theme.Colors", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local t = R.Theme.new()
+    local reg = fakeReg()
+    local id = R.Notification.show({ Title = "t", Message = "m", Type = "success", Duration = 1000, Theme = t,
+      Action = { Text = "Undo" }, AccentReg = reg.AccentReg })
+    h.expect(reg.count).toBe(1)
+    local toast = firstToast(root)
+    -- swap tokens the way applyMode/SetAccent do (in place on theme.Colors), then fire the closure
+    t.Colors.card = h.roblox.Color3.fromRGB(1, 2, 3)
+    t.Colors.border = h.roblox.Color3.fromRGB(4, 5, 6)
+    t.Colors.foreground = h.roblox.Color3.fromRGB(7, 8, 9)
+    t.Colors.mutedForeground = h.roblox.Color3.fromRGB(10, 11, 12)
+    t.Colors.primary = h.roblox.Color3.fromRGB(13, 14, 15)
+    t.Colors.surface = h.roblox.Color3.fromRGB(16, 17, 18)
+    t.Colors.success = h.roblox.Color3.fromRGB(19, 20, 21)
+    reg.fire()
+    local row = toast:FindFirstChild("TitleRow")
+    h.expect(toast.BackgroundColor3).toBe(t.Colors.card)                              -- by identity
+    h.expect(toast:FindFirstChildOfClass("UIStroke").Color).toBe(t.Colors.border)
+    h.expect(row:FindFirstChild("Title").TextColor3).toBe(t.Colors.foreground)
+    h.expect(toast:FindFirstChild("Message").TextColor3).toBe(t.Colors.mutedForeground)
+    h.expect(row:FindFirstChild("Close").ImageColor3).toBe(t.Colors.primary)
+    h.expect(toast:FindFirstChild("Action").BackgroundColor3).toBe(t.Colors.surface)
+    h.expect(toast:FindFirstChild("Action").TextColor3).toBe(t.Colors.foreground)
+    h.expect(toast:FindFirstChild("Progress").BackgroundColor3).toBe(t.Colors.success)  -- accent = type colour
+    h.expect(row:FindFirstChild("Icon").ImageColor3).toBe(t.Colors.success)
+    -- parts replaced by update (new Progress bar, morphed type) are read live, not captured
+    R.Notification.update(id, { Type = "error", Duration = 500 })
+    t.Colors.destructive = h.roblox.Color3.fromRGB(22, 23, 24)
+    reg.fire()
+    h.expect(toast:FindFirstChild("Progress").BackgroundColor3).toBe(t.Colors.destructive)
+    h.expect(row:FindFirstChild("Icon").ImageColor3).toBe(t.Colors.destructive)
+    R.Notification.clearAll()
+  end)
+
+  h.it("AccentReg: a Message added by update is re-skinned too", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local t = R.Theme.new()
+    local reg = fakeReg()
+    local id = R.Notification.show({ Title = "t", Duration = 0, Theme = t, AccentReg = reg.AccentReg })
+    R.Notification.update(id, { Message = "later" })
+    t.Colors.mutedForeground = h.roblox.Color3.fromRGB(10, 11, 12)
+    reg.fire()
+    h.expect(firstToast(root):FindFirstChild("Message").TextColor3).toBe(t.Colors.mutedForeground)
+    R.Notification.clearAll()
+  end)
+
+  h.it("AccentReg: dismiss releases the registration exactly once; clearAll releases every toast", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(gui)
+    local reg = fakeReg()
+    local id = R.Notification.show({ Title = "a", Duration = 0, AccentReg = reg.AccentReg })
+    R.Notification.show({ Title = "b", Duration = 0, AccentReg = reg.AccentReg })
+    R.Notification.show({ Title = "c", Duration = 0, AccentReg = reg.AccentReg })
+    h.expect(reg.count).toBe(3)
+    h.expect(reg.released).toBe(0)
+    R.Notification.dismiss(id)
+    h.expect(reg.released).toBe(1)
+    R.Notification.dismiss(id)                 -- already gone: no double release
+    h.expect(reg.released).toBe(1)
+    R.Notification.clearAll()
+    h.expect(reg.released).toBe(3)
+  end)
+
+  h.it("AccentReg: a timed toast releases its registration when the countdown expires", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(gui)
+    local reg = fakeReg()
+    R.Notification.show({ Title = "a", Duration = 1000, AccentReg = reg.AccentReg })
+    h.mock.stepHeartbeat(1.2)
+    h.expect(R.Notification.count()).toBe(0)
+    h.expect(reg.released).toBe(1)
+  end)
+
+  h.it("AccentReg: promise forwards the registration to its loading toast", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(gui)
+    local reg = fakeReg()
+    R.Notification.promise(function() return 1 end, { Loading = "w", Success = "ok", AccentReg = reg.AccentReg })
+    h.expect(reg.count).toBe(1)
+    h.mock.stepHeartbeat(0)
+    R.Notification.clearAll()
+    h.expect(reg.released).toBe(1)
+  end)
+
+  h.it("loading spin is an endless Animate.spin loop; update cancels it before the new glyph lands", function()
+    R.Notification.clearAll()
+    h.mock.resetTweens()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local id = R.Notification.loading({ Title = "Saving" })
+    local icon = firstToast(root):FindFirstChild("TitleRow"):FindFirstChild("Icon")
+    local tw = h.mock.tweensFor(icon)[1]
+    h.expect(tw ~= nil).toBeTruthy()
+    h.expect(tw.Info.RepeatCount).toBe(-1)
+    h.expect(tw.Goal.Rotation).toBe(360)
+    h.expect(tw.cancelled).toBe(false)
+    R.Notification.update(id, { Type = "success", Duration = 0 })
+    h.expect(tw.cancelled).toBe(true)
+    h.expect(icon.Rotation).toBe(0)
+    h.expect(#h.mock.tweensFor(icon)).toBe(1)   -- no second spin for a non-loading type
+    R.Notification.clearAll()
+  end)
+
+  h.it("dismiss cancels a running spin", function()
+    R.Notification.clearAll()
+    h.mock.resetTweens()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local id = R.Notification.loading({ Title = "Saving" })
+    local tw = h.mock.tweensFor(firstToast(root):FindFirstChild("TitleRow"):FindFirstChild("Icon"))[1]
+    R.Notification.dismiss(id)
+    h.expect(tw.cancelled).toBe(true)
+  end)
+
+  h.it("reduced motion: no spin tween is created and the loader glyph rests at 0", function()
+    h.withReducedMotion(R, function()
+      R.Notification.clearAll()
+      h.mock.resetTweens()
+      local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+      R.Notification.loading({ Title = "Saving" })
+      local icon = firstToast(root):FindFirstChild("TitleRow"):FindFirstChild("Icon")
+      h.expect(#h.mock.tweensFor(icon)).toBe(0)
+      h.expect(icon.Rotation).toBe(0)
+      R.Notification.clearAll()
+    end)
+  end)
+
+  h.it("window contract: SetMode re-skins live toasts (Notify + ShowLoading) via the window's AccentReg", function()
+    R.Notification.clearAll()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local w = R.Window.new({ Title = "W", Parent = gui })
+    w:Notify({ Title = "t", Message = "m", Duration = 0 })
+    w:ShowLoading({ Title = "l" })
+    local light = R.Theme.PALETTES.light
+    w:SetMode("light")
+    local n = 0
+    for _, c in ipairs(root:GetChildren()) do if c.Name == "ToastContainer" then
+      for _, t in ipairs(c:GetChildren()) do if t.Name == "Toast" then
+        n = n + 1
+        h.expect(t.BackgroundColor3).toBe(light.card)
+        h.expect(t:FindFirstChildOfClass("UIStroke").Color).toBe(light.border)
+        h.expect(t:FindFirstChild("TitleRow"):FindFirstChild("Title").TextColor3).toBe(light.foreground)
+      end end end end
+    h.expect(n).toBe(2)
+    w:SetMode("dark")
+    h.expect(firstToast(root).BackgroundColor3).toBe(R.Theme.PALETTES.dark.card)
+    R.Notification.clearAll()
+  end)
+
+  h.it("Init twice: one Heartbeat step counts a timed toast down once (stale ticker disconnected)", function()
+    R.Notification.clearAll()
+    local base = h.mock.heartbeatHandlers()
+    local R2 = h.loadLib()   -- re-runs Notification.Init on the same cached module (helper caches modules)
+    local R3 = h.loadLib()
+    h.expect(h.mock.heartbeatHandlers() <= base).toBeTruthy()   -- Init released the previous ticker
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R3.Overlay.get(gui)
+    R3.Notification.show({ Title = "t", Duration = 1000 })
+    local bar = firstToast(root):FindFirstChild("Progress")
+    h.mock.stepHeartbeat(0.5)
+    h.expect(bar.Size.X.Scale).toBeCloseTo(0.5, 0.01)   -- one ticker: 0.5 remaining, not 0
+    h.expect(R3.Notification.count()).toBe(1)
+    R3.Notification.clearAll()
+  end)
 end)
 h.run()

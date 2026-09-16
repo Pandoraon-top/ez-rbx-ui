@@ -2,51 +2,76 @@
 local UserInputService = game:GetService("UserInputService")
 
 local Window = {}
-local Create, DefaultTheme, Animate, Maid, Icons, Overlay, Acrylic, Tab, ConfigMod, DialogMod, Notif, Asset, Themer, Mount, Safe, Drag, Device
+local Create, DefaultTheme, Animate, Maid, Icons, Overlay, Acrylic, Tab, ConfigMod, DialogMod, Notif, Asset, Themer, Mount, Safe, Drag, Device, Recipes
 
 function Window.Init(R)
   Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid
   Icons = R.Icons; Overlay = R.Overlay; Acrylic = R.Acrylic; Tab = R.Tab; ConfigMod = R.Config; DialogMod = R.Dialog
   Notif = R.Notification; Asset = R.Asset; Themer = R.Themer
-  Mount = R.Mount; Safe = R.Safe; Drag = R.Drag; Device = R.Device
+  Mount = R.Mount; Safe = R.Safe; Drag = R.Drag; Device = R.Device; Recipes = R.Recipes
 end
 
-local TITLE_H = 40
-local TITLE_H_TALL = 56
+-- Title bar heights, FAB geometry and the indicator pill read theme.Sizes (titleBar/titleBarTall,
+-- fab.*, indicator.*) so a window Theme override can retune them; the literals that stay below are
+-- layout constants no token names yet (sidebar band, minimum size, viewport fractions).
 local SIDEBAR_W = 150
 local SIDEBAR_MIN, SIDEBAR_MAX = 110, 260
 local MIN_W, MIN_H = 380, 260
 local VP_MARGIN = 0.92                  -- never exceed 92% of the viewport on either axis
 local DEF_WF, DEF_HF = 0.45, 0.6       -- default window size as a fraction of the viewport (W x H)
 local FALLBACK_VP = { X = 1280, Y = 720 }
-local FAB_MARGIN = 16
+-- Group header text inset: matches the TabButton's own left padding (tab.lua) so the overline
+-- and the tab rows share one left edge. Keep in sync until a Sizes token names it.
+local GROUP_HEADER_INSET = 10
+-- TextService measuring bound: wide enough that a Tag label never wraps.
+local MEASURE_MAX_W = 1e4
 local FAB_ANCHORS = { TopLeft = true, MidLeft = true, BottomLeft = true, TopRight = true, MidRight = true, BottomRight = true }
--- Map a named anchor + the FAB kind/size to a Position UDim2.
--- simple = a docked edge tab (left peeks at -15; right starts near the edge so the on-show
--- magnet settles it); circle/square = fully visible at the anchor with a margin. Vertical
+-- Map a named anchor + the FAB kind/size to a Position UDim2 (S = theme.Sizes.fab).
+-- simple = a docked edge tab (left peeks at -S.peek; right starts near the edge so the on-show
+-- magnet settles it); circle/square = fully visible at the anchor with S.margin. Vertical
 -- band (Top/Mid/Bottom) is the same for both.
-local function fabAnchorPos(name, kind, w, h)
+local function fabAnchorPos(name, kind, w, h, S)
   local yScale, yOff
-  if name:find("Top") then yScale, yOff = 0, FAB_MARGIN
+  if name:find("Top") then yScale, yOff = 0, S.margin
   elseif name:find("Mid") then yScale, yOff = 0.5, -h / 2
-  else yScale, yOff = 1, -(h + FAB_MARGIN) end
+  else yScale, yOff = 1, -(h + S.margin) end
   local isLeft = name:find("Left") ~= nil
   if kind == "simple" then
-    if isLeft then return UDim2.new(0, -15, yScale, yOff) end
-    return UDim2.new(1, -(w - 15), yScale, yOff)
+    if isLeft then return UDim2.new(0, -S.peek, yScale, yOff) end
+    return UDim2.new(1, -(w - S.peek), yScale, yOff)
   end
-  if isLeft then return UDim2.new(0, FAB_MARGIN, yScale, yOff) end
-  return UDim2.new(1, -(w + FAB_MARGIN), yScale, yOff)
+  if isLeft then return UDim2.new(0, S.margin, yScale, yOff) end
+  return UDim2.new(1, -(w + S.margin), yScale, yOff)
 end -- headless / no CurrentCamera
+
+-- Tag pill text width. TextService:GetTextSize takes the legacy Enum.Font (no weight), so a
+-- Medium face measures narrower than it renders: Sizes.tagMeasureFudge covers the gap.
+-- GetTextBoundsAsync would yield on the build thread, so it is never used here. pcall guards
+-- an executor without TextService; the fallback is the old per-character estimate.
+local function measureTagText(text, size, theme)
+  local ok, measured = pcall(function()
+    return game:GetService("TextService"):GetTextSize(text, size, Enum.Font.BuilderSans, Vector2.new(MEASURE_MAX_W, size))
+  end)
+  if ok and measured and type(measured.X) == "number" then
+    return math.ceil(measured.X * theme.Sizes.tagMeasureFudge)
+  end
+  return #text * 7
+end
 
 function Window.new(config)
   config = config or {}
   -- merge a partial Theme override onto the defaults (verbatim use would crash on missing tokens)
   local theme = DefaultTheme.new(config.Theme or {})
+  -- a Theme = { Motion = {...} } override retunes every Animate token name (process-wide, like enabled)
+  Animate.useMotion(theme.Motion)
   if config.Mode == "light" then DefaultTheme.applyMode(theme, "light") else theme.Mode = "dark" end
   -- reduced-motion toggle. Process-wide by design (single-window norm; last writer wins) —
   -- see api:SetAnimationsEnabled. Don't "fix" into per-window state without revisiting the spec.
-  if config.Animations ~= nil then Animate.setEnabled(config.Animations ~= false) end
+  -- No config -> the OS preference is only a DEFAULT: applyDefault never overrides an explicit
+  -- choice, so a second window without Animations cannot re-enable motion the user switched off.
+  if config.Animations ~= nil then Animate.setEnabled(config.Animations ~= false)
+  else Animate.applyDefault(not Device.PrefersReducedMotion()) end
+  local S = theme.Sizes
   if config.NotificationPosition then Notif.setPosition(config.NotificationPosition) end
   theme.AccentName = "Adaptive"
   local maid = Maid.new()
@@ -129,11 +154,13 @@ function Window.new(config)
     Parent = gui,
     Create.corner(theme.Radius.window),
   })
-  local transp = type(config.Transparency) == "number" and config.Transparency or 0.12
-  Acrylic.decorate(main, theme, { transparency = transp,
-    base = theme.Colors.background, gradientTop = theme.Colors.card, gradientBottom = theme.Colors.background })
+  local transp = type(config.Transparency) == "number" and config.Transparency or theme.Acrylic.frost
+  -- base = background (the chrome); Acrylic owns the sheen so no card-over-background gradient
+  -- multiplies the dark shell to black any more. Re-painted by Acrylic.reskin in the shell closure.
+  Acrylic.decorate(main, theme, { transparency = transp, base = theme.Colors.background })
   local winScale = Create("UIScale", { Scale = 1, Parent = main })
   local userScale = 1
+  local grip -- resize grip glyph; built after the shell, re-tinted by the shell closure below
 
   -- A logo source is either a string (one image, optionally ImageAdaptive-tinted) or a
   -- { dark = ..., light = ... } table that swaps per color mode -- for full-color tiles that ship a
@@ -152,7 +179,7 @@ function Window.new(config)
   local imageAdaptive = config.ImageAdaptive == true and not imageIsModal
   local hasTitleImg = Asset.resolvable(srcFor(titleSrc, theme.Mode))
   local hasSubtitle = type(config.Subtitle) == "string" and config.Subtitle ~= ""
-  local titleH = (hasTitleImg or hasSubtitle) and TITLE_H_TALL or TITLE_H
+  local titleH = (hasTitleImg or hasSubtitle) and S.titleBarTall or S.titleBar
   local titleBar = Create("Frame", {
     Name = "TitleBar",
     BackgroundTransparency = 1,
@@ -193,26 +220,26 @@ function Window.new(config)
     TextColor3 = theme.Colors.foreground,
     TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = hasSubtitle and Enum.TextYAlignment.Bottom or Enum.TextYAlignment.Center,
-    TextSize = theme.Font.title.Size,
-    Font = Enum.Font.BuilderSans,
+    TextTruncate = Enum.TextTruncate.AtEnd,
     Position = UDim2.new(0, titleTextX, 0, 0),
     Size = hasSubtitle and UDim2.new(1, -(titleTextX + 60), 0.5, 0) or UDim2.new(1, -(titleTextX + 60), 1, 0),
     Parent = titleBar,
   })
+  Create.text(titleLabel, theme, "title")
   if hasSubtitle then
-    Create("TextLabel", {
+    local subtitle = Create("TextLabel", {
       Name = "Subtitle",
       BackgroundTransparency = 1,
       Text = config.Subtitle,
       TextColor3 = theme.Colors.mutedForeground,
       TextXAlignment = Enum.TextXAlignment.Left,
       TextYAlignment = Enum.TextYAlignment.Top,
-      TextSize = theme.Font.muted.Size,
-      Font = Enum.Font.BuilderSans,
+      TextTruncate = Enum.TextTruncate.AtEnd,
       Position = UDim2.new(0, titleTextX, 0.5, 0),
       Size = UDim2.new(1, -(titleTextX + 60), 0.5, 0),
       Parent = titleBar,
     })
+    Create.text(subtitle, theme, "muted")
   end
   local closeBtn = Create("ImageButton", {
     Name = "Close",
@@ -241,17 +268,32 @@ function Window.new(config)
     Parent = main,
   })
   -- sidebar search box (pinned above the tab list)
+  -- Stroke.search is per-mode (light needs a firmer hairline over the 240 chrome); the same
+  -- stroke doubles as the focus ring (Recipes.focus below), so its colour has ONE source.
   local searchBox = Create("Frame", {
     Name = "Search", BackgroundColor3 = theme.Colors.input, BorderSizePixel = 0,
     Position = UDim2.new(0, 8, 0, 6), Size = UDim2.new(0, sidebarW - 16, 0, 24), Parent = body,
     Create.corner(theme.Radius.sm), Create.padding({ left = 8, right = 8 }),
   })
+  local searchStroke = Create.stroke(theme.Colors.border, 1, theme.modeVal(theme, theme.Stroke.search))
+  searchStroke.Parent = searchBox
   local searchInput = Create("TextBox", {
     Name = "SearchInput", BackgroundTransparency = 1, Text = "", PlaceholderText = "Search…",
     PlaceholderColor3 = theme.Colors.mutedForeground, TextColor3 = theme.Colors.foreground,
-    TextXAlignment = Enum.TextXAlignment.Left, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
+    TextXAlignment = Enum.TextXAlignment.Left,
     ClearTextOnFocus = false, Size = UDim2.new(1, 0, 1, 0), Parent = searchBox,
   })
+  Create.text(searchInput, theme, "muted")
+  local searchFocused = false
+  local function searchStrokeColor() return searchFocused and theme.Colors.ring or theme.Colors.border end
+  -- the recipe owns Thickness (1 <-> Stroke.focusThickness); the flag is recorded in the colour
+  -- callback so the shell closure re-derives the same colour after SetMode
+  local function searchRestAlpha() return theme.modeVal(theme, theme.Stroke.search) end
+  local searchFocus = Recipes.focus(searchStroke, searchInput, function(focused)
+    searchFocused = focused
+    return searchStrokeColor()
+  end, { theme = theme, restAlpha = searchRestAlpha })
+  maid:Give(searchFocus.disconnect)
 
   local sidebar = Create("ScrollingFrame", {
     Name = "Sidebar",
@@ -274,6 +316,9 @@ function Window.new(config)
     Size = UDim2.new(1, -(sidebarW + cgap * 2), 1, -cgap * 2),
     Parent = body, ClipsDescendants = true, Create.corner(theme.Radius.lg),
   })
+  -- Stroke.panel: faint in dark, opaque in light where card 255 over chrome 240 needs an edge
+  local contentStroke = Create.stroke(theme.Colors.border, 1, theme.modeVal(theme, theme.Stroke.panel))
+  contentStroke.Parent = contentPanel
   local contentScroll = Create("ScrollingFrame", {
     Name = "Content",
     BackgroundTransparency = 1,
@@ -314,10 +359,11 @@ function Window.new(config)
 
   -- single active-tab indicator that slides between sidebar buttons (lives in Body so the
   -- sidebar's UIListLayout does not lay it out; Body positions its children manually).
+  local IND = S.indicator
   local activeIndicator = Create("Frame", {
     Name = "ActiveIndicator", BackgroundColor3 = theme.Colors.primary, BorderSizePixel = 0,
-    Size = UDim2.new(0, 3, 0, 18), Position = UDim2.new(0, 2, 0, 0), Visible = false, ZIndex = 5,
-    Parent = body, Create.corner(2),
+    Size = UDim2.new(0, IND.w, 0, IND.h), Position = UDim2.new(0, 2, 0, 0), Visible = false, ZIndex = 5,
+    Parent = body, Create.corner(IND.radius),
   })
   local activeTabButton
   local function moveIndicatorTo(btn, instant)
@@ -334,7 +380,7 @@ function Window.new(config)
     local center = by + bh / 2
     if sBot > sTop and (center < sTop or center > sBot) then activeIndicator.Visible = false; return end
     activeIndicator.Visible = true
-    local target = UDim2.new(0, 2, 0, by + bh / 2 - 9)
+    local target = UDim2.new(0, 2, 0, by + bh / 2 - IND.h / 2)
     if instant then activeIndicator.Position = target else Animate.springTo(activeIndicator, "base", { Position = target }) end
   end
   -- Keep the window-owned indicator glued to the selected button: its Y is a body-relative
@@ -406,12 +452,15 @@ function Window.new(config)
   end
 
   function api:AddTabGroup(name)
+    -- Overline row one Spacing.major tall with the text sat at the bottom: the empty top half is
+    -- the breathing room between the previous group and this header.
     local header = Create("TextLabel", {
       Name = "GroupHeader", BackgroundTransparency = 1, Text = string.upper(name or "Group"),
       TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left,
-      TextSize = 10, Font = Enum.Font.BuilderSans, Size = UDim2.new(1, 0, 0, 16),
-      LayoutOrder = nextSidebarOrder(), Parent = sidebar,
+      TextYAlignment = Enum.TextYAlignment.Bottom, Size = UDim2.new(1, 0, 0, theme.Spacing.major),
+      LayoutOrder = nextSidebarOrder(), Parent = sidebar, Create.padding({ left = GROUP_HEADER_INSET }),
     })
+    Create.text(header, theme, "overline")
     local group = { _header = header, _entries = {} }
     groups[#groups + 1] = group
     function group:AddTab(o)
@@ -503,10 +552,18 @@ function Window.new(config)
       end)
     end)
   end
-  function api:Dialog(o) o = o or {}; o.Theme = theme; o.Window = api; return DialogMod.open(o) end
-  function api:Notify(o) o = o or {}; o.Theme = theme; return Notif.show(o) end
+  -- Overlays that outlive a SetMode/SetAccent (toasts, dialogs) register a temporary closure
+  -- through opts.AccentReg and unregister it on dismiss/close (cross-component contract).
+  local function accentReg(fn) return themer.register(fn) end
+  function api:Dialog(o) o = o or {}; o.Theme = theme; o.Window = api; o.AccentReg = accentReg; return DialogMod.open(o) end
+  function api:Notify(o) o = o or {}; o.Theme = theme; o.AccentReg = accentReg; return Notif.show(o) end
   function api:SetNotificationsEnabled(b) Notif.setEnabled(b); return b end
-  function api:SetTransparency(n) Safe.mutate(function() main.BackgroundTransparency = n end); return n end
+  -- reskin (not a bare write) so the acrylic sheen band rescales with the new transparency
+  function api:SetTransparency(n)
+    transp = n
+    Safe.mutate(function() Acrylic.reskin(main, theme, { base = theme.Colors.background, transparency = n }) end)
+    return n
+  end
   function api:SetAnimationsEnabled(b) Animate.setEnabled(b and true or false); return b end
   function api:SetToggleKey(k) toggleKey = k; return k end
   function api:SetUIScale(n)
@@ -518,8 +575,8 @@ function Window.new(config)
   function api:ShowWarning(o) o = o or {}; o.Type = "warning"; return api:Notify(o) end
   function api:ShowError(o) o = o or {}; o.Type = "error"; return api:Notify(o) end
   function api:ShowInfo(o) o = o or {}; o.Type = "info"; return api:Notify(o) end
-  function api:ShowLoading(o) o = o or {}; o.Theme = theme; return Notif.loading(o) end
-  function api:Promise(fn, o) o = o or {}; o.Theme = theme; return Notif.promise(fn, o) end
+  function api:ShowLoading(o) o = o or {}; o.Theme = theme; o.AccentReg = accentReg; return Notif.loading(o) end
+  function api:Promise(fn, o) o = o or {}; o.Theme = theme; o.AccentReg = accentReg; return Notif.promise(fn, o) end
   function api:SetNotificationPosition(p) return Notif.setPosition(p) end
   function api:DismissNotification(id) Notif.dismiss(id) end
   function api:ClearNotifications() Notif.clearAll() end
@@ -555,7 +612,7 @@ function Window.new(config)
   function api:Tag(o)
     o = o or {}
     local hasIcon = o.Icon ~= nil
-    local width = (hasIcon and 22 or 8) + (#tostring(o.Text or "") * 7) + 8
+    local width = (hasIcon and 22 or 8) + measureTagText(tostring(o.Text or ""), theme.Font.muted.Size, theme) + 8
     local pill = Create("Frame", { Name = "Tag", BackgroundColor3 = o.Color or theme.Colors.surface, BorderSizePixel = 0,
       AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -tagX, 0.5, 0), Size = UDim2.new(0, width, 0, 20),
       Parent = titleBar, Create.corner(theme.Radius.sm), Create.padding({ left = 6, right = 6 }) })
@@ -566,9 +623,10 @@ function Window.new(config)
       Icons.apply(ic, o.Icon, theme.Colors.primary)
     end
     local txt = Create("TextLabel", { Name = "TagText", BackgroundTransparency = 1, Text = o.Text or "",
-      TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left, TextSize = theme.Font.muted.Size,
-      Font = Enum.Font.BuilderSans, Size = UDim2.new(1, hasIcon and -16 or 0, 1, 0),
+      TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+      Size = UDim2.new(1, hasIcon and -16 or 0, 1, 0),
       Position = UDim2.new(0, hasIcon and 16 or 0, 0, 0), Parent = pill })
+    Create.text(txt, theme, "muted")
     tagX = tagX + width + 8
     local unreg = themer.register(function()
       pill.BackgroundColor3 = o.Color or theme.Colors.surface
@@ -599,7 +657,7 @@ function Window.new(config)
       theme.Colors.primary = a.Primary
       theme.Colors.primaryForeground = a.Foreground
     end
-    Safe.mutate(function() themer.reskin() end)
+    Safe.mutate(function() themer.reskin("accent") end)
   end
   function api:GetMode() return theme.Mode end
   function api:SetMode(mode)
@@ -609,35 +667,32 @@ function Window.new(config)
       theme.Colors.primary = p.primary
       theme.Colors.primaryForeground = p.primaryForeground
     end
-    Safe.mutate(function() themer.reskin() end)
+    Safe.mutate(function() themer.reskin("mode") end)
   end
 
-  -- window-shell live re-skin (mode/accent)
-  themer.register(function()
-    main.BackgroundColor3 = theme.Colors.background
+  -- window-shell live re-skin. `reason` is 'mode' | 'accent' (nil from legacy callers): only a
+  -- mode switch swaps the { dark, light } title tile, so an accent change skips the re-download.
+  themer.register(function(reason)
+    Acrylic.reskin(main, theme, { base = theme.Colors.background })  -- fill, sheen, stroke, grain
     titleLabel.TextColor3 = theme.Colors.foreground
     if titleImg and imageAdaptive then titleImg.ImageColor3 = theme.Colors.foreground end
-    if applyTitleImage and imageIsModal then applyTitleImage() end   -- swap to the active-mode tile
+    if applyTitleImage and imageIsModal and reason ~= "accent" then applyTitleImage() end
     local sub = titleBar:FindFirstChild("Subtitle")
     if sub then sub.TextColor3 = theme.Colors.mutedForeground end
-    Icons.apply(closeBtn, "x", theme.Colors.mutedForeground)
-    Icons.apply(minBtn, "minus", theme.Colors.mutedForeground)
+    Icons.apply(closeBtn, "x", theme.Colors[theme.Icon.structural])
+    Icons.apply(minBtn, "minus", theme.Colors[theme.Icon.structural])
+    if grip then Icons.apply(grip, "move-diagonal-2", theme.Colors[theme.Icon.structural]) end
     searchBox.BackgroundColor3 = theme.Colors.input
+    searchStroke.Color = searchStrokeColor()
+    -- keep the ring opaque while the field is still focused; only a blurred field wears the hairline
+    searchStroke.Transparency = searchFocused and theme.Stroke.control or searchRestAlpha()
     local si = searchBox:FindFirstChild("SearchInput")
     if si then si.TextColor3 = theme.Colors.foreground; si.PlaceholderColor3 = theme.Colors.mutedForeground end
     contentPanel.BackgroundColor3 = theme.Colors.card
+    contentStroke.Color = theme.Colors.border
+    contentStroke.Transparency = theme.modeVal(theme, theme.Stroke.panel)
     activeIndicator.BackgroundColor3 = theme.Colors.primary
-    local grad = main:FindFirstChildOfClass("UIGradient")
-    if grad then
-      grad.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, theme.Colors.card),
-        ColorSequenceKeypoint.new(1, theme.Colors.background),
-      })
-    end
-    local mstroke = main:FindFirstChildOfClass("UIStroke")
-    if mstroke then mstroke.Color = theme.Colors.border end
-    local noise = main:FindFirstChild("AcrylicNoise")
-    if noise then noise.ImageTransparency = (theme.Mode == "light") and 0.97 or 0.92 end
+    for _, g in ipairs(groups) do g._header.TextColor3 = theme.Colors.mutedForeground end
   end)
 
   fabEnabled = config.FloatingToggle ~= false
@@ -670,6 +725,11 @@ function Window.new(config)
         end)
       end)
     end
+    -- The gamepad placeholder sits on primary for a circle FAB (so it needs primaryForeground) and
+    -- on a neutral surface for square (primary). Resolved live: the fab closure re-tints it.
+    local function placeholderColor()
+      return (kind == "circle") and theme.Colors.primaryForeground or theme.Colors.primary
+    end
     -- A logo fills the whole FAB (rounded to the FAB shape); the gamepad placeholder is a small
     -- centered glyph. `radius` clips the fill to match the FAB's own corner.
     local function makeFabImg(radius)
@@ -681,12 +741,14 @@ function Window.new(config)
       end
       local img = Create("ImageLabel", { Name = "Img", BackgroundTransparency = 1, Size = UDim2.new(0, 24, 0, 24),
         Position = UDim2.new(0.5, -12, 0.5, -12), Parent = fab })
-      Icons.apply(img, "gamepad-2", theme.Colors.primary)
+      Icons.apply(img, "gamepad-2", placeholderColor())
       return img
     end
     local chev, chevDir = nil, "chevron-right"
+    local F = S.fab
     fab = Create("ImageButton", { Name = "FloatingToggle", AutoButtonColor = false, BackgroundTransparency = 0,
-      Visible = false, Size = UDim2.new(0, 44, 0, 44), Position = UDim2.new(0, 16, 1, -60), ZIndex = 1700, Parent = Overlay.get(gui) })
+      Visible = false, Size = UDim2.new(0, F.size, 0, F.size), Position = UDim2.new(0, F.margin, 1, -(F.size + F.margin)),
+      ZIndex = 1700, Parent = Overlay.get(gui) })
     fab:SetAttribute("FabType", kind)
     fabScale = Create("UIScale", { Scale = 1, Parent = fab })
     if kind == "square" then
@@ -695,13 +757,13 @@ function Window.new(config)
       fabImg = makeFabImg(theme.Radius.lg); applyFabImage(fabImg)
     elseif kind == "circle" then
       fab.BackgroundColor3 = theme.Colors.primary
-      Create("UICorner", { CornerRadius = UDim.new(0, 22), Parent = fab })
-      fabImg = makeFabImg(22); applyFabImage(fabImg)
-    else -- simple: 50x50 chevron square, neutral surface (follows the mode)
-      fab.Size = UDim2.new(0, 50, 0, 50)
-      fab.Position = UDim2.new(0, -15, 0.5, -25) -- dock at the left edge, peeking ~15px (magnet)
+      Create("UICorner", { CornerRadius = UDim.new(0, F.size / 2), Parent = fab })
+      fabImg = makeFabImg(F.size / 2); applyFabImage(fabImg)
+    else -- simple: F.simple square chevron tab, neutral surface (follows the mode)
+      fab.Size = UDim2.new(0, F.simple, 0, F.simple)
+      fab.Position = UDim2.new(0, -F.peek, 0.5, -F.simple / 2) -- dock at the left edge, peeking F.peek px (magnet)
       fab.BackgroundColor3 = theme.Colors.surface
-      Create("UICorner", { CornerRadius = UDim.new(0, 12), Parent = fab })
+      Create("UICorner", { CornerRadius = UDim.new(0, F.radius), Parent = fab })
       Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = fab })
       chev = Create("ImageLabel", { Name = "Chevron", BackgroundTransparency = 1, Size = UDim2.new(0, 24, 0, 24),
         Position = UDim2.new(0.5, -12, 0.5, -12), Parent = fab })
@@ -718,11 +780,11 @@ function Window.new(config)
     local pos = fabOpts.Position
     if type(pos) == "string" then
       if not FAB_ANCHORS[pos] then pos = defaultAnchor end
-      fab.Position = fabAnchorPos(pos, kind, fab.Size.X.Offset, fab.Size.Y.Offset)
+      fab.Position = fabAnchorPos(pos, kind, fab.Size.X.Offset, fab.Size.Y.Offset, F)
     elseif pos ~= nil then
       fab.Position = pos -- raw UDim2
     else
-      fab.Position = fabAnchorPos(defaultAnchor, kind, fab.Size.X.Offset, fab.Size.Y.Offset)
+      fab.Position = fabAnchorPos(defaultAnchor, kind, fab.Size.X.Offset, fab.Size.Y.Offset, F)
     end
     fabFullSize = fab.Size
 
@@ -732,10 +794,10 @@ function Window.new(config)
       if kind ~= "simple" then return end
       local vp = Overlay.get(gui).AbsoluteSize
       if not vp or vp.X <= 0 then return end
-      local w2 = (fabFullSize and fabFullSize.X.Offset) or 50
+      local w2 = (fabFullSize and fabFullSize.X.Offset) or F.simple
       local cx = fab.Position.X.Scale * vp.X + fab.Position.X.Offset + w2 / 2
       local ys, yo = fab.Position.Y.Scale, fab.Position.Y.Offset
-      local peek = 15 -- slide-out tab: dock to the edge, peeking ~15px
+      local peek = F.peek -- slide-out tab: dock to the edge, peeking F.peek px
       if cx < vp.X / 2 then
         chevDir = "chevron-right"; if chev then Icons.apply(chev, chevDir, theme.Colors.primary) end
         Animate.to(fab, 0.3, { Position = UDim2.new(0, -peek, ys, yo) }, Enum.EasingStyle.Quad)
@@ -775,7 +837,7 @@ function Window.new(config)
       if moved then moved = false; return end
       api:Toggle()
     end))
-    fabMaid:Give(themer.register(function()
+    fabMaid:Give(themer.register(function(reason)
       if kind == "circle" then
         fab.BackgroundColor3 = theme.Colors.primary
       else -- square + simple are neutral surface
@@ -783,8 +845,10 @@ function Window.new(config)
         local st = fab:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
         if chev then Icons.apply(chev, chevDir, theme.Colors.primary) end
       end
+      if fabImg and not hasImage then Icons.apply(fabImg, "gamepad-2", placeholderColor()) end
       if fabImg and fabAdaptive and hasImage then fabImg.ImageColor3 = theme.Colors.foreground end
-      if fabImg and fabImageModal then applyFabImage(fabImg) end   -- swap to the active-mode tile
+      -- swap to the active-mode tile; an accent change never changes the tile, so skip the fetch
+      if fabImg and fabImageModal and reason ~= "accent" then applyFabImage(fabImg) end
     end))
     local fabHover = false
     fabMaid:Give(fab.MouseEnter:Connect(function() fabHover = true; Animate.to(fabScale, "fast", { Scale = 1.06 }) end))
@@ -800,7 +864,7 @@ function Window.new(config)
     Safe.mutate(function()
       ensureFab()
       fab.Visible = true
-      fabScale.Scale = 0.6
+      fabScale.Scale = S.fab.popFrom
       Animate.toThen(fabScale, "slow", { Scale = 1 }, function()
         if fabSnap and fab:GetAttribute("FabType") == "simple" then fabSnap() end
       end, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
@@ -809,7 +873,7 @@ function Window.new(config)
   hideFab = function()
     Safe.mutate(function()
       if not fab or not fab.Visible then return end
-      Animate.toThen(fabScale, "fast", { Scale = 0.6 }, function()
+      Animate.toThen(fabScale, "fast", { Scale = S.fab.popFrom }, function()
         fab.Visible = false; fabScale.Scale = 1
       end)
     end)
@@ -850,13 +914,13 @@ function Window.new(config)
 
   -- resize via bottom-right grip. The small icon stays put; a transparent hit target sits
   -- on top of it, finger-sized on touch, so the corner is actually grabbable on mobile.
-  local grip = Create("ImageButton", {
+  grip = Create("ImageButton", {
     Name = "ResizeGrip", AutoButtonColor = false, BackgroundTransparency = 1,
     AnchorPoint = Vector2.new(1, 1), Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(1, -2, 1, -2),
     ZIndex = 50, Parent = main,
   })
-  Icons.apply(grip, "move-diagonal-2", theme.Colors.mutedForeground)
-  local gripHitPx = Device.IsTouch() and 44 or 22
+  Icons.apply(grip, "move-diagonal-2", theme.Colors[theme.Icon.structural])
+  local gripHitPx = Device.IsTouch() and S.touchHit or 22
   local resizeHit = Create("ImageButton", {
     Name = "ResizeHit", AutoButtonColor = false, BackgroundTransparency = 1,
     AnchorPoint = Vector2.new(1, 1), Size = UDim2.new(0, gripHitPx, 0, gripHitPx), Position = UDim2.new(1, 0, 1, 0),

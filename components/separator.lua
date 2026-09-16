@@ -10,13 +10,15 @@ function Separator.new(opts)
   local frame = Create("Frame", {
     Name = "Separator",
     BackgroundColor3 = theme.Colors.border,
+    BackgroundTransparency = theme.Stroke.divider,   -- divider alpha role, shared with accordion/table rules
     BorderSizePixel = 0,
     Size = UDim2.new(1, 0, 0, 1),
     LayoutOrder = opts.LayoutOrder or 0,
     Parent = opts.Parent,
   })
-  if opts.AccentReg then opts.AccentReg(function() frame.BackgroundColor3 = theme.Colors.border end) end
-  return { Frame = frame, Destroy = function() frame:Destroy() end }
+  -- keep the unregister so Destroy drops the closure (one used to leak per destroyed separator)
+  local unreg = opts.AccentReg and opts.AccentReg(function() frame.BackgroundColor3 = theme.Colors.border end)
+  return { Frame = frame, Destroy = function() if unreg then unreg() end; frame:Destroy() end }
 end
 
 return Separator

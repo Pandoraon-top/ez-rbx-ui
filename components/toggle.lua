@@ -25,18 +25,17 @@ function Toggle.new(opts)
     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX,
       top = hasDesc and 8 or 0, bottom = hasDesc and 8 or 0 }),
   })
-  Create("TextLabel", {
+  Create.text(Create("TextLabel", {
     Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Toggle",
     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-    TextSize = theme.Font.label.Size, Font = Enum.Font.BuilderSans,
     Size = UDim2.new(1, -54, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn,
-  })
+  }), theme, "label")
   if hasDesc then
-    Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+    Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
       TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-      TextYAlignment = Enum.TextYAlignment.Top, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
-      Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -54, 0, 18), Parent = btn })
+      TextYAlignment = Enum.TextYAlignment.Top,
+      Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -54, 0, 18), Parent = btn }), theme, "muted")
   end
   local track = Create("Frame", {
     Name = "Track", BackgroundColor3 = theme.Colors.switchTrackOff, BorderSizePixel = 0,

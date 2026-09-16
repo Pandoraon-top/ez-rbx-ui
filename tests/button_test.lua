@@ -64,6 +64,15 @@ h.describe("button", function()
     h.expect(b.Frame.Size.X.Scale).toBe(1)
     h.expect(b.Frame.AutomaticSize.Name).toBe("None")
   end)
+  h.it("Label carries the theme label role in both layouts (1.2)", function()
+    for _, auto in ipairs({ false, true }) do
+      local b = Button.new({ Parent = Create("Frame", {}), Text = "Go", AutoWidth = auto })
+      local label = b.Frame:FindFirstChild("Surface"):FindFirstChild("Label")
+      h.expect(label.TextSize).toBe(R.Theme.Font.label.Size)
+      h.expect(label.Font).toBe(h.roblox.Enum.Font.BuilderSans)
+      h.expect(label.FontFace.Weight).toBe(R.Theme.Font.label.Weight)
+    end
+  end)
 end)
 
 h.run()

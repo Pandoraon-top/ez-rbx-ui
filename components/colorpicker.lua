@@ -42,15 +42,16 @@ function ColorPicker.new(opts)
   local btn = Create("TextButton", { Name = "ColorPicker", AutoButtonColor = false, Text = "",
     BackgroundColor3 = theme.Colors.surface, Size = UDim2.new(1, 0, 0, hasDesc and 50 or 34), LayoutOrder = opts.LayoutOrder or 0,
     Parent = opts.Parent, Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
-  Create("TextLabel", { Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Color",
-    TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left, TextSize = theme.Font.label.Size,
-    TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center, Font = Enum.Font.BuilderSans,
-    Position = UDim2.new(0, 0, 0, hasDesc and 8 or 0), Size = UDim2.new(1, -40, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn })
+  Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Color",
+    TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+    Position = UDim2.new(0, 0, 0, hasDesc and 8 or 0), Size = UDim2.new(1, -40, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn }),
+    theme, "label")
   if hasDesc then
-    Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+    Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
       TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-      TextYAlignment = Enum.TextYAlignment.Top, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
-      Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, -40, 0, 18), Parent = btn })
+      TextYAlignment = Enum.TextYAlignment.Top,
+      Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, -40, 0, 18), Parent = btn }), theme, "muted")
   end
   local swatch = Create("Frame", { Name = "Swatch", BackgroundColor3 = color, BorderSizePixel = 0,
     Size = UDim2.new(0, 28, 0, 18), Position = UDim2.new(1, -28, 0.5, -9), Parent = btn, Create.corner(theme.Radius.sm) })
@@ -69,7 +70,7 @@ function ColorPicker.new(opts)
     popover = Create("Frame", { Name = "ColorPopover", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
       Position = UDim2.new(0, ap and ap.X or 0, 0, (ap and ap.Y or 0) + 36), Size = UDim2.new(0, 180, 0, 152),
       ZIndex = 1001, Create.corner(theme.Radius.md), Create.padding({ all = 8 }) })
-    Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = popover })
+    Create.stroke(theme.Colors.border, 1, theme.Stroke.floating).Parent = popover -- floating surface: opaque hairline (1.5)
 
     -- SV square: hue-colored base + white(sat) overlay + black(value) overlay
     local sv = Create("ImageButton", { Name = "SV", AutoButtonColor = false,

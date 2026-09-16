@@ -4,7 +4,6 @@
 local Notification = {}
 local Create, DefaultTheme, Maid, Overlay, Animate, Icons, Safe
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local container
 local order = {}   -- array of entries (oldest first, newest last)
 local seq = 0
@@ -15,6 +14,11 @@ function Notification.Init(R)
   Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Animate = R.Animate; Icons = R.Icons
   Safe = R.Safe
   container = nil
+  -- Init is re-entrant (the test harness re-runs it per loadLib): drop the previous Heartbeat
+  -- countdown so a fresh container never runs two tickers over the same `order`.
+  if stepConn then stepConn:Disconnect() end
+  stepConn = nil
+  expanded = false
 end
 
 local enabled = true
@@ -136,6 +140,10 @@ end
 
 local function indexOf(id) for i, e in ipairs(order) do if e.id == id then return i end end end
 
+-- Semantic accent for a toast type, read from the LIVE palette so a reskin picks up the mode's
+-- colour (the four type tokens are mode-invariant today, but a theme override may change them).
+local function accentFor(theme, ty) return theme.Colors[TYPE_COLOR[ty]] or theme.Colors.info end
+
 local function startCountdown(entry, total, accent, theme)
   local bar = Create("Frame", { Name = "Progress", BackgroundColor3 = accent, BorderSizePixel = 0,
     Size = UDim2.new(1, 0, 0, 3), LayoutOrder = 99, Parent = entry.frame, Create.corner(2) })
@@ -143,10 +151,37 @@ local function startCountdown(entry, total, accent, theme)
 end
 
 local function createMsgLabel(text, theme, parent)
-  return Create("TextLabel", { Name = "Message", BackgroundTransparency = 1, Text = text,
+  local lbl = Create("TextLabel", { Name = "Message", BackgroundTransparency = 1, Text = text,
     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-    TextYAlignment = Enum.TextYAlignment.Top, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
+    TextYAlignment = Enum.TextYAlignment.Top,
     Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, Parent = parent })
+  return Create.text(lbl, theme, "muted")
+end
+
+-- Stop the loader spin (if any); Animate.spin's Cancel rests the glyph at Rotation 0.
+local function stopSpin(entry)
+  if entry.spin then entry.spin.Cancel(); entry.spin = nil end
+end
+
+-- Live re-skin (SetMode/SetAccent): every coloured part re-reads theme.Colors. Parts that
+-- applyUpdate creates or replaces later (Message, Progress) are read off the entry at call time.
+local function reskin(entry)
+  local theme = entry.theme
+  local accent = accentFor(theme, entry.type)
+  entry.accent = accent
+  entry.frame.BackgroundColor3 = theme.Colors.card
+  if entry.stroke then entry.stroke.Color = theme.Colors.border end
+  entry.titleLabel.TextColor3 = theme.Colors.foreground
+  if entry.msgLabel then entry.msgLabel.TextColor3 = theme.Colors.mutedForeground end
+  if entry.closeBtn then Icons.apply(entry.closeBtn, "x", theme.Colors.primary) end
+  if entry.actionBtn then
+    entry.actionBtn.BackgroundColor3 = theme.Colors.surface
+    entry.actionBtn.TextColor3 = theme.Colors.foreground
+  end
+  if entry.bar then entry.bar.BackgroundColor3 = accent end
+  -- Icons.apply only rewrites ImageColor3 when the glyph is unchanged, so a spinning loader is
+  -- retinted without touching its Rotation.
+  if entry.icon then Icons.apply(entry.icon, TYPE_ICON[entry.type] or "info", accent) end
 end
 
 local function msgText(v, arg)
@@ -166,7 +201,8 @@ function Notification.show(opts)
   local entry = { id = id, onDismiss = opts.OnDismiss }
   order[#order + 1] = entry           -- reserve FIFO slot synchronously
   Safe.mutate(function()
-    local accent = theme.Colors[TYPE_COLOR[opts.Type or "info"]] or theme.Colors.info
+    local ty = opts.Type or "info"
+    local accent = accentFor(theme, ty)
     ensureContainer()
     local pcfg = POS[position] or POS["bottom-right"]
     local sx = (pcfg.ax == 1 and UDim.new(1, 320)) or (pcfg.ax == 0 and UDim.new(0, -320)) or UDim.new(0.5, 0)
@@ -179,7 +215,9 @@ function Notification.show(opts)
       Create.corner(theme.Radius.md), Create.padding({ all = 10 }),
       Create.listLayout({ Padding = 4 }),
     })
-    Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = toast })
+    -- floating surface: opaque hairline (Stroke.floating), same border token as every other stroke
+    local stroke = Create.stroke(theme.Colors.border, 1, theme.Stroke.floating)
+    stroke.Parent = toast
     local scale = Instance.new("UIScale"); scale.Parent = toast
     toast:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
       -- property-changed handler -> engine thread without GUI capability on strict executors; relayout
@@ -192,10 +230,12 @@ function Notification.show(opts)
       Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 1, Parent = toast })
     local tIcon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
       Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(0, 0, 0.5, -8), Parent = titleRow })
-    Icons.apply(tIcon, TYPE_ICON[opts.Type or "info"] or "info", accent)
+    Icons.apply(tIcon, TYPE_ICON[ty] or "info", accent)
     local titleLabel = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "",
-      TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left, TextSize = theme.Font.label.Size,
-      Font = Enum.Font.BuilderSans, Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 24, 0, 0), Parent = titleRow })
+      TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+      TextTruncate = Enum.TextTruncate.AtEnd,
+      Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 24, 0, 0), Parent = titleRow })
+    Create.text(titleLabel, theme, "label")
     local closeBtn = Create("ImageButton", { Name = "Close", AutoButtonColor = false, BackgroundTransparency = 1,
       Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -14, 0, 0), Parent = titleRow })
     Icons.apply(closeBtn, "x", theme.Colors.primary)
@@ -204,26 +244,28 @@ function Notification.show(opts)
     if opts.Message then
       msgLabel = createMsgLabel(opts.Message, theme, toast)
     end
+    local aBtn
     if opts.Action then
       local act = opts.Action
-      local aBtn = Create("TextButton", { Name = "Action", AutoButtonColor = false,
+      aBtn = Create("TextButton", { Name = "Action", AutoButtonColor = false,
         BackgroundColor3 = theme.Colors.surface, Text = act.Text or act.Label or "Action",
-        TextColor3 = theme.Colors.foreground, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
+        TextColor3 = theme.Colors.foreground,
         Size = UDim2.new(0, 96, 0, 24), LayoutOrder = 3, Parent = toast, Create.corner(theme.Radius.sm) })
+      Create.text(aBtn, theme, "muted")
       aBtn.MouseButton1Click:Connect(function() if act.Callback then pcall(act.Callback) end; Notification.dismiss(id) end)
     end
-    entry.frame = toast; entry.scale = scale
-    entry.icon = tIcon; entry.titleLabel = titleLabel; entry.theme = theme
-    entry.type = opts.Type or "info"; entry.accent = accent
+    entry.frame = toast; entry.scale = scale; entry.stroke = stroke
+    entry.icon = tIcon; entry.titleLabel = titleLabel; entry.closeBtn = closeBtn; entry.actionBtn = aBtn
+    entry.theme = theme
+    entry.type = ty; entry.accent = accent
     entry.msgLabel = msgLabel
-    if entry.type == "loading" then
-      entry.spinTween = TweenService:Create(tIcon,
-        TweenInfo.new(0.8, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Rotation = 360 })
-      entry.spinTween:Play()
-    end
+    if entry.type == "loading" then entry.spin = Animate.spin(tIcon) end
     if entry.type ~= "loading" and (opts.Duration or 4000) > 0 then
       startCountdown(entry, (opts.Duration or 4000) / 1000, accent, theme)
     end
+    -- A live toast follows SetMode/SetAccent through the window's themer; released in dismiss.
+    -- Registered after the build so the closure never sees a half-built toast.
+    if opts.AccentReg then entry.unreg = opts.AccentReg(function() reskin(entry) end) end
     Animate.pop(toast, "base")
     Notification.relayout()
     if entry.pendingUpdate then applyUpdate(entry, entry.pendingUpdate); entry.pendingUpdate = nil end
@@ -240,12 +282,14 @@ end
 applyUpdate = function(entry, opts)
   local theme = entry.theme
   local newType = opts.Type or entry.type
-  local accent = theme.Colors[TYPE_COLOR[newType]] or theme.Colors.info
+  local accent = accentFor(theme, newType)
   entry.type = newType; entry.accent = accent
-  if entry.spinTween then entry.spinTween:Cancel(); entry.spinTween = nil end
+  -- Cancel BEFORE re-applying the glyph: Cancel rests Rotation at 0 so the new (static) icon
+  -- never lands mid-spin. A morph back to 'loading' restarts the spin.
+  stopSpin(entry)
   if entry.icon then
-    entry.icon.Rotation = 0
     Icons.apply(entry.icon, TYPE_ICON[newType] or "info", accent)
+    if newType == "loading" then entry.spin = Animate.spin(entry.icon) end
   end
   if opts.Title ~= nil and entry.titleLabel then entry.titleLabel.Text = opts.Title end
   if opts.Message ~= nil then
@@ -294,7 +338,7 @@ function Notification.promise(runner, opts)
     if opts.Finally then pcall(opts.Finally) end
   end)
   local id = Notification.loading({
-    Title = msgText(opts.Loading) or "Loading…", Message = opts.Message, Theme = opts.Theme })
+    Title = msgText(opts.Loading) or "Loading…", Message = opts.Message, Theme = opts.Theme, AccentReg = opts.AccentReg })
   pendingId = id
   return id
 end
@@ -304,8 +348,11 @@ function Notification.dismiss(id)
   if not i then return end
   local entry = table.remove(order, i)
   if entry.onDismiss then pcall(entry.onDismiss) end
+  -- Same Safe queue as the build, so a dismiss issued before a deferred build still runs after it
+  -- (FIFO) and releases the themer registration + spin the build created.
   Safe.mutate(function()
-    if entry.spinTween then entry.spinTween:Cancel(); entry.spinTween = nil end
+    stopSpin(entry)
+    if entry.unreg then entry.unreg(); entry.unreg = nil end
     if entry.frame then entry.frame:Destroy() end
     Notification.relayout()
   end)

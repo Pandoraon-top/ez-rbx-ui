@@ -32,18 +32,19 @@ function Slider.new(opts)
     Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = padY, bottom = padY }) })
   local valueLabel
   if opts.Text then
-    Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
+    -- Title is the row label (14, Medium) like every other row; the 16px slot and the track
+    -- offset are pinned geometry (theme_test), so only the type role changes.
+    Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
       TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-      TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans, Size = UDim2.new(1, -40, 0, 16), Parent = root })
-    valueLabel = Create("TextLabel", { Name = "Value", BackgroundTransparency = 1, Text = "0",
+      Size = UDim2.new(1, -40, 0, 16), Parent = root }), theme, "label")
+    valueLabel = Create.text(Create("TextLabel", { Name = "Value", BackgroundTransparency = 1, Text = "0",
       TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Right,
-      TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans, Size = UDim2.new(0, 40, 0, 16),
-      Position = UDim2.new(1, -40, 0, 0), Parent = root })
+      Size = UDim2.new(0, 40, 0, 16), Position = UDim2.new(1, -40, 0, 0), Parent = root }), theme, "muted")
     if hasDesc then
-      Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+      Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
         TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-        TextYAlignment = Enum.TextYAlignment.Top, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
-        Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -40, 0, 18), Parent = root })
+        TextYAlignment = Enum.TextYAlignment.Top,
+        Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -40, 0, 18), Parent = root }), theme, "muted")
     end
   end
   local track = Create("Frame", { Name = "Track", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,

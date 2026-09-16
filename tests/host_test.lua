@@ -63,4 +63,43 @@ h.describe("host wiring", function()
   end)
 end)
 
+h.describe("Host.own", function()
+  h.it("gives fn to control.Maid when the control has one", function()
+    local m = R.Maid.new(); local ran = 0
+    local control = { Maid = m }
+    R.Host.own(control, function() ran = ran + 1 end)
+    h.expect(ran).toBe(0)
+    m:DoCleanup()
+    h.expect(ran).toBe(1)
+  end)
+  h.it("wraps Destroy so fn runs first, then the original, and passes the return through", function()
+    local order = {}
+    local control = { Destroy = function() order[#order + 1] = "destroy"; return "ret" end }
+    R.Host.own(control, function() order[#order + 1] = "fn" end)
+    local r = control.Destroy()
+    h.expect(r).toBe("ret")
+    h.expect(order[1]).toBe("fn")
+    h.expect(order[2]).toBe("destroy")
+  end)
+  h.it("installs a Destroy when the control has none", function()
+    local ran = 0
+    local control = {}
+    R.Host.own(control, function() ran = ran + 1 end)
+    control.Destroy()
+    h.expect(ran).toBe(1)
+  end)
+  h.it("LockScrim recolours on SetMode and uses the scrim alpha token", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local tab = w:AddTab({ Name = "T" })
+    local lbl = tab:AddLabel("x")
+    local scrim = lbl.Frame:FindFirstChild("LockScrim")
+    h.expect(scrim.BackgroundTransparency).toBe(R.Theme.Opacity.scrim)
+    w:SetMode("light")
+    h.expect(scrim.BackgroundColor3).toBe(R.Theme.PALETTES.light.background)
+    w:SetMode("dark")
+    h.expect(scrim.BackgroundColor3).toBe(R.Theme.PALETTES.dark.background)
+  end)
+end)
+
 h.run()

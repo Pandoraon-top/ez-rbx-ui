@@ -22,6 +22,22 @@ local SIMPLE = {
   AddCard = { mod = "Card" },
 }
 
+-- Tie a cleanup fn to a control's lifetime. Controls that expose a Maid (Tab/Accordion/Window)
+-- take it directly; the rest (Button/Label/Image/ProgressBar/Separator/Card...) only have Destroy,
+-- so it is wrapped to run fn FIRST and then the original. Used for per-control reskin
+-- unregisters (LockScrim here; tooltip / disabled in later items) so a destroyed control never
+-- leaves a closure behind in the window's themer.
+function Host.own(control, fn)
+  if type(fn) ~= "function" then error("Host.own(control, fn): fn must be a function", 2) end
+  if control.Maid then control.Maid:Give(fn); return control end
+  local d = control.Destroy
+  control.Destroy = function(...)
+    fn()
+    if d then return d(...) end
+  end
+  return control
+end
+
 -- ctx = { R, content, theme, config, window, nextOrder }
 function Host.attach(api, ctx)
   for method, spec in pairs(SIMPLE) do
@@ -56,11 +72,16 @@ function Host.attach(api, ctx)
       if control and control.Frame then
         local C = ctx.R.Create
         local scrim = C("Frame", { Name = "LockScrim", BackgroundColor3 = ctx.theme.Colors.background,
-          BackgroundTransparency = 0.45, BorderSizePixel = 0, Visible = false, ZIndex = 50,
+          BackgroundTransparency = ctx.theme.Opacity.scrim, BorderSizePixel = 0, Visible = false, ZIndex = 50,
           Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame, C.corner(ctx.theme.Radius.md) })
         local shield = C("ImageButton", { Name = "LockShield", AutoButtonColor = false, BackgroundTransparency = 1,
           Active = true, Visible = false, ZIndex = 51, Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame })
         control.SetLocked = function(b) local v = b and true or false; ctx.R.Safe.mutate(function() scrim.Visible = v; shield.Visible = v end) end
+        -- the scrim is chrome-coloured, so it must follow SetMode; owned by the control so a
+        -- destroyed control takes its closure with it
+        if ctx.accentThemer then
+          Host.own(control, ctx.accentThemer.register(function() scrim.BackgroundColor3 = ctx.theme.Colors.background end))
+        end
         if opts.Locked then control.SetLocked(true) end
         if ctx.registerControl then ctx.registerControl(control) end
       end

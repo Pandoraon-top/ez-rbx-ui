@@ -1,7 +1,11 @@
 -- Deps injected via Init(R).
 local Table = {}
-local Create, DefaultTheme, Maid, Safe
-function Table.Init(R) Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Safe = R.Safe end
+local Create, DefaultTheme, Maid, Safe, Recipes
+function Table.Init(R) Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Safe = R.Safe; Recipes = R.Recipes end
+
+-- Row geometry (today's literals): 24px rows, Body starts 2px under the header so the 1px
+-- HeaderRule sits in that gap; cells inset 4px so header text lines up with body cells.
+local ROW_H, BODY_Y, CELL_INSET = 24, 26, 4
 
 function Table.new(opts)
   opts = opts or {}
@@ -10,30 +14,39 @@ function Table.new(opts)
   local cols = opts.Columns or {}
 
   local root = Create("Frame", { Name = "Table", BackgroundTransparency = 1,
-    Size = UDim2.new(1, 0, 0, (opts.Height or 120) + 26), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
+    Size = UDim2.new(1, 0, 0, (opts.Height or 120) + BODY_Y), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
 
   local function makeRow(parent, cells, header, order)
     local row = Create("Frame", { Name = header and "Header" or "Row",
       BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = header and 1 or 0,
-      Size = UDim2.new(1, 0, 0, 24), LayoutOrder = order or 0, Parent = parent,
-      Create.corner(header and 0 or theme.Radius.sm),
-      Create.listLayout({ Padding = 4, FillDirection = Enum.FillDirection.Horizontal }) })
+      Size = UDim2.new(1, 0, 0, ROW_H), LayoutOrder = order or 0, Parent = parent,
+      Create.corner(header and 0 or theme.Radius.xs),
+      Create.listLayout({ Padding = CELL_INSET, FillDirection = Enum.FillDirection.Horizontal }) })
+    -- the header sits on the root while body rows sit inside Body's padding: inset it the same
+    if header then Create.padding({ left = CELL_INSET, right = CELL_INSET }).Parent = row end
     for i, text in ipairs(cells) do
-      local cell = Create("TextLabel", { Name = "Cell", BackgroundTransparency = 1, Text = tostring(text),
+      local cell = Create.text(Create("TextLabel", { Name = "Cell", BackgroundTransparency = 1, Text = tostring(text),
         TextColor3 = header and theme.Colors.mutedForeground or theme.Colors.foreground,
-        TextXAlignment = Enum.TextXAlignment.Left, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
-        Size = UDim2.new(0, 0, 1, 0), LayoutOrder = i, Parent = row })
+        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+        Size = UDim2.new(0, 0, 1, 0), LayoutOrder = i, Parent = row }), theme, "muted")
+      -- header keeps the muted size but reads Medium (plan 1.2); nil-safe where Font.fromName is absent
+      local face = header and theme.FontFace and theme.FontFace(Enum.FontWeight.Medium)
+      if face then cell.FontFace = face end
       Create("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill, Parent = cell })
     end
     return row
   end
 
   makeRow(root, cols, true, 0)
+  local rule = Create("Frame", { Name = "HeaderRule", BackgroundColor3 = theme.Colors.border,
+    BackgroundTransparency = theme.Stroke.divider, BorderSizePixel = 0,
+    Position = UDim2.new(0, 0, 0, BODY_Y - 1), Size = UDim2.new(1, 0, 0, 1), Parent = root })
   local body = Create("ScrollingFrame", { Name = "Body", BackgroundColor3 = theme.Colors.surface,
     BackgroundTransparency = 0.5, BorderSizePixel = 0,
-    ScrollBarThickness = 3, Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, 0, 1, -26),
+    Position = UDim2.new(0, 0, 0, BODY_Y), Size = UDim2.new(1, 0, 1, -BODY_Y),
     AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(0, 0, 0, 0), Parent = root,
-    Create.corner(theme.Radius.sm), Create.padding({ all = 4 }), Create.listLayout({ Padding = 2 }) })
+    Create.corner(theme.Radius.sm), Create.padding({ all = CELL_INSET }), Create.listLayout({ Padding = 2 }) })
+  Recipes.scrollbar(body, theme)
 
   local order = 0
   local api = { Frame = root, Body = body }
@@ -58,6 +71,8 @@ function Table.new(opts)
 
   if opts.AccentReg then maid:Give(opts.AccentReg(function()
     body.BackgroundColor3 = theme.Colors.surface
+    Recipes.scrollbar(body, theme)                 -- scrollbar tint follows the border token
+    rule.BackgroundColor3 = theme.Colors.border
     local header = root:FindFirstChild("Header")
     if header then for _, c in ipairs(header:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.mutedForeground end end end
     for _, row in ipairs(body:GetChildren()) do

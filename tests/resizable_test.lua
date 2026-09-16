@@ -28,5 +28,32 @@ h.describe("resizable", function()
     uis.InputChanged:Fire({ UserInputType = h.roblox.Enum.UserInputType.MouseMovement, Position = h.roblox.Vector2.new(120, 80) })
     h.expect(rz.Panes[1].Frame.Size.X.Scale > 0.5).toBeTruthy()
   end)
+  h.it("grip icon rests on the structural icon token, lifts to foreground on hover", function()
+    local rz = Resizable.new({ Parent = Create("Frame", {}), Panes = { {}, {} } })
+    local handle; for _, c in ipairs(rz.Frame:GetChildren()) do if c.Name == "Handle" then handle = c end end
+    local icon = handle:FindFirstChild("Grip"):FindFirstChildOfClass("ImageLabel")
+    h.expect(icon.ImageColor3).toBe(R.Theme.Colors[R.Theme.Icon.structural])
+    handle.MouseEnter:Fire()
+    h.expect(icon.ImageColor3).toBe(R.Theme.Colors[R.Theme.Icon.structuralActive])
+    handle.MouseLeave:Fire()
+    h.expect(icon.ImageColor3).toBe(R.Theme.Colors[R.Theme.Icon.structural])
+  end)
+  h.it("reskin closure recolours the grip stroke and re-derives the icon from hover state", function()
+    local fns = {}
+    local themer = { register = function(fn) fns[#fns + 1] = fn; return function() end end }
+    local rz = Resizable.new({ Parent = Create("Frame", {}), Panes = { {}, {} }, AccentThemer = themer })
+    local handle; for _, c in ipairs(rz.Frame:GetChildren()) do if c.Name == "Handle" then handle = c end end
+    local grip = handle:FindFirstChild("Grip")
+    local st = grip:FindFirstChildOfClass("UIStroke")
+    local icon = grip:FindFirstChildOfClass("ImageLabel")
+    local other = h.roblox.Color3.fromRGB(1, 2, 3)
+    st.Color = other; icon.ImageColor3 = other
+    for _, fn in ipairs(fns) do fn("mode") end
+    h.expect(st.Color).toBe(R.Theme.Colors.border)
+    h.expect(icon.ImageColor3).toBe(R.Theme.Colors[R.Theme.Icon.structural])
+    handle.MouseEnter:Fire(); icon.ImageColor3 = other
+    for _, fn in ipairs(fns) do fn("mode") end
+    h.expect(icon.ImageColor3).toBe(R.Theme.Colors[R.Theme.Icon.structuralActive])
+  end)
 end)
 h.run()

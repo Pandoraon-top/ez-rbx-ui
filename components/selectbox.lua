@@ -1,12 +1,11 @@
 -- Deps injected via Init(R).
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local SelectBox = {}
-local Create, DefaultTheme, Animate, Maid, Icons, Overlay, Flag, Safe
+local Create, DefaultTheme, Animate, Maid, Icons, Overlay, Flag, Safe, Recipes
 
 function SelectBox.Init(R)
   Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid
-  Icons = R.Icons; Overlay = R.Overlay; Flag = R.Flag; Safe = R.Safe
+  Icons = R.Icons; Overlay = R.Overlay; Flag = R.Flag; Safe = R.Safe; Recipes = R.Recipes
 end
 
 local function contains(arr, v) for _, x in ipairs(arr) do if x == v then return true end end return false end
@@ -45,6 +44,7 @@ function SelectBox.new(opts)
   local value = multi and (opts.Default or {}) or (opts.Default ~= nil and opts.Default or firstValue())
   local dropdown
   local posConn -- repositions the open dropdown when the control scrolls
+  local searchFocus -- focus ring of the dropdown search; torn down with the dropdown
   local optButtons = {} -- { { btn = TextButton, text = optionName } } for live search
   local buildDropdown, rebuild, computePos, refresh
   local onChanged = opts.Callback
@@ -79,17 +79,18 @@ function SelectBox.new(opts)
     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }),
   })
   if opts.Text then
-    Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
+    local title = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
       TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
       TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-      TextSize = theme.Font.label.Size, Font = Enum.Font.BuilderSans,
       Position = UDim2.new(0, 0, 0, hasDesc and 8 or 0),
       Size = UDim2.new(0.5, -8, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn })
+    Create.text(title, theme, "label")
     if hasDesc then
-      Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+      local desc = Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
         TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-        TextYAlignment = Enum.TextYAlignment.Top, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
+        TextYAlignment = Enum.TextYAlignment.Top,
         Position = UDim2.new(0, 0, 0, 28), Size = UDim2.new(0.5, -8, 0, 18), Parent = btn })
+      Create.text(desc, theme, "muted")
     end
   end
   -- flip-aware, viewport-clamped dropdown position for the current control bounds
@@ -108,17 +109,39 @@ function SelectBox.new(opts)
     Size = opts.Text and UDim2.new(0.5, -4, 0, 26) or UDim2.new(1, 0, 0, 26),
     Position = opts.Text and UDim2.new(0.5, 4, 0.5, -13) or UDim2.new(0, 0, 0.5, -13),
     Parent = btn, Create.corner(theme.Radius.sm) })
-  Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = field })
+  local fieldStroke = Create.stroke(theme.Colors.border, 1); fieldStroke.Parent = field
   local valueLabel = Create("TextLabel", { Name = "Value", BackgroundTransparency = 1, Text = display(),
     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-    TextSize = theme.Font.body.Size, Font = Enum.Font.BuilderSans,
     -- a long value must end with "…" inside the label, not overflow under the caret (a TextLabel does
     -- NOT clip its own text to its bounds; relayout() keeps the label's width clear of the caret).
     TextTruncate = Enum.TextTruncate.AtEnd,
     Size = UDim2.new(1, -24, 1, 0), Position = UDim2.new(0, 8, 0, 0), Parent = field })
+  Create.text(valueLabel, theme, "body")
+
+  -- The caret is a structural glyph: it rests at Icon.structural and lifts to structuralActive
+  -- while the dropdown is open; disabled always mutes it. Both flags live here so caretColor()
+  -- and fieldStrokeColor() re-derive from state alone (the themer closure calls them by name).
+  local disabled, open = false, false
+  local function caretColor()
+    if disabled then return theme.Colors.mutedForeground end
+    return theme.Colors[open and theme.Icon.structuralActive or theme.Icon.structural]
+  end
   local caret = Create("ImageLabel", { Name = "Caret", BackgroundTransparency = 1,
     Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -20, 0.5, -7), Parent = field })
-  Icons.apply(caret, "chevron-down", theme.Colors.primary)
+  Icons.apply(caret, "chevron-down", caretColor())
+  -- Field ring while open: the one source of the stroke colour, shared with the themer closure;
+  -- the focus recipe owns Thickness (1 <-> Stroke.focusThickness) and is driven by set() since a
+  -- Frame has no focus event of its own.
+  local function fieldStrokeColor() return open and theme.Colors.ring or theme.Colors.border end
+  local fieldFocus = Recipes.focus(fieldStroke, field, fieldStrokeColor, { theme = theme })
+  maid:Give(fieldFocus.disconnect)
+  local function setOpen(b)
+    b = b and true or false
+    if open == b then return end
+    open = b
+    Icons.tint(caret, caretColor())
+    fieldFocus.set(open)
+  end
 
   local fieldIcon = Create("ImageLabel", { Name = "FieldIcon", BackgroundTransparency = 1, Visible = false,
     Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 8, 0.5, -7), Parent = field })
@@ -141,29 +164,27 @@ function SelectBox.new(opts)
     valueLabel.Size = UDim2.new(1, -(left + right), 1, 0)
   end
 
-  local disabled = false
+  -- Colours derived from the disabled flag, painted instantly; the themer closure replays this
+  -- after a mode/accent change, while setDisabled adds the caret tween for the state change.
+  local function paintDisabled()
+    valueLabel.TextColor3 = disabled and theme.Colors.mutedForeground or theme.Colors.foreground
+    field.BackgroundTransparency = disabled and 0.4 or 0
+  end
   local function setDisabled(b)
     disabled = b and true or false
-    Safe.mutate(function()
-      valueLabel.TextColor3 = disabled and theme.Colors.mutedForeground or theme.Colors.foreground
-      Icons.apply(caret, "chevron-down", disabled and theme.Colors.mutedForeground or theme.Colors.primary)
-      field.BackgroundTransparency = disabled and 0.4 or 0
-    end)
+    Safe.mutate(function() paintDisabled(); Icons.tint(caret, caretColor()) end)
   end
 
   local loading = false
-  local spinTween
+  local spin -- Animate.spin handle while loading; Cancel rests the glyph at Rotation 0
+  local function stopSpin() if spin then spin.Cancel(); spin = nil end end
   local function setLoading(b)
     loading = b and true or false
     Safe.mutate(function()
       caret.Visible = not loading
       spinner.Visible = loading
-      if spinTween then spinTween:Cancel(); spinTween = nil end
-      if loading then
-        spinTween = TweenService:Create(spinner,
-          TweenInfo.new(0.8, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Rotation = 360 })
-        spinTween:Play()
-      end
+      stopSpin()
+      if loading then spin = Animate.spin(spinner) end
       refresh()
       if dropdown then rebuild() end
     end)
@@ -282,7 +303,7 @@ function SelectBox.new(opts)
       ClipsDescendants = true, ZIndex = 1001,
       Create.corner(theme.Radius.md),
     })
-    Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = dropdown })
+    local ddStroke = Create.stroke(theme.Colors.border, 1, theme.Stroke.floating); ddStroke.Parent = dropdown -- floating surface: opaque hairline (1.5)
 
     -- sticky search box (filters options live) — only for longer lists, or when forced
     local listTop = 4
@@ -293,8 +314,16 @@ function SelectBox.new(opts)
         Create.corner(theme.Radius.sm), Create.padding({ left = 8, right = 8 }) })
       local searchInput = Create("TextBox", { Name = "Input", BackgroundTransparency = 1, Text = "",
         PlaceholderText = "Search…", PlaceholderColor3 = theme.Colors.mutedForeground, TextColor3 = theme.Colors.foreground,
-        TextXAlignment = Enum.TextXAlignment.Left, TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
+        TextXAlignment = Enum.TextXAlignment.Left,
         ClearTextOnFocus = false, ZIndex = 1003, Size = UDim2.new(1, 0, 1, 0), Parent = searchBox })
+      Create.text(searchInput, theme, "muted")
+      -- Hairline at Stroke.search (as the sidebar search) that thickens into the ring while typing.
+      -- A ring at the hairline's alpha would barely read, so the alpha follows focus as well.
+      local restAlpha = theme.modeVal(theme, theme.Stroke.search)
+      local searchStroke = Create.stroke(theme.Colors.border, 1, restAlpha); searchStroke.Parent = searchBox
+      searchFocus = Recipes.focus(searchStroke, searchInput, function(focused)
+        return focused and theme.Colors.ring or theme.Colors.border
+      end, { theme = theme, restAlpha = restAlpha })   -- the recipe fades the hairline to opaque while focused
       searchInput:GetPropertyChangedSignal("Text"):Connect(function() Safe.mutate(function() api.Filter(searchInput.Text) end) end)
     end
 
@@ -311,10 +340,10 @@ function SelectBox.new(opts)
     })
 
     if loading then
-      Create("TextLabel", { Name = "Loading", BackgroundTransparency = 1, Text = "Loading…", ZIndex = 1002,
+      local row = Create("TextLabel", { Name = "Loading", BackgroundTransparency = 1, Text = "Loading…", ZIndex = 1002,
         TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Center,
-        TextSize = theme.Font.body.Size, Font = Enum.Font.BuilderSans,
         Size = UDim2.new(1, 0, 0, 26), LayoutOrder = 1, Parent = list })
+      Create.text(row, theme, "body")
     else
     for i, raw in ipairs(options) do
       local e = normOpt(raw)
@@ -339,16 +368,16 @@ function SelectBox.new(opts)
           Icons.apply(lead, e.icon, theme.Colors.foreground)
           textX = 40
         end
-        Create("TextLabel", { Name = "OptLabel", BackgroundTransparency = 1, Text = e.label or tostring(e.value), ZIndex = 1003,
-          TextColor3 = theme.Colors.foreground,
-          TextXAlignment = Enum.TextXAlignment.Left, TextSize = theme.Font.body.Size, Font = Enum.Font.BuilderSans,
+        local optLabel = Create("TextLabel", { Name = "OptLabel", BackgroundTransparency = 1, Text = e.label or tostring(e.value), ZIndex = 1003,
+          TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
           Size = UDim2.new(1, -textX - 4, e.desc and 0 or 1, e.desc and 16 or 0),
           Position = UDim2.new(0, textX, 0, e.desc and 4 or 0), Parent = o })
+        Create.text(optLabel, theme, "body")
         if e.desc then
-          Create("TextLabel", { Name = "Desc", BackgroundTransparency = 1, Text = e.desc, ZIndex = 1003,
+          local desc = Create("TextLabel", { Name = "Desc", BackgroundTransparency = 1, Text = e.desc, ZIndex = 1003,
             TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left,
-            TextSize = theme.Font.muted.Size, Font = Enum.Font.BuilderSans,
             Size = UDim2.new(1, -textX - 4, 0, 14), Position = UDim2.new(0, textX, 0, 20), Parent = o })
+          Create.text(desc, theme, "muted")
         end
         o.MouseButton1Click:Connect(function() pick(e.value) end)
         optButtons[#optButtons + 1] = { btn = o, text = tostring(e.value) .. " " .. tostring(e.label or "") .. " " .. tostring(e.desc or "") }
@@ -362,6 +391,7 @@ function SelectBox.new(opts)
     posConn = btn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function() Safe.mutate(api.Close) end)
     Overlay.mount(dropdown)
     Overlay.trackPopover(api.Close)
+    setOpen(true)
   end
 
   function api.Open()
@@ -369,17 +399,21 @@ function SelectBox.new(opts)
     if opts.OnOpen then opts.OnOpen(api) end
     buildDropdown()
   end
-  function rebuild()
-    if dropdown then api.Close() end
-    buildDropdown()
-  end
 
-  function api.Close()
+  -- Drop the popover and its connections; the open state (caret tint, field ring) is left to
+  -- the caller so a rebuild swaps the list without flickering the field back to rest.
+  local function teardown()
     if posConn then posConn:Disconnect(); posConn = nil end
+    if searchFocus then searchFocus.disconnect(); searchFocus = nil end
     if dropdown then dropdown:Destroy(); dropdown = nil end
     optButtons = {}
     Overlay.untrackPopover(api.Close)
   end
+  function rebuild()
+    if dropdown then teardown() end
+    buildDropdown()
+  end
+  function api.Close() teardown(); setOpen(false) end
 
   function api.Destroy() api.Close(); maid:DoCleanup() end
 
@@ -389,7 +423,7 @@ function SelectBox.new(opts)
   end))
   maid:Give(clearBtn.MouseButton1Click:Connect(function() if multi then api.SetValue({}) end end))
   maid:Give(btn)
-  maid:Give(function() if spinTween then spinTween:Cancel(); spinTween = nil end end)
+  maid:Give(stopSpin)
   maid:Give(function() api.Close() end)
   if opts.Disabled then setDisabled(true) end
   if opts.Loading then setLoading(true) end
@@ -397,14 +431,13 @@ function SelectBox.new(opts)
   if opts.AccentReg then maid:Give(opts.AccentReg(function()
     btn.BackgroundColor3 = theme.Colors.surface
     field.BackgroundColor3 = theme.Colors.background
-    local fs = field:FindFirstChildOfClass("UIStroke"); if fs then fs.Color = theme.Colors.border end
-    valueLabel.TextColor3 = theme.Colors.foreground
+    fieldStroke.Color = fieldStrokeColor()
     local ti = btn:FindFirstChild("Title"); if ti then ti.TextColor3 = theme.Colors.foreground end
     local de = btn:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
-    Icons.apply(caret, "chevron-down", theme.Colors.primary)
+    paintDisabled()
+    Icons.apply(caret, "chevron-down", caretColor())
     Icons.apply(clearBtn, "x", theme.Colors.mutedForeground)
     if fieldIcon.Visible then local ic = selectedIcon(); if ic then Icons.apply(fieldIcon, ic, theme.Colors.foreground) end end
-    setDisabled(disabled)
     Icons.apply(spinner, "loader", theme.Colors.mutedForeground)
   end)) end
 

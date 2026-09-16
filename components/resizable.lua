@@ -24,7 +24,7 @@ function Resizable.new(opts)
     Size = UDim2.new(1, 0, 0, opts.Height or (horizontal and 160 or 200)),
     LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
 
-  local paneFrames, panes, handles = {}, {}, {}
+  local paneFrames, panes, handles, gripPaint = {}, {}, {}, {}
 
   local function applyLayout()
     local cum = 0
@@ -72,12 +72,20 @@ function Resizable.new(opts)
       ZIndex = 6, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
       Size = horizontal and UDim2.new(0, 8, 0, 16) or UDim2.new(0, 16, 0, 8),
       Parent = handle, Create.corner(theme.Radius.sm) })
-    Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = grip })
+    Create.stroke(theme.Colors.border, 1).Parent = grip
     local gi = Create("ImageLabel", { BackgroundTransparency = 1, Size = UDim2.new(0, 8, 0, 8),
       Position = UDim2.new(0.5, -4, 0.5, -4), Parent = grip })
-    Icons.apply(gi, horizontal and "grip-vertical" or "grip-horizontal", theme.Colors.primary)
-    maid:Give(handle.MouseEnter:Connect(function() Icons.apply(gi, horizontal and "grip-vertical" or "grip-horizontal", theme.Colors.foreground) end))
-    maid:Give(handle.MouseLeave:Connect(function() Icons.apply(gi, horizontal and "grip-vertical" or "grip-horizontal", theme.Colors.primary) end))
+    -- structural glyph: rests muted, lifts to foreground while hovered; the reskin closure
+    -- re-derives from `hovering` so SetMode mid-hover keeps the right role
+    local hovering = false
+    local function paintGrip()
+      Icons.apply(gi, horizontal and "grip-vertical" or "grip-horizontal",
+        theme.Colors[hovering and theme.Icon.structuralActive or theme.Icon.structural])
+    end
+    paintGrip()
+    maid:Give(handle.MouseEnter:Connect(function() hovering = true; paintGrip() end))
+    maid:Give(handle.MouseLeave:Connect(function() hovering = false; paintGrip() end))
+    gripPaint[k] = paintGrip
     handles[k] = handle
     local drag
     maid:Give(handle.InputBegan:Connect(function(input)
@@ -103,11 +111,14 @@ function Resizable.new(opts)
 
   if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function()
     for _, f in ipairs(paneFrames) do f.BackgroundColor3 = theme.Colors.card end
-    for _, hd in ipairs(handles) do
+    for k, hd in ipairs(handles) do
       local line = hd:FindFirstChild("Line"); if line then line.BackgroundColor3 = theme.Colors.border end
-      local grip = hd:FindFirstChild("Grip"); if grip then grip.BackgroundColor3 = theme.Colors.surface end
-      local ic = grip and grip:FindFirstChildOfClass("ImageLabel")
-      if ic then Icons.apply(ic, horizontal and "grip-vertical" or "grip-horizontal", theme.Colors.primary) end
+      local grip = hd:FindFirstChild("Grip")
+      if grip then
+        grip.BackgroundColor3 = theme.Colors.surface
+        local st = grip:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
+      end
+      if gripPaint[k] then gripPaint[k]() end
     end
   end)) end
 

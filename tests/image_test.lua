@@ -20,5 +20,24 @@ h.describe("image", function()
     h.expect(im.Frame.Image).toBe("rbxassetid://2")   -- applied in a capability context
     R.Safe._setCapabilityCheck(nil)
   end)
+  h.it("a Lucide glyph is re-tinted to foreground by the reskin closure; Destroy unregisters", function()
+    local fns, unregs = {}, 0
+    local reg = function(fn) fns[#fns + 1] = fn; return function() unregs = unregs + 1 end end
+    local i = Image.new({ Lucide = "home", AccentReg = reg })
+    h.expect(#fns).toBe(1)
+    i.Frame.ImageColor3 = h.roblox.Color3.fromRGB(1, 2, 3)
+    fns[1]("mode")
+    h.expect(i.Frame.ImageColor3).toBe(R.Theme.Colors.foreground)
+    i.Destroy()
+    h.expect(unregs).toBe(1)
+  end)
+  h.it("an explicit Color is kept across reskin", function()
+    local fns = {}
+    local reg = function(fn) fns[#fns + 1] = fn; return function() end end
+    local tint = h.roblox.Color3.fromRGB(9, 8, 7)
+    local i = Image.new({ Lucide = "home", Color = tint, AccentReg = reg })
+    for _, fn in ipairs(fns) do fn("mode") end
+    h.expect(i.Frame.ImageColor3).toBe(tint)
+  end)
 end)
 h.run()
