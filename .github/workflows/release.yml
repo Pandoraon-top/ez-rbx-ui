@@ -34,9 +34,11 @@ jobs:
       - name: Build release bundle
         run: |
           mkdir -p release
-          # NOT --release: that flag strips module wiring and the artifact then dies on the first
-          # CreateWindow (Window's injected DefaultTheme is nil). Reproducible back to bf1ba76.
-          lua-bundler --entry ./main.lua --output ./release/ez-rbx-ui.lua --obfuscate 1
+          # Plain bundle on purpose. --release strips module wiring and the artifact dies on the
+          # first CreateWindow (DefaultTheme nil, reproducible back to bf1ba76). --obfuscate 2 and 3
+          # die the same way ("attempt to index global '_0x...'"), and level 1 only strips comments:
+          # function names and error strings survive it, so it protects nothing worth the risk.
+          lua-bundler --entry ./main.lua --output ./release/ez-rbx-ui.lua
 
       - name: Build readable example + stress bundles
         run: make examples
