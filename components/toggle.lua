@@ -7,9 +7,6 @@ function Toggle.Init(R)
   Effects = R.Effects; Recipes = R.Recipes
 end
 
--- Token core/theme.lua does not carry yet (reported as a deviation); the theme wins the moment
--- Stroke.knob exists. Same escape hatch core/animate.lua uses for its FALLBACK durations.
-local FALLBACK = { knobRim = 0.7 }
 
 -- shadcn switch proportions, pinned by toggle_test. Every knob offset is derived from them so the
 -- ON position, the press stretch and the rim never need a second literal.
@@ -67,7 +64,7 @@ function Toggle.new(opts)
     Parent = track, Create.corner(knobSize / 2),
   })
   -- Rim: a white knob on a white ON track (Adaptive light) would otherwise dissolve into it.
-  local knobStroke = Create.stroke(theme.Colors.background, 1, theme.Stroke.knob or FALLBACK.knobRim)
+  local knobStroke = Create.stroke(theme.Colors.background, 1, theme.Stroke.knob)
   knobStroke.Parent = knob
   -- Accent glow BEHIND the track, sibling under btn. nil while Effect.shadowId is '' (and on
   -- phones under controlGlow 'auto'), so every use is guarded.

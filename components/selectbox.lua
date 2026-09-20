@@ -9,10 +9,6 @@ function SelectBox.Init(R)
   Effects = R.Effects; Acrylic = R.Acrylic
 end
 
--- A popover is frosted one step LIGHTER than the window shell: content must stay readable
--- through it. theme.Acrylic.frost (0.12) is the window's value, so a theme may define
--- Acrylic.popoverFrost and this is the fallback until that token lands (reported as a deviation).
-local POPOVER_FROST = 0.04
 local CARET_OPEN = 180 -- chevron-down reads as chevron-up while the list is open
 
 -- 3.1 loading skeleton geometry. Uneven widths on purpose: three equal bars read as a progress
@@ -30,10 +26,7 @@ local EMPTY_ICON, EMPTY_TEXT = "search", "No results"
 -- LOADING_H answers for the shimmer.
 local function emptyH(t) return t.Sizes.icon + t.Spacing.gap * 2 + t.Font.muted.Size end
 
-local function frostAlpha(theme)
-  local a = theme.Acrylic and theme.Acrylic.popoverFrost
-  return type(a) == "number" and a or POPOVER_FROST
-end
+local function frostAlpha(theme) return theme.Acrylic.popoverFrost end
 
 -- Popover open/close motion. Animate.popIn/popOut rest a popover's UIScale at 1, which is right
 -- until the window forwards a UI scale (2.22): a scaled popover must rest at Overlay.scale(), so

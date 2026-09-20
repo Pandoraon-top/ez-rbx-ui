@@ -60,6 +60,11 @@ function Host.attach(api, ctx)
       opts.Window = ctx.window
       opts.AccentReg = ctx.accentThemer and ctx.accentThemer.register
       opts.AccentThemer = ctx.accentThemer
+      -- A control may itself be a host (Resizable mounts its own panes). Without these two it
+      -- attaches its panes with a nil registry, and every control nested inside one is invisible
+      -- to the sidebar search and to Window:LockAll -- the pane's own comment claimed otherwise.
+      opts.RegisterSearchable = ctx.registerSearchable
+      opts.RegisterControl = ctx.registerControl
       local control = ctx.R[spec.mod].new(opts)
       if opts.Tooltip and ctx.R.Tooltip and control and control.Frame then
         -- Button/Label/Image/ProgressBar/Separator/Card expose no .Maid, so without Host.own the
