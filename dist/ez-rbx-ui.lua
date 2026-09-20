@@ -4,226 +4,478 @@
 
 local EmbeddedModules = {}
 
--- Module: components/card
-EmbeddedModules["components/card"] = function()
-    local Card = {}
-    local Create, DefaultTheme, Maid, Asset, Button, Safe
-    function Card.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Asset = R.Asset; Button = R.Button; Safe = R.Safe
+-- Module: core/maid
+EmbeddedModules["core/maid"] = function()
+    local Maid = {}
+    Maid.__index = Maid
+    function Maid.new()
+     return setmetatable({ _tasks = {} }, Maid)
     end
-    function Card.new(opts)
-     opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local maid = Maid.new()
-     local card = Create("Frame", { Name = "Card", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
-     AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), LayoutOrder = opts.LayoutOrder or 0,
-     Parent = opts.Parent, Create.corner(theme.Radius.md),
-     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = theme.Spacing.inputY, bottom = theme.Spacing.inputY }),
-     Create.listLayout({ Padding = theme.Spacing.gap }) })
-     Create.stroke(theme.Colors.border, 1).Parent = card
-     local lo = 0
-     local banner
-     local function makeBanner(image)
-     lo = lo + 1
-     banner = Create("ImageLabel", { Name = "Banner", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
-     Image = image, ScaleType = Enum.ScaleType.Crop, Size = UDim2.new(1, 0, 0, 80), LayoutOrder = lo,
-     Parent = card, Create.corner(theme.Radius.sm) })
-     end
-     if Asset.resolvable(opts.Banner) then
-     makeBanner("")
-     Asset.imageAsync(opts.Banner, function(id) Safe.mutate(function() banner.Image = id end) end)
-     else
-     local resolved = Asset.image(opts.Banner)
-     if resolved then makeBanner(resolved) end
-     end
-     if opts.Title then
-     lo = lo + 1
-     Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title,
-     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-     TextTruncate = Enum.TextTruncate.AtEnd, Size = UDim2.new(1, 0, 0, 18), LayoutOrder = lo, Parent = card }),
-     theme, "label")
-     end
-     if opts.Body then
-     lo = lo + 1
-     Create.text(Create("TextLabel", { Name = "Body", BackgroundTransparency = 1, Text = opts.Body,
-     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-     TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = Enum.AutomaticSize.Y,
-     Size = UDim2.new(1, 0, 0, 0), LayoutOrder = lo, Parent = card }), theme, "muted")
-     end
-     if opts.Buttons and #opts.Buttons > 0 then
-     lo = lo + 1
-     local row = Create("Frame", { Name = "Actions", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
-     LayoutOrder = lo, Parent = card,
-     Create.listLayout({ Padding = theme.Spacing.gap, FillDirection = Enum.FillDirection.Horizontal }) })
-     for i, b in ipairs(opts.Buttons) do
-     local control = Button.new({ Parent = row, Text = b.Text, Variant = b.Variant, Callback = b.Callback,
-     Theme = theme, AccentReg = opts.AccentReg, AutoWidth = true, LayoutOrder = i })
-     maid:Give(control)
-     end
-     end
-     if opts.AccentReg then maid:Give(opts.AccentReg(function()
-     card.BackgroundColor3 = theme.Colors.card
-     local st = card:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
-     if banner then banner.BackgroundColor3 = theme.Colors.surface end
-     local ti = card:FindFirstChild("Title"); if ti then ti.TextColor3 = theme.Colors.foreground end
-     local bo = card:FindFirstChild("Body"); if bo then bo.TextColor3 = theme.Colors.mutedForeground end
-     end)) end
-     maid:Give(card)
-     return { Frame = card, Destroy = function() maid:DoCleanup() end }
+    function Maid:Give(task)
+     self._tasks[#self._tasks + 1] = task
+     return task
     end
-    return Card
+    local function cleanupTask(t)
+     local kind = (typeof and typeof(t)) or type(t)
+     if kind == "function" then
+     t()
+     elseif kind == "Instance" then
+     t:Destroy()
+     elseif kind == "RBXScriptConnection" then
+     t:Disconnect()
+     elseif kind == "table" then
+     if type(t.Disconnect) == "function" then t:Disconnect()
+     elseif type(t.Destroy) == "function" then t:Destroy()
+     end
+     end
+    end
+    function Maid:DoCleanup()
+     local tasks = self._tasks
+     self._tasks = {}
+     for i = #tasks, 1, -1 do
+     local ok, err = pcall(cleanupTask, tasks[i])
+     if not ok and warn then warn("Maid task error: " .. tostring(err)) end
+     end
+    end
+    Maid.Destroy = Maid.DoCleanup
+    return Maid
 end
 
--- Module: components/slider
-EmbeddedModules["components/slider"] = function()
-    local Slider = {}
-    local Create, DefaultTheme, Animate, Maid, Flag, Safe, Effects, Recipes, Device
+-- Module: core/device
+EmbeddedModules["core/device"] = function()
     local UserInputService = game:GetService("UserInputService")
-    function Slider.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe
-     Effects = R.Effects; Recipes = R.Recipes; Device = R.Device
+    local GuiService = game:GetService("GuiService")
+    local Device = {}
+    local Signal
+    local DEFAULTS = { TabletMaxAspect = 1.55, TabletMinDiagonal = math.huge }
+    local cfg = { TabletMaxAspect = DEFAULTS.TabletMaxAspect, TabletMinDiagonal = DEFAULTS.TabletMinDiagonal }
+    local function viewport()
+     local cam = workspace and workspace.CurrentCamera
+     local vp = cam and cam.ViewportSize
+     if vp and vp.X and vp.X > 0 then return vp end
+     return { X = 1280, Y = 720 }
     end
-    local TRACK_H, TRACK_Y, HANDLE = 6, -16, 12
-    function Slider.new(opts)
+    function Device.GetType()
+     if GuiService and GuiService.IsTenFootInterface and GuiService:IsTenFootInterface() then
+     return "Console"
+     end
+     local touch = UserInputService.TouchEnabled
+     local mouse = UserInputService.MouseEnabled
+     if touch and not mouse then
+     local vp = viewport()
+     local a, b = math.max(vp.X, vp.Y), math.min(vp.X, vp.Y)
+     local aspect = (b > 0) and (a / b) or 1
+     local diag = math.sqrt(vp.X * vp.X + vp.Y * vp.Y)
+     if aspect <= cfg.TabletMaxAspect or diag >= cfg.TabletMinDiagonal then return "Tablet" end
+     return "Mobile"
+     end
+     return "Desktop"
+    end
+    function Device.IsMobile() return Device.GetType() == "Mobile" end
+    function Device.IsTablet() return Device.GetType() == "Tablet" end
+    function Device.IsDesktop() return Device.GetType() == "Desktop" end
+    function Device.IsConsole() return Device.GetType() == "Console" end
+    function Device.IsTouch() return UserInputService.TouchEnabled == true end
+    local function readService(name, prop)
+     local ok, v = pcall(function() return game:GetService(name)[prop] end)
+     if ok then return v end
+     return nil
+    end
+    function Device.SupportsHover() return readService("UserInputService", "MouseEnabled") == true end
+    function Device.PrefersReducedMotion() return readService("GuiService", "ReducedMotionEnabled") == true end
+    function Device.GetInput()
+     local t = UserInputService.GetLastInputType and UserInputService:GetLastInputType()
+     local name = (t and t.Name) or ""
+     if name == "Touch" then return "Touch" end
+     if name:find("Gamepad") then return "Gamepad" end
+     return "KeyboardMouse"
+    end
+    local lastType, lastInput
+    function Device._recompute()
+     local t, i = Device.GetType(), Device.GetInput()
+     if t ~= lastType or i ~= lastInput then
+     lastType, lastInput = t, i
+     if Device.Changed then Device.Changed:Fire({ Type = t, Input = i, Viewport = viewport() }) end
+     end
+    end
+    function Device.Configure(opts)
+     if type(opts) == "table" then
+     if tonumber(opts.TabletMaxAspect) then cfg.TabletMaxAspect = tonumber(opts.TabletMaxAspect) end
+     if tonumber(opts.TabletMinDiagonal) then cfg.TabletMinDiagonal = tonumber(opts.TabletMinDiagonal) end
+     end
+     Device._recompute()
+    end
+    local connected = false
+    function Device.Init(R)
+     Signal = R.Signal
+     cfg.TabletMaxAspect = DEFAULTS.TabletMaxAspect
+     cfg.TabletMinDiagonal = DEFAULTS.TabletMinDiagonal
+     if not Device.Changed then Device.Changed = Signal.new() end
+     lastType, lastInput = Device.GetType(), Device.GetInput()
+     if connected then return end
+     connected = true
+     local function hook(sig) if sig and sig.Connect then sig:Connect(function() Device._recompute() end) end end
+     hook(UserInputService.LastInputTypeChanged)
+     if UserInputService.GetPropertyChangedSignal then
+     hook(UserInputService:GetPropertyChangedSignal("TouchEnabled"))
+     hook(UserInputService:GetPropertyChangedSignal("MouseEnabled"))
+     hook(UserInputService:GetPropertyChangedSignal("KeyboardEnabled"))
+     end
+     local cam = workspace and workspace.CurrentCamera
+     if cam and cam.GetPropertyChangedSignal then hook(cam:GetPropertyChangedSignal("ViewportSize")) end
+    end
+    return Device
+end
+
+-- Module: components/separator
+EmbeddedModules["components/separator"] = function()
+    local Separator = {}
+    local Create, DefaultTheme
+    function Separator.Init(R) Create = R.Create; DefaultTheme = R.Theme end
+    function Separator.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local frame = Create("Frame", {
+     Name = "Separator",
+     BackgroundColor3 = theme.Colors.border,
+     BackgroundTransparency = theme.Stroke.divider, 
+     BorderSizePixel = 0,
+     Size = UDim2.new(1, 0, 0, 1),
+     LayoutOrder = opts.LayoutOrder or 0,
+     Parent = opts.Parent,
+     })
+     local unreg = opts.AccentReg and opts.AccentReg(function() frame.BackgroundColor3 = theme.Colors.border end)
+     return { Frame = frame, Destroy = function() if unreg then unreg() end; frame:Destroy() end }
+    end
+    return Separator
+end
+
+-- Module: components/toggle
+EmbeddedModules["components/toggle"] = function()
+    local Toggle = {}
+    local Create, DefaultTheme, Animate, Maid, Flag, Safe, Effects, Recipes
+    function Toggle.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe
+     Effects = R.Effects; Recipes = R.Recipes
+    end
+    local TRACK_W, TRACK_H = 44, 24
+    function Toggle.new(opts)
      opts = opts or {}
      local theme = opts.Theme or DefaultTheme
      local maid = Maid.new()
-     local minV = opts.Min or 0
-     local maxV = opts.Max or 100
-     local step = opts.Step or 1
-     local value = minV
+     local value = false
      local onChanged
-     local function snap(n)
-     n = tonumber(n) or value
-     if step and step > 0 then n = math.floor((n - minV) / step + 0.5) * step + minV end
-     if n < minV then n = minV elseif n > maxV then n = maxV end
-     return n
-     end
      local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-     local padY = theme.Spacing.inputY
-     local root = Create("Frame", { Name = "SliderRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
-     Size = UDim2.new(1, 0, 0, (opts.Text and (hasDesc and 62 or 46) or 28) + padY * 2), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
-     Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = padY, bottom = padY }) })
-     local valueLabel, titleLabel, descLabel
-     if opts.Text then
-     titleLabel = Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
+     local rowH = hasDesc and 50 or 34
+     local padY = hasDesc and 8 or 0
+     local btn = Create("TextButton", {
+     Name = "Toggle", AutoButtonColor = false, Text = "",
+     BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
+     Size = UDim2.new(1, 0, 0, rowH), LayoutOrder = opts.LayoutOrder or 0,
+     Parent = opts.Parent,
+     Create.corner(theme.Radius.md),
+     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = padY, bottom = padY }),
+     })
+     local label = Create.text(Create("TextLabel", {
+     Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Toggle",
      TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-     Size = UDim2.new(1, -40, 0, 16), Parent = root }), theme, "label")
-     valueLabel = Create.text(Create("TextLabel", { Name = "Value", BackgroundTransparency = 1, Text = "0",
-     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Right,
-     Size = UDim2.new(0, 40, 0, 16), Position = UDim2.new(1, -40, 0, 0), Parent = root }), theme, "muted")
+     TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+     Size = UDim2.new(1, -54, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn,
+     }), theme, "label")
+     local desc
      if hasDesc then
-     descLabel = Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+     desc = Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
      TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
      TextYAlignment = Enum.TextYAlignment.Top,
-     Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -40, 0, 18), Parent = root }), theme, "muted")
+     Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -54, 0, 18), Parent = btn }), theme, "muted")
      end
-     end
-     local track = Create("Frame", { Name = "Track", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
-     Size = UDim2.new(1, 0, 0, TRACK_H), Position = UDim2.new(0, 0, 1, TRACK_Y), Parent = root, Create.corner(TRACK_H / 2) })
+     local track = Create("Frame", {
+     Name = "Track", BackgroundColor3 = theme.Colors.switchTrackOff, BorderSizePixel = 0, ZIndex = 2,
+     Size = UDim2.new(0, TRACK_W, 0, TRACK_H), Position = UDim2.new(1, -TRACK_W, 0.5, -TRACK_H / 2),
+     Parent = btn, Create.corner(TRACK_H / 2),
+     })
      local trackStroke = Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = track })
-     local fill = Create("Frame", { Name = "Fill", BackgroundColor3 = theme.Colors.primary, BorderSizePixel = 0,
-     Size = UDim2.new(0, 0, 1, 0), Parent = track, Create.corner(TRACK_H / 2) })
-     local handle = Create("Frame", { Name = "Handle", BackgroundColor3 = theme.Colors.foreground, BorderSizePixel = 0, ZIndex = 2,
-     AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(0, HANDLE, 0, HANDLE),
-     Position = UDim2.new(0, 0, 0.5, 0), Parent = track, Create.corner(HANDLE / 2) })
-     local handleScale = Create("UIScale", { Scale = 1, Parent = handle })
-     local halo = Effects.glow(track, theme, theme.Colors.primary, "control", 0, "Halo")
-     Effects.mirror(halo, handle, "control", theme)
-     local hitH = theme.Sizes.sliderHit
-     local hit = Create("Frame", { Name = "Hit", BackgroundTransparency = 1, BorderSizePixel = 0, Active = false, ZIndex = 3,
-     Size = UDim2.new(1, 0, 0, hitH), Position = UDim2.new(0, 0, 1, TRACK_Y + TRACK_H / 2 - hitH / 2), Parent = root })
-     local dragging = false
+     local knobSize = theme.Sizes.knob
+     local knobPad = (TRACK_H - knobSize) / 2
+     local knobY = -knobSize / 2
+     local offX, onX = knobPad, TRACK_W - knobSize - knobPad
+     local stretchW = knobSize * theme.Motion.knobStretch
+     local knob = Create("Frame", {
+     Name = "Knob", BackgroundColor3 = theme.Colors.foreground, BorderSizePixel = 0, ZIndex = 3,
+     Size = UDim2.new(0, knobSize, 0, knobSize), Position = UDim2.new(0, offX, 0.5, knobY),
+     Parent = track, Create.corner(knobSize / 2),
+     })
+     local knobStroke = Create.stroke(theme.Colors.background, 1, theme.Stroke.knob)
+     knobStroke.Parent = knob
+     local glow = Effects.glow(btn, theme, theme.Colors.primary, "control", 1, "TrackGlow")
+     Effects.mirror(glow, track, "control", theme)
+     local function knobRest() return UDim2.new(0, value and onX or offX, 0.5, knobY) end
      local built = false
-     local function valuePos(scale) return UDim2.new(scale, 0, 0.5, 0) end
      local function apply(v)
-     value = snap(v)
-     local scale = (maxV > minV) and (value - minV) / (maxV - minV) or 0
-     local direct = dragging or not built
+     value = v and true or false
+     local instant = not built
      Safe.mutate(function()
-     if valueLabel then valueLabel.Text = tostring(value) end
-     if direct then
-     fill.Size = UDim2.new(scale, 0, 1, 0)
-     handle.Position = valuePos(scale)
-     if halo then halo.Position = valuePos(scale) end
+     local trackC = value and theme.Colors.primary or theme.Colors.switchTrackOff
+     local knobC = value and theme.Colors.primaryForeground or theme.Colors.foreground
+     local strokeA = value and 1 or theme.Stroke.control
+     local glowA = value and theme.fx(theme).glow or 1
+     if instant then
+     knob.Position = knobRest(); knob.Size = UDim2.new(0, knobSize, 0, knobSize)
+     knob.BackgroundColor3 = knobC; track.BackgroundColor3 = trackC
+     trackStroke.Transparency = strokeA
+     if glow then glow.ImageTransparency = glowA end
      return
      end
-     local E, D = Animate.EASING.smooth, Animate.DIR.Out
-     Animate.to(fill, "base", { Size = UDim2.new(scale, 0, 1, 0) }, E, D)
-     Animate.to(handle, "base", { Position = valuePos(scale) }, E, D)
-     if halo then Animate.to(halo, "base", { Position = valuePos(scale) }, E, D) end
+     Animate.springTo(knob, "release", { Position = knobRest(), Size = UDim2.new(0, knobSize, 0, knobSize) })
+     Animate.to(knob, "base", { BackgroundColor3 = knobC })
+     Animate.to(track, "base", { BackgroundColor3 = trackC })
+     Animate.to(trackStroke, "fast", { Transparency = strokeA })
+     if glow then Animate.to(glow, "base", { ImageTransparency = glowA }) end
      end)
      end
-     local commit = Flag.bind(opts, snap(opts.Default or minV), apply)
+     local commit = Flag.bind(opts, opts.Default == true, apply)
      built = true
-     local api = { Frame = root }
-     function api.GetValue() return value end
-     function api.SetValue(v) commit(snap(v)); if opts.Callback then opts.Callback(value) end; if onChanged then onChanged(value) end end
-     function api.OnChanged(fn) onChanged = fn end
-     function api.Destroy() maid:DoCleanup() end
-     local hovering = false
-     local function handleGrow()
-     local s = dragging and theme.Motion.handleGrow or (hovering and theme.Motion.handleHover or 1)
-     Animate.springTo(handleScale, "release", { Scale = s })
-     if halo then Animate.to(halo, "base", { ImageTransparency = dragging and theme.fx(theme).glow or 1 }) end
-     end
+     local hover = Recipes.hover(btn, { theme = theme, corner = theme.Radius.md,
+     inset = { x = theme.Spacing.inputX, y = padY } })
+     maid:Give(hover.disconnect)
      local enabled = true
      local function setEnabled(b)
-     local was = enabled
      enabled = b ~= false
      Safe.mutate(function()
-     local parts = { { fill, "BackgroundTransparency", 0 }, { handle, "BackgroundTransparency", 0 } }
-     if valueLabel then parts[#parts + 1] = { valueLabel, "TextTransparency", 0 } end
+     local parts = { { track, "BackgroundTransparency", 0 }, { knob, "BackgroundTransparency", 0 },
+     { label, "TextTransparency", 0 } }
+     if desc then parts[#parts + 1] = { desc, "TextTransparency", 0 } end
      Recipes.disabled(parts, not enabled, theme)
      end)
-     if was and not enabled and dragging then dragging = false; handleGrow() end
+     end
+     local pressed = false
+     local function pressKnob()
+     pressed = true
+     Animate.to(knob, "press", {
+     Size = UDim2.new(0, stretchW, 0, knobSize),
+     Position = UDim2.new(0, value and (TRACK_W - knobPad - stretchW) or knobPad, 0.5, knobY),
+     })
+     end
+     local function releaseKnob()
+     if not pressed then return end
+     pressed = false
+     Animate.springTo(knob, "release", { Size = UDim2.new(0, knobSize, 0, knobSize), Position = knobRest() })
      end
      if opts.AccentReg then maid:Give(opts.AccentReg(function()
-     root.BackgroundColor3 = theme.Colors.surface
-     track.BackgroundColor3 = theme.Colors.background
+     btn.BackgroundColor3 = theme.Colors.surface
+     label.TextColor3 = theme.Colors.foreground
+     if desc then desc.TextColor3 = theme.Colors.mutedForeground end
      trackStroke.Color = theme.Colors.border
-     fill.BackgroundColor3 = theme.Colors.primary
-     handle.BackgroundColor3 = theme.Colors.foreground
-     Effects.reskin(halo, theme, "glow", theme.Colors.primary)
-     if titleLabel then titleLabel.TextColor3 = theme.Colors.foreground end
-     if descLabel then descLabel.TextColor3 = theme.Colors.mutedForeground end
-     if valueLabel then valueLabel.TextColor3 = theme.Colors.mutedForeground end
+     knobStroke.Color = theme.Colors.background
+     Effects.reskin(glow, theme, "glow", theme.Colors.primary)
+     hover.reskin()
+     apply(value)
      end)) end
-     local function fromX(px)
-     local ap, sz = track.AbsolutePosition, track.AbsoluteSize
-     local x0 = ap and ap.X or 0
-     local w = (sz and sz.X) or 1
-     local t = (px - x0) / (w > 0 and w or 1)
-     if t < 0 then t = 0 elseif t > 1 then t = 1 end
-     api.SetValue(minV + t * (maxV - minV))
+     local api = { Frame = btn }
+     function api.Get() return value end
+     function api.Set(v)
+     commit(v and true or false)
+     if opts.Callback then opts.Callback(value) end
+     if onChanged then onChanged(value) end
      end
-     maid:Give(hit.InputBegan:Connect(function(input)
-     if not enabled then return end
-     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-     dragging = true; handleGrow(); fromX(input.Position.X)
-     end
-     end))
-     maid:Give(UserInputService.InputChanged:Connect(function(input)
-     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-     fromX(input.Position.X)
-     end
-     end))
-     maid:Give(UserInputService.InputEnded:Connect(function(input)
-     if not dragging then return end
-     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-     dragging = false; handleGrow()
-     end
-     end))
-     if Device.SupportsHover() then
-     maid:Give(hit.MouseEnter:Connect(function() hovering = true; if enabled then handleGrow() end end))
-     maid:Give(hit.MouseLeave:Connect(function() hovering = false; handleGrow() end))
-     end
+     function api.OnChanged(fn) onChanged = fn end
      function api.SetEnabled(b) setEnabled(b) end
+     function api.Destroy() maid:DoCleanup() end
+     maid:Give(btn.MouseButton1Down:Connect(function() if enabled then pressKnob() end end))
+     maid:Give(btn.MouseButton1Up:Connect(releaseKnob))
+     maid:Give(btn.MouseLeave:Connect(releaseKnob))
+     maid:Give(btn.MouseButton1Click:Connect(function() if enabled then api.Set(not value) end end))
+     maid:Give(btn)
      if opts.Disabled then setEnabled(false) end
-     maid:Give(root)
      return api
     end
-    return Slider
+    return Toggle
+end
+
+-- Module: components/numberbox
+EmbeddedModules["components/numberbox"] = function()
+    local RunService = game:GetService("RunService")
+    local NumberBox = {}
+    local Create, DefaultTheme, Maid, Icons, Flag, Numfmt, Safe, Animate, Recipes
+    function NumberBox.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Icons = R.Icons; Flag = R.Flag; Numfmt = R.Numfmt; Safe = R.Safe
+     Animate = R.Animate; Recipes = R.Recipes
+    end
+    function NumberBox.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local maid = Maid.new()
+     local minV, maxV, step = opts.Min, opts.Max, opts.Step or 1
+     local value = opts.Default or 0
+     local hasLabel = opts.Text ~= nil and opts.Text ~= ""
+     local hasDesc = opts.Description ~= nil and opts.Description ~= ""
+     local rowH = (not hasLabel) and 30 or (hasDesc and 56 or 46)
+     local enabled = true
+     local hovering = false 
+     local function clamp(n)
+     n = tonumber(n) or value
+     if minV then n = math.max(minV, n) end
+     if maxV then n = math.min(maxV, n) end
+     return n
+     end
+     local root = Create("Frame", { Name = "NumberBoxRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
+     Size = UDim2.new(1, 0, 0, rowH), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
+     Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
+     if hasLabel then
+     Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
+     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+     TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+     Position = UDim2.new(0, 0, 0, hasDesc and 6 or 0),
+     Size = UDim2.new(0.5, -8, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = root }), theme, "label")
+     if hasDesc then
+     Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+     TextYAlignment = Enum.TextYAlignment.Top,
+     Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(0.5, -8, 0, 26), Parent = root }), theme, "muted")
+     end
+     end
+     local box = Create("Frame", { Name = "Box", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
+     Position = hasLabel and UDim2.new(0.5, 4, 0.5, -15) or UDim2.new(0, 0, 0, 0),
+     Size = hasLabel and UDim2.new(0.5, -4, 0, 30) or UDim2.new(1, 0, 0, 30),
+     Parent = root, Create.corner(theme.Radius.input) })
+     local boxStroke = Create.stroke(theme.Colors.border, 1); boxStroke.Parent = box
+     local function structural() return theme.Colors[theme.Icon.structural] end
+     local function stepBtn(name, icon, x)
+     local b = Create("ImageButton", { Name = name, AutoButtonColor = false, BackgroundColor3 = theme.Colors.surface,
+     Size = UDim2.new(0, 26, 1, -6), Position = x, Parent = box, Create.corner(theme.Radius.sm) })
+     local img = Create("ImageLabel", { BackgroundTransparency = 1, ImageTransparency = 0, Size = UDim2.new(0, 14, 0, 14),
+     Position = UDim2.new(0.5, -7, 0.5, -7), Parent = b })
+     Icons.apply(img, icon, structural())
+     local hover = Recipes.hover(b, { theme = theme, host = b, corner = theme.Radius.sm, kind = "wash" })
+     maid:Give(hover.disconnect)
+     maid:Give(Recipes.press(b, img, { theme = theme }).disconnect)
+     return b, img, hover
+     end
+     local minus, minusImg, minusHover = stepBtn("Minus", "minus", UDim2.new(0, 3, 0.5, -12))
+     local plus, plusImg, plusHover = stepBtn("Plus", "plus", UDim2.new(1, -29, 0.5, -12))
+     local input = Create.text(Create("TextBox", { Name = "Input", BackgroundTransparency = 1, Text = tostring(value),
+     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Center, ClearTextOnFocus = false,
+     Position = UDim2.new(0, 32, 0, 0), Size = UDim2.new(1, -64, 1, 0), Parent = box }), theme, "body")
+     local atMin, atMax = false, false
+     local dimmed = { [minusImg] = false, [plusImg] = false }
+     local function glyphAlpha(img) return (dimmed[img] or not enabled) and theme.Opacity.disabled or 0 end
+     local function dim(img, off)
+     if dimmed[img] == off then return end
+     dimmed[img] = off
+     Animate.to(img, "fast", { ImageTransparency = glyphAlpha(img) })
+     end
+     local function updateBounds()
+     atMin = minV ~= nil and value <= minV
+     atMax = maxV ~= nil and value >= maxV
+     Safe.mutate(function()
+     dim(minusImg, atMin); minus.Active = not atMin
+     dim(plusImg, atMax); plus.Active = not atMax
+     end)
+     end
+     local function fmt(n)
+     return Numfmt.format(n, { Format = opts.Format, Decimals = opts.Decimals, Prefix = opts.Prefix, Suffix = opts.Suffix })
+     end
+     local focused = false
+     local function strokeColor(f) return f and theme.Colors.ring or theme.Colors.border end
+     local function render() Safe.mutate(function() input.Text = focused and tostring(value) or fmt(value) end) end
+     local function apply(n) value = clamp(n); render(); updateBounds() end
+     local commit = Flag.bind(opts, clamp(opts.Default or 0), apply)
+     local function set(n) commit(clamp(n)); if opts.Callback then opts.Callback(value) end end
+     local bumping = false
+     local function bump(dir)
+     if bumping or dir == nil or not Animate.isEnabled() then return end
+     local rest = box.Position
+     bumping = true
+     Animate.chain({
+     { box, "press", { Position = UDim2.new(rest.X.Scale, rest.X.Offset + dir * theme.Motion.bumpPx,
+     rest.Y.Scale, rest.Y.Offset) }, Animate.EASING.snap, Animate.DIR.Out },
+     { box, "press", { Position = rest }, Animate.EASING.snap, Animate.DIR.Out },
+     }, function() bumping = false end)
+     end
+     local function setEnabled(b)
+     b = b and true or false
+     if enabled == b then return end
+     enabled = b
+     Safe.mutate(function()
+     input.TextEditable = b
+     Recipes.disabled({
+     { box, "BackgroundTransparency", 0 },
+     { minusImg, "ImageTransparency", dimmed[minusImg] and theme.Opacity.disabled or 0 },
+     { plusImg, "ImageTransparency", dimmed[plusImg] and theme.Opacity.disabled or 0 },
+     }, not b, theme)
+     end)
+     end
+     local function holdRepeat(btn, stepFn, atBoundFn, dir)
+     local conn, held
+     local function stop()
+     held = false
+     if conn then conn:Disconnect(); conn = nil end
+     end
+     maid:Give(btn.MouseButton1Down:Connect(function()
+     if not enabled then return end
+     if atBoundFn() then bump(dir); return end
+     held = true
+     stepFn() 
+     local elapsed, since = 0, 0
+     conn = RunService.Heartbeat:Connect(function(dt)
+     if not held then return end
+     elapsed = elapsed + dt
+     if elapsed < 0.35 then return end 
+     since = since + dt
+     local interval = math.max(0.03, 0.12 - (elapsed - 0.35) * 0.06) 
+     if since >= interval then
+     since = 0
+     if atBoundFn() then stop(); return end
+     stepFn()
+     end
+     end)
+     end))
+     maid:Give(btn.MouseButton1Up:Connect(stop))
+     maid:Give(btn.MouseLeave:Connect(stop))
+     maid:Give(stop)
+     end
+     holdRepeat(minus, function() set(value - step) end, function() return atMin end, -1)
+     holdRepeat(plus, function() set(value + step) end, function() return atMax end, 1)
+     maid:Give(input.Focused:Connect(function() focused = true; input.Text = tostring(value) end))
+     maid:Give(input.FocusLost:Connect(function()
+     focused = false
+     local parsed = Numfmt.parse(input.Text, { Prefix = opts.Prefix, Suffix = opts.Suffix })
+     if parsed ~= nil then set(parsed) else render() end
+     end))
+     maid:Give(Recipes.focus(boxStroke, input, strokeColor, { theme = theme }).disconnect)
+     maid:Give(box.MouseEnter:Connect(function() hovering = true end))
+     maid:Give(box.MouseLeave:Connect(function() hovering = false end))
+     maid:Give(box.InputChanged:Connect(function(io)
+     if io.UserInputType == Enum.UserInputType.MouseWheel and enabled and (hovering or focused) then
+     local dir = (io.Position.Z >= 0) and 1 or -1
+     set(value + step * dir)
+     end
+     end))
+     maid:Give(root)
+     if opts.Disabled then setEnabled(false) end
+     if opts.AccentReg then maid:Give(opts.AccentReg(function()
+     root.BackgroundColor3 = theme.Colors.surface
+     box.BackgroundColor3 = theme.Colors.background
+     boxStroke.Color = strokeColor(focused)
+     input.TextColor3 = theme.Colors.foreground
+     local ti = root:FindFirstChild("Title"); if ti then ti.TextColor3 = theme.Colors.foreground end
+     local de = root:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
+     minus.BackgroundColor3 = theme.Colors.surface; plus.BackgroundColor3 = theme.Colors.surface
+     Icons.apply(minusImg, "minus", structural()); Icons.apply(plusImg, "plus", structural())
+     minusHover.reskin(); plusHover.reskin() 
+     updateBounds()
+     end)) end
+     return {
+     Frame = root,
+     GetValue = function() return value end,
+     SetValue = function(n) set(n) end,
+     SetMin = function(n) minV = n; set(value) end,
+     SetMax = function(n) maxV = n; set(value) end,
+     SetEnabled = function(b) setEnabled(b) end,
+     Destroy = function() maid:DoCleanup() end,
+     }
+    end
+    return NumberBox
 end
 
 -- Module: components/colorpicker
@@ -236,11 +488,7 @@ EmbeddedModules["components/colorpicker"] = function()
      Animate = R.Animate; Safe = R.Safe; Recipes = R.Recipes; Effects = R.Effects; Acrylic = R.Acrylic
     end
     local POP_W, POP_H = 180, 152
-    local POPOVER_FROST = 0.04
-    local function frostAlpha(theme)
-     local a = theme.Acrylic and theme.Acrylic.popoverFrost
-     return type(a) == "number" and a or POPOVER_FROST
-    end
+    local function frostAlpha(theme) return theme.Acrylic.popoverFrost end
     local function popOpen(frame, theme, edge, scale)
      if scale == 1 then return Animate.popIn(frame, edge) end
      local us = frame:FindFirstChildOfClass("UIScale")
@@ -459,6 +707,1000 @@ EmbeddedModules["components/colorpicker"] = function()
      return api
     end
     return ColorPicker
+end
+
+-- Module: core/mount
+EmbeddedModules["core/mount"] = function()
+    local Mount = {}
+    function Mount.Init(R) end 
+    function Mount.service(name)
+     local ok, s = pcall(function() return game:GetService(name) end)
+     if not ok or not s then return nil end
+     local okcr, cr = pcall(function() return cloneref or clonereference end)
+     if okcr and type(cr) == "function" then
+     local ok2, ref = pcall(cr, s)
+     if ok2 and ref then return ref end
+     end
+     return s
+    end
+    function Mount.resolve(config)
+     config = config or {}
+     if config.Parent ~= nil then return { parent = config.Parent } end
+     local studio = false
+     local rs = Mount.service("RunService")
+     if rs then local ok, v = pcall(function() return rs:IsStudio() end); studio = ok and v or false end
+     local ok, hui = pcall(function() return gethui and gethui() end)
+     if ok and hui then return { parent = hui, studio = studio } end
+     local protect = nil
+     if type(protectgui) == "function" then
+     protect = protectgui
+     elseif type(syn) == "table" and type(syn.protect_gui) == "function" then
+     protect = syn.protect_gui
+     end
+     local cg = Mount.service("CoreGui")
+     if cg then return { parent = cg, protect = protect, studio = studio } end
+     local players = Mount.service("Players")
+     local lp = players and players.LocalPlayer
+     if lp then
+     local pg = lp:FindFirstChildOfClass("PlayerGui")
+     if not pg then
+     local ok3, w = pcall(function() return lp:WaitForChild("PlayerGui", 5) end)
+     pg = ok3 and w or nil
+     end
+     if pg then return { parent = pg, studio = studio } end
+     end
+     return { parent = nil, studio = studio }
+    end
+    function Mount.guiName(config, studio)
+     config = config or {}
+     if type(config.GuiName) == "string" and config.GuiName ~= "" then return config.GuiName end
+     if config.Stealth == false or studio then return "EzUI" end
+     local hs = Mount.service("HttpService")
+     if hs then
+     local ok, guid = pcall(function() return hs:GenerateGUID(false) end)
+     if ok and guid then return guid end
+     end
+     return "_" .. tostring(math.random(100000, 999999999))
+    end
+    function Mount.finalize(gui, ctx)
+     ctx = ctx or {}
+     gui:SetAttribute("__ezui", true)
+     local parent = gui.Parent
+     if parent then
+     for _, inst in ipairs(parent:GetChildren()) do
+     if inst ~= gui and inst:GetAttribute("__ezui") then inst:Destroy() end
+     end
+     end
+     if ctx.protect and not ctx.studio then pcall(ctx.protect, gui) end
+     return gui
+    end
+    function Mount.anonName(readable)
+     local rs = Mount.service("RunService")
+     local studio = false
+     if rs then local ok, v = pcall(function() return rs:IsStudio() end); studio = ok and v or false end
+     if studio then return readable end
+     local hs = Mount.service("HttpService")
+     if hs then local ok, g = pcall(function() return hs:GenerateGUID(false) end); if ok and g then return g end end
+     return "_" .. tostring(math.random(100000, 999999999))
+    end
+    return Mount
+end
+
+-- Module: core/acrylic
+EmbeddedModules["core/acrylic"] = function()
+    local Acrylic = {}
+    local Create, Theme, Effects
+    function Acrylic.Init(R) Create = R.Create; Theme = R.Theme; Effects = R.Effects end
+    local FROST = 0.12 
+    local GLINT_FADE = 0.25 
+    local HAIRLINE = 1 
+    local meta = setmetatable({}, { __mode = "k" })
+    local function tokens(theme) return theme.Acrylic or Theme.Acrylic end
+    local function white() return Color3.new(1, 1, 1) end
+    local function resolve(frame, theme, opts)
+     opts = opts or {}
+     local A, m = tokens(theme), meta[frame] or {}
+     local function pick(k, default)
+     local v = opts[k]
+     if v == nil then v = m[k] end
+     if v == nil then v = default end
+     return v
+     end
+     local o = {
+     solid = pick("solid", false) and true or false,
+     strokeAlpha = pick("strokeAlpha", A.strokeAlpha),
+     radius = pick("radius", theme.Radius.window),
+     edge = pick("edge", false) and true or false,
+     padInset = pick("padInset", 0),
+     base = opts.base or theme.Colors.card,
+     transparency = opts.transparency,
+     }
+     meta[frame] = { solid = o.solid, strokeAlpha = o.strokeAlpha, radius = o.radius, edge = o.edge, padInset = o.padInset }
+     return o
+    end
+    local function colorSeq(stops)
+     local kps = {}
+     for i, s in ipairs(stops) do kps[i] = ColorSequenceKeypoint.new(s[1], s[2]) end
+     return ColorSequence.new(kps)
+    end
+    local function numberSeq(stops)
+     local kps = {}
+     for i, s in ipairs(stops) do kps[i] = NumberSequenceKeypoint.new(s[1], s[2]) end
+     return NumberSequence.new(kps)
+    end
+    local function sheenStops(theme, fx)
+     return { { 0, fx.sheenTop or theme.Colors.card }, { 1, fx.sheenBottom } }
+    end
+    local function highlightStops(theme, fx, transparency)
+     local top = 1 - (1 - fx.highlight) * (1 - transparency)
+     return { { 0, top }, { tokens(theme).highlightBand, 1 }, { 1, 1 } }
+    end
+    local function glintStops(theme)
+     local fade = tokens(theme).glintFade or GLINT_FADE
+     return { { 0, 1 }, { fade, 0 }, { 1 - fade, 0 }, { 1, 1 } }
+    end
+    local function layerGeometry(inst, p)
+     inst.Position = UDim2.new(0, -p, 0, -p)
+     inst.Size = UDim2.new(1, 2 * p, 1, 2 * p)
+    end
+    local function glintGeometry(inst, r, p)
+     inst.Position = UDim2.new(0, r - p, 0, -p)
+     inst.Size = UDim2.new(1, 2 * p - 2 * r, 0, HAIRLINE)
+    end
+    local function ensureStroke(frame, theme, o)
+     if frame:FindFirstChildOfClass("UIStroke") then return end
+     Create.stroke(theme.Colors.border, HAIRLINE, o.strokeAlpha).Parent = frame
+    end
+    local function ensureNoise(frame, theme, o, fx)
+     local A = tokens(theme)
+     if A.noiseId == "" or frame:FindFirstChild("AcrylicNoise") then return end
+     local noise = Create("ImageLabel", {
+     Name = "AcrylicNoise", BackgroundTransparency = 1, Image = A.noiseId, ScaleType = Enum.ScaleType.Tile,
+     TileSize = UDim2.new(0, A.tileSize, 0, A.tileSize), ImageColor3 = fx.grainTint, ImageTransparency = fx.grain,
+     ZIndex = 0, Active = false, Parent = frame, Create.corner(o.radius),
+     })
+     layerGeometry(noise, o.padInset)
+    end
+    local function ensureGradient(frame, theme, fx)
+     if frame:FindFirstChildOfClass("UIGradient") then return end
+     Create.gradient({ rotation = 90, stops = sheenStops(theme, fx) }).Parent = frame
+    end
+    local function ensureSheen(frame, theme, o, fx, transparency)
+     if frame:FindFirstChild("AcrylicSheen") then return end
+     local sheen = Create("Frame", {
+     Name = "AcrylicSheen", BackgroundColor3 = white(), BackgroundTransparency = 0, BorderSizePixel = 0,
+     Visible = fx.highlight < 1, ZIndex = 0, Active = false, Parent = frame, Create.corner(o.radius),
+     Create.shade({ rotation = 90, stops = highlightStops(theme, fx, transparency) }),
+     })
+     layerGeometry(sheen, o.padInset)
+    end
+    local function ensureGlint(frame, theme, o, fx)
+     if frame:FindFirstChild("AcrylicGlint") then return end
+     local glint = Create("Frame", {
+     Name = "AcrylicGlint", BackgroundColor3 = white(), BorderSizePixel = 0, BackgroundTransparency = fx.glint,
+     Visible = fx.glint < 1, ZIndex = 0, Active = false, Parent = frame,
+     Create.shade({ rotation = 0, stops = glintStops(theme) }),
+     })
+     glintGeometry(glint, o.radius, o.padInset)
+    end
+    local function paintStroke(frame, theme, o)
+     local stroke = frame:FindFirstChildOfClass("UIStroke")
+     if not stroke then return end
+     stroke.Color = theme.Colors.border
+     stroke.Transparency = o.strokeAlpha
+     if Effects and (o.edge or stroke:FindFirstChildOfClass("UIGradient")) then Effects.rim(stroke, theme) end
+    end
+    local function paintFrost(frame, theme, fx, transparency)
+     local grad = frame:FindFirstChildOfClass("UIGradient")
+     if grad then grad.Color = colorSeq(sheenStops(theme, fx)) end
+     local noise = frame:FindFirstChild("AcrylicNoise")
+     if noise then noise.ImageColor3 = fx.grainTint; noise.ImageTransparency = fx.grain end
+     local sheen = frame:FindFirstChild("AcrylicSheen")
+     if sheen then
+     local g = sheen:FindFirstChildOfClass("UIGradient")
+     if g then g.Transparency = numberSeq(highlightStops(theme, fx, transparency)) end
+     sheen.Visible = fx.highlight < 1
+     end
+     local glint = frame:FindFirstChild("AcrylicGlint")
+     if glint then glint.BackgroundTransparency = fx.glint; glint.Visible = fx.glint < 1 end
+    end
+    local function paint(frame, theme, o)
+     local fx = Theme.fx(theme)
+     frame.BackgroundColor3 = o.base
+     if o.solid then frame.BackgroundTransparency = 0
+     elseif o.transparency ~= nil then frame.BackgroundTransparency = o.transparency end
+     paintStroke(frame, theme, o)
+     if o.edge and not o.solid and frame:FindFirstChildOfClass("UIGradient") then ensureGlint(frame, theme, o, fx) end
+     paintFrost(frame, theme, fx, frame.BackgroundTransparency or 0)
+     return frame
+    end
+    function Acrylic.decorate(frame, theme, opts)
+     local o = resolve(frame, theme, opts)
+     if o.transparency == nil then o.transparency = tokens(theme).frost or FROST end
+     ensureStroke(frame, theme, o)
+     if not o.solid then
+     local fx = Theme.fx(theme)
+     ensureNoise(frame, theme, o, fx)
+     ensureGradient(frame, theme, fx)
+     ensureSheen(frame, theme, o, fx, o.transparency)
+     end
+     return paint(frame, theme, o)
+    end
+    function Acrylic.reskin(frame, theme, opts)
+     return paint(frame, theme, resolve(frame, theme, opts))
+    end
+    return Acrylic
+end
+
+-- Module: core/asset
+EmbeddedModules["core/asset"] = function()
+    local Asset = {}
+    local cache = {}
+    function Asset.Init(_) end
+    local function customAssetFn()
+     local fn = getcustomasset or getsynasset or get_custom_asset
+     or rawget(_G, "getcustomasset") or rawget(_G, "getsynasset") or rawget(_G, "get_custom_asset")
+     if type(fn) == "function" then return fn end
+     return nil
+    end
+    local function getCustomAsset(path)
+     local fn = customAssetFn()
+     if not fn then return nil end
+     local ok, res = pcall(fn, path)
+     if ok and type(res) == "string" then return res end
+     return nil
+    end
+    local function djb2(s)
+     local h = 5381
+     for i = 1, #s do h = (h * 33 + string.byte(s, i)) % 2147483647 end
+     return h
+    end
+    local function fetchUrl(url)
+     if cache[url] ~= nil then return cache[url] or nil end
+     local hasFS = type(writefile) == "function" and type(isfile) == "function"
+     if not hasFS then cache[url] = false; return nil end
+     local ext = url:match("%.(%w%w%w%w?)$") or "png"
+     local path = "EzUI/assets/" .. djb2(url) .. "." .. ext
+     if type(makefolder) == "function" then pcall(makefolder, "EzUI"); pcall(makefolder, "EzUI/assets") end
+     if not isfile(path) then
+     local body
+     if type(game.HttpGet) == "function" then
+     local ok, data = pcall(function() return game:HttpGet(url) end)
+     if ok then body = data end
+     end
+     if not body and type(request) == "function" then
+     local ok, resp = pcall(request, { Url = url, Method = "GET" })
+     if ok and type(resp) == "table" then body = resp.Body end
+     end
+     if not body then cache[url] = false; return nil end
+     local okw = pcall(writefile, path, body)
+     if not okw then cache[url] = false; return nil end
+     end
+     local content = getCustomAsset(path)
+     cache[url] = content or false
+     return content
+    end
+    function Asset.image(value)
+     if type(value) ~= "string" or value == "" then return nil end
+     if value:match("^rbxassetid://") or value:match("^rbxasset://") or value:match("^rbxthumb://") then return value end
+     if value:match("^https?://") then return fetchUrl(value) end
+     if value:match("^%d+$") then return "rbxassetid://" .. value end
+     return nil
+    end
+    function Asset.resolvable(value)
+     if type(value) ~= "string" or value == "" then return false end
+     if value:match("^rbxassetid://") or value:match("^rbxasset://")
+     or value:match("^rbxthumb://") or value:match("^%d+$") then return true end
+     if value:match("^https?://") then
+     if cache[value] then return true end
+     if cache[value] == false then return false end 
+     return type(writefile) == "function" and type(isfile) == "function" and customAssetFn() ~= nil
+     end
+     return false
+    end
+    function Asset.imageAsync(value, cb, onFail)
+     local function fail() if onFail then onFail() end end
+     if type(value) ~= "string" or value == "" then fail(); return end
+     if value:match("^rbxassetid://") or value:match("^rbxasset://") or value:match("^rbxthumb://") then
+     cb(value); return
+     end
+     if value:match("^%d+$") then cb("rbxassetid://" .. value); return end
+     if value:match("^https?://") then
+     if cache[value] ~= nil then
+     if cache[value] then cb(cache[value]) else fail() end
+     return
+     end
+     local spawn = (type(task) == "table" and task.spawn) or function(fn) fn() end
+     spawn(function() local id = fetchUrl(value); if id then cb(id) else fail() end end)
+     return
+     end
+     fail() 
+    end
+    return Asset
+end
+
+-- Module: core/recipes
+EmbeddedModules["core/recipes"] = function()
+    local Recipes = {}
+    local Create, Theme, Animate, Icons, Safe, Device
+    function Recipes.Init(R)
+     Create = R.Create; Theme = R.Theme; Animate = R.Animate; Icons = R.Icons; Safe = R.Safe; Device = R.Device
+    end
+    local function noop() end
+    local NOOP_HANDLE = { reskin = noop, disconnect = noop }
+    local function themeOf(opts) return (opts and opts.theme) or Theme end
+    local function disconnectAll(conns)
+     return function()
+     for i = #conns, 1, -1 do
+     local c = conns[i]
+     if c and c.Disconnect then c:Disconnect() end
+     conns[i] = nil
+     end
+     end
+    end
+    local function colorOf(theme, c, default)
+     if type(c) == "string" then return theme.Colors[c] or theme.Colors[default] end
+     if c ~= nil then return c end
+     return theme.Colors[default]
+    end
+    local function isButton(inst)
+     local cls = inst.ClassName
+     return cls == "TextButton" or cls == "ImageButton"
+    end
+    local function isPress(input)
+     local t = input and input.UserInputType
+     return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
+    end
+    local function onPress(conns, src, down, up)
+     if isButton(src) then
+     conns[#conns + 1] = src.MouseButton1Down:Connect(down)
+     conns[#conns + 1] = src.MouseButton1Up:Connect(up)
+     else
+     conns[#conns + 1] = src.InputBegan:Connect(function(i) if isPress(i) then down() end end)
+     conns[#conns + 1] = src.InputEnded:Connect(function(i) if isPress(i) then up() end end)
+     end
+    end
+    local function pointerHover() return Device.SupportsHover() and Device.GetInput() ~= "Touch" end
+    local function pick(state, rest, hover, press)
+     if state == "press" then return press elseif state == "hover" then return hover end
+     return rest
+    end
+    local function hoverParts(kind, host, opts, theme)
+     if kind == "wash" then
+     local inset = opts.inset or {}
+     local ix, iy = inset.x or inset[1] or 0, inset.y or inset[2] or 0
+     local wash = Create("Frame", {
+     Name = "Hover", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1, BorderSizePixel = 0,
+     Size = UDim2.new(1, 2 * ix, 1, 2 * iy), Position = UDim2.new(0, -ix, 0, -iy),
+     ZIndex = 0, Active = false, Parent = host,
+     })
+     if opts.corner then Create.corner(opts.corner).Parent = wash end
+     local hoverA, pressA = opts.hoverAlpha or theme.Opacity.hoverWash, opts.pressAlpha or theme.Opacity.pressWash
+     return { { wash, "BackgroundTransparency", function(s) return pick(s, 1, hoverA, pressA) end } }, wash
+     elseif kind == "fill" then
+     local restA = host.BackgroundTransparency or 1
+     local hoverA = opts.hoverAlpha or theme.Opacity.rowHover
+     local pressA = opts.pressAlpha or hoverA
+     return { { host, "BackgroundTransparency", function(s) return pick(s, restA, hoverA, pressA) end } }, nil
+     elseif kind == "text" then
+     local function tint(s)
+     if s == "rest" then return colorOf(theme, opts.rest, "mutedForeground") end
+     return colorOf(theme, opts.hover, "foreground")
+     end
+     local parts = {}
+     if opts.label then parts[#parts + 1] = { opts.label, "TextColor3", tint } end
+     if opts.icon then parts[#parts + 1] = { opts.icon, "ImageColor3", tint } end
+     return parts, nil
+     end
+     error("Recipes.hover: kind must be 'wash' | 'text' | 'fill', got " .. tostring(kind), 3)
+    end
+    local function bindHover(sources, opts)
+     opts = opts or {}
+     local theme = themeOf(opts)
+     if not Device.SupportsHover() then return NOOP_HANDLE end
+     local kind = opts.kind or "wash"
+     local parts, wash = hoverParts(kind, opts.host or sources[1], opts, theme)
+     local state, hovering, pressed = "rest", false, false
+     local function paint(next, instant)
+     state = next
+     local dur = (next == "press") and "press" or "hover"
+     for _, p in ipairs(parts) do
+     local inst, prop, v = p[1], p[2], p[3](next)
+     if instant then inst[prop] = v else Animate.to(inst, dur, { [prop] = v }) end
+     end
+     end
+     local function enter() hovering = true; paint(pressed and "press" or "hover") end
+     local function leave() hovering = false; pressed = false; paint("rest") end
+     local function down() pressed = true; paint("press") end
+     local function up()
+     pressed = false
+     if hovering and pointerHover() then paint("hover") else hovering = false; paint("rest") end
+     end
+     local conns = {}
+     for _, src in ipairs(sources) do
+     conns[#conns + 1] = src.MouseEnter:Connect(enter)
+     conns[#conns + 1] = src.MouseLeave:Connect(leave)
+     onPress(conns, src, down, up)
+     end
+     return {
+     Frame = wash,
+     reskin = function()
+     if wash then wash.BackgroundColor3 = theme.Colors.foreground end
+     if kind == "text" then paint(state, true) end
+     end,
+     disconnect = disconnectAll(conns),
+     }
+    end
+    function Recipes.hover(hit, opts) return bindHover({ hit }, opts) end
+    function Recipes.press(hit, scaleHost, opts)
+     if scaleHost == nil then return { disconnect = noop } end
+     local theme = themeOf(opts)
+     local us = scaleHost:FindFirstChildOfClass("UIScale") or Create("UIScale", { Scale = 1, Parent = scaleHost })
+     local pressed = false
+     local function down() pressed = true; Animate.to(us, "press", { Scale = theme.Motion.pressScale }) end
+     local function up() if pressed then pressed = false; Animate.springTo(us, "release", { Scale = 1 }) end end
+     local conns = {}
+     onPress(conns, hit, down, up)
+     conns[#conns + 1] = hit.MouseLeave:Connect(up)
+     return { Scale = us, disconnect = disconnectAll(conns) }
+    end
+    local function centreOf(inst)
+     local p, s, a = inst.Position, inst.Size, inst.AnchorPoint
+     if not p or not s then return UDim2.new(0.5, 0, 0.5, 0) end
+     local ax, ay = a and a.X or 0, a and a.Y or 0
+     return UDim2.new(p.X.Scale + s.X.Scale * (0.5 - ax), p.X.Offset + s.X.Offset * (0.5 - ax),
+     p.Y.Scale + s.Y.Scale * (0.5 - ay), p.Y.Offset + s.Y.Offset * (0.5 - ay))
+    end
+    function Recipes.iconButton(btn, opts)
+     opts = opts or {}
+     local theme = themeOf(opts)
+     local size = opts.hitSize or (Device.IsTouch() and theme.Sizes.touchHit or theme.Sizes.iconButton)
+     local hit = Create("ImageButton", {
+     Name = (btn.Name or btn.ClassName) .. "Hit", BackgroundTransparency = 1, ImageTransparency = 1, BorderSizePixel = 0,
+     AutoButtonColor = false, Active = true, AnchorPoint = Vector2.new(0.5, 0.5), Position = centreOf(btn),
+     Size = UDim2.new(0, size, 0, size), ZIndex = (btn.ZIndex or 1) + 1, Parent = opts.parent or btn.Parent,
+     })
+     local sources = { btn, hit }
+     local function restC() return colorOf(theme, opts.rest, "mutedForeground") end
+     local function hoverC() return colorOf(theme, opts.hover, "foreground") end
+     if opts.icon then Icons.apply(btn, opts.icon, restC()) end
+     local wash = bindHover(sources, { theme = theme, host = hit, corner = theme.Radius.sm, kind = "wash" })
+     local conns, hovering = {}, false
+     if Device.SupportsHover() then
+     local function enter() hovering = true; Icons.tint(btn, hoverC()) end
+     local function leave() hovering = false; Icons.tint(btn, restC()) end
+     local function up() if not pointerHover() then leave() end end
+     for _, src in ipairs(sources) do
+     conns[#conns + 1] = src.MouseEnter:Connect(enter)
+     conns[#conns + 1] = src.MouseLeave:Connect(leave)
+     conns[#conns + 1] = src.MouseButton1Up:Connect(up)
+     end
+     end
+     if opts.onClick then
+     for _, src in ipairs(sources) do conns[#conns + 1] = src.MouseButton1Click:Connect(opts.onClick) end
+     end
+     local disconnectOwn = disconnectAll(conns)
+     return {
+     Hit = hit,
+     reskin = function()
+     local c = hovering and hoverC() or restC()
+     if opts.icon then Icons.apply(btn, opts.icon, c) else btn.ImageColor3 = c end
+     wash.reskin()
+     end,
+     disconnect = function() disconnectOwn(); wash.disconnect() end,
+     }
+    end
+    function Recipes.focus(stroke, host, getColor, opts)
+     opts = opts or {}
+     local theme = themeOf(opts)
+     local restThickness = stroke.Thickness or 1
+     local restAlphaOpt = opts.restAlpha
+     local capturedAlpha = stroke.Transparency or 0
+     local function restAlpha()
+     if type(restAlphaOpt) == "function" then return restAlphaOpt() or 0 end
+     if type(restAlphaOpt) == "number" then return restAlphaOpt end
+     return capturedAlpha
+     end
+     local function apply(focused)
+     focused = focused and true or false
+     local goal = { Thickness = focused and theme.Stroke.focusThickness or restThickness }
+     local rest = restAlpha()
+     if rest > 0 then goal.Transparency = focused and theme.Stroke.control or rest end
+     if getColor then goal.Color = getColor(focused) end
+     Animate.to(stroke, "fast", goal)
+     end
+     local function on() apply(true) end
+     local function off() apply(false) end
+     local conns = {}
+     local function bind(name, fn)
+     local ok, sig = pcall(function() return host[name] end)
+     if ok and sig ~= nil then conns[#conns + 1] = sig:Connect(fn) end
+     end
+     bind("Focused", on); bind("FocusLost", off)
+     bind("SelectionGained", on); bind("SelectionLost", off)
+     pcall(function()
+     host.SelectionImageObject = Create("Frame", { Name = "SelectionImage", BackgroundTransparency = 1, BorderSizePixel = 0 })
+     end)
+     return { set = apply, disconnect = disconnectAll(conns) }
+    end
+    function Recipes.disabled(parts, on, theme)
+     theme = theme or Theme
+     local alpha = theme.Opacity.disabled
+     for _, p in ipairs(parts or {}) do
+     local inst, prop, rest = p[1], p[2], p[3]
+     if inst and prop then
+     if rest == nil then rest = 0 end
+     Animate.to(inst, "fast", { [prop] = on and alpha or rest })
+     end
+     end
+    end
+    function Recipes.empty(parent, opts)
+     opts = opts or {}
+     local theme = themeOf(opts)
+     local z = opts.zIndex
+     local frame = Create("Frame", {
+     Name = "Empty", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 1, 0),
+     Visible = false, Active = false, ZIndex = z, Parent = parent,
+     Create("UIListLayout", {
+     FillDirection = Enum.FillDirection.Vertical, SortOrder = Enum.SortOrder.LayoutOrder,
+     HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center,
+     Padding = UDim.new(0, theme.Spacing.gap),
+     }),
+     })
+     local icon
+     if opts.icon then
+     icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, LayoutOrder = 1, ZIndex = z,
+     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), Parent = frame })
+     Icons.apply(icon, opts.icon, theme.Colors.mutedForeground)
+     end
+     local label = Create("TextLabel", { Name = "Text", BackgroundTransparency = 1, Text = opts.text or "",
+     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Center, TextWrapped = true,
+     AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), LayoutOrder = 2, ZIndex = z, Parent = frame })
+     Create.text(label, theme, "muted")
+     return {
+     Frame = frame,
+     SetVisible = function(b) frame.Visible = b and true or false end,
+     reskin = function()
+     label.TextColor3 = theme.Colors.mutedForeground
+     if icon then Icons.apply(icon, opts.icon, theme.Colors.mutedForeground) end
+     end,
+     }
+    end
+    function Recipes.scrollbar(sf, theme)
+     theme = theme or Theme
+     sf.ScrollBarThickness = theme.Sizes.scrollbar
+     sf.ScrollBarImageColor3 = theme.Colors.border
+     sf.ScrollBarImageTransparency = theme.Scrollbar.alpha
+     local id = theme.Scrollbar.imageId
+     if id and id ~= "" then sf.TopImage = id; sf.MidImage = id; sf.BottomImage = id end
+     return sf
+    end
+    return Recipes
+end
+
+-- Module: components/button
+EmbeddedModules["components/button"] = function()
+    local Button = {}
+    local Create, DefaultTheme, Animate, Maid, Icons, Safe, Recipes, Device
+    function Button.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Icons = R.Icons; Safe = R.Safe
+     Recipes = R.Recipes; Device = R.Device
+    end
+    local function palette(theme, variant)
+     if variant == "destructive" then return theme.Colors.destructive, theme.Colors.primaryForeground, nil end
+     if variant == "secondary" then return theme.Colors.surface, theme.Colors.foreground, nil end
+     if variant == "outline" then return theme.Colors.card, theme.Colors.foreground, theme.Colors.border end
+     if variant == "ghost" then return theme.Colors.surface, theme.Colors.foreground, nil end
+     return theme.Colors.primary, theme.Colors.primaryForeground, nil 
+    end
+    local function pointerHover() return Device.SupportsHover() and Device.GetInput() ~= "Touch" end
+    function Button.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local variant = opts.Variant or "default"
+     local maid = Maid.new()
+     local bg, fg, stroke = palette(theme, variant)
+     local transparent = (variant == "ghost")
+     local auto = opts.AutoWidth and true or false
+     local btn = Create("TextButton", {
+     Name = "Button", AutoButtonColor = false, Text = "",
+     BackgroundTransparency = 1,
+     Size = auto and UDim2.new(0, 0, 0, 34) or UDim2.new(1, 0, 0, 34),
+     AutomaticSize = auto and Enum.AutomaticSize.X or Enum.AutomaticSize.None,
+     LayoutOrder = opts.LayoutOrder or 0,
+     Parent = opts.Parent,
+     })
+     if auto then Create("UISizeConstraint", { MinSize = Vector2.new(72, 0), Parent = btn }) end
+     local surface = Create("Frame", {
+     Name = "Surface", BackgroundColor3 = bg, BackgroundTransparency = transparent and 1 or 0,
+     AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+     Size = auto and UDim2.new(0, 0, 1, 0) or UDim2.new(1, 0, 1, 0),
+     AutomaticSize = auto and Enum.AutomaticSize.X or Enum.AutomaticSize.None,
+     Active = false, Parent = btn,
+     Create.corner(theme.Radius.md),
+     })
+     local scale = Create("UIScale", { Scale = 1, Parent = surface })
+     local line = stroke and Create("UIStroke", { Color = stroke, Thickness = 1, Parent = surface }) or nil
+     local hovering = false
+     local bgNormal = transparent and 1 or 0
+     local bgHover = transparent and theme.Opacity.ghostHover or theme.Opacity.hoverFill
+     local bgPressed = transparent and theme.Opacity.ghostPress or theme.Opacity.pressFill
+     local hasIcon = opts.Icon ~= nil
+     local label, iconImg
+     if auto then
+     Create.padding({ left = 14, right = 14 }).Parent = surface
+     Create("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal,
+     HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center,
+     SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, theme.Spacing.icon), Parent = surface })
+     if hasIcon then
+     iconImg = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
+     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = 1, Parent = surface })
+     Icons.apply(iconImg, opts.Icon, fg)
+     end
+     label = Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1,
+     Text = opts.Text or "Button", TextColor3 = fg,
+     AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 1, 0),
+     LayoutOrder = 2, Parent = surface }), theme, "label")
+     else
+     if hasIcon then
+     iconImg = Create("ImageLabel", {
+     Name = "Icon", BackgroundTransparency = 1,
+     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), Position = UDim2.new(0.5, -44, 0.5, -theme.Sizes.icon / 2),
+     Parent = surface,
+     })
+     Icons.apply(iconImg, opts.Icon, fg)
+     end
+     label = Create.text(Create("TextLabel", {
+     Name = "Label", BackgroundTransparency = 1,
+     Text = opts.Text or "Button", TextColor3 = fg, Size = UDim2.new(1, 0, 1, 0),
+     Position = UDim2.new(0, hasIcon and 12 or 0, 0, 0),
+     Parent = surface,
+     }), theme, "label")
+     end
+     local enabled, loading, pressed = true, false, false
+     local function blocked() return (not enabled) or loading end
+     local function lineColor() return (variant == "outline" and hovering) and theme.Colors.ring or stroke end
+     local function paintSurface(alpha) Animate.to(surface, "hover", { BackgroundTransparency = alpha }) end
+     local function enter()
+     if blocked() then return end
+     hovering = true
+     paintSurface(bgHover)
+     if line and variant == "outline" then Animate.to(line, "hover", { Color = lineColor() }) end
+     end
+     local function leave()
+     hovering = false
+     if blocked() then return end
+     paintSurface(bgNormal)
+     if pressed then pressed = false; Animate.springTo(scale, "release", { Scale = 1 }) end
+     if line and variant == "outline" then Animate.to(line, "hover", { Color = lineColor() }) end
+     end
+     maid:Give(btn.MouseEnter:Connect(enter))
+     maid:Give(btn.MouseLeave:Connect(leave))
+     maid:Give(btn.MouseButton1Down:Connect(function()
+     if blocked() then return end
+     pressed = true
+     Animate.to(scale, "press", { Scale = theme.Motion.pressScale })
+     Animate.to(surface, "press", { BackgroundTransparency = bgPressed })
+     end))
+     maid:Give(btn.MouseButton1Up:Connect(function()
+     if blocked() then return end
+     pressed = false
+     Animate.springTo(scale, "release", { Scale = 1 })
+     if not pointerHover() then hovering = false end
+     paintSurface(hovering and bgHover or bgNormal)
+     if line and variant == "outline" then Animate.to(line, "hover", { Color = lineColor() }) end
+     end))
+     maid:Give(btn.MouseButton1Click:Connect(function()
+     if blocked() then return end
+     if opts.Action == "ResetConfig" and opts.Window and opts.Window.ResetConfiguration then opts.Window:ResetConfiguration() end
+     if opts.Callback then opts.Callback() end
+     end))
+     maid:Give(btn)
+     local function dimParts()
+     local parts = { { label, "TextTransparency", 0 } }
+     if not transparent then parts[#parts + 1] = { surface, "BackgroundTransparency", bgNormal } end
+     if line then parts[#parts + 1] = { line, "Transparency", theme.Stroke.control } end
+     if iconImg then parts[#parts + 1] = { iconImg, "ImageTransparency", 0 } end
+     return parts
+     end
+     local function setEnabled(en)
+     enabled = en ~= false
+     btn.Active = enabled
+     if enabled then hovering = false; pressed = false end
+     Safe.mutate(function()
+     if enabled then scale.Scale = 1 end
+     Recipes.disabled(dimParts(), not enabled, theme)
+     end)
+     end
+     local spinner, spin
+     local function stopSpin() if spin then spin.Cancel(); spin = nil end end
+     local function mkSpinner()
+     if spinner then return spinner end
+     local props = { Name = "Spinner", BackgroundTransparency = 1, Visible = false,
+     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = 2, Parent = surface }
+     if not auto then props.Position = UDim2.new(0.5, -theme.Sizes.icon / 2, 0.5, -theme.Sizes.icon / 2) end
+     spinner = Create("ImageLabel", props)
+     Icons.apply(spinner, "loader", fg)
+     return spinner
+     end
+     local function setLoading(b)
+     loading = b and true or false
+     if loading then pressed = false; hovering = false end
+     Safe.mutate(function()
+     local s = mkSpinner()
+     stopSpin()
+     s.Visible = loading
+     if loading then
+     scale.Scale = 1
+     paintSurface(bgNormal)
+     Animate.toThen(label, "fast", { TextTransparency = 1 }, function()
+     if auto and loading then label.Visible = false end
+     end)
+     spin = Animate.spin(s)
+     else
+     label.Visible = true
+     Animate.to(label, "fast", { TextTransparency = 0 })
+     end
+     end)
+     end
+     maid:Give(stopSpin)
+     if opts.AccentReg then maid:Give(opts.AccentReg(function()
+     local nbg, nfg, nstroke = palette(theme, variant)
+     bg, fg, stroke = nbg, nfg, nstroke
+     if not transparent then surface.BackgroundColor3 = nbg end
+     label.TextColor3 = nfg
+     if iconImg then Icons.apply(iconImg, opts.Icon, nfg) end
+     if spinner then Icons.apply(spinner, "loader", nfg) end
+     if line then line.Color = lineColor() end 
+     end)) end
+     if opts.Disabled then setEnabled(false) end
+     if opts.Loading then setLoading(true) end
+     return {
+     Frame = btn,
+     SetText = function(s) Safe.mutate(function() label.Text = s end) end,
+     SetEnabled = setEnabled,
+     SetLoading = setLoading,
+     Destroy = function() maid:DoCleanup() end,
+     }
+    end
+    return Button
+end
+
+-- Module: components/slider
+EmbeddedModules["components/slider"] = function()
+    local Slider = {}
+    local Create, DefaultTheme, Animate, Maid, Flag, Safe, Effects, Recipes, Device
+    local UserInputService = game:GetService("UserInputService")
+    function Slider.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe
+     Effects = R.Effects; Recipes = R.Recipes; Device = R.Device
+    end
+    local TRACK_H, TRACK_Y, HANDLE = 6, -16, 12
+    function Slider.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local maid = Maid.new()
+     local minV = opts.Min or 0
+     local maxV = opts.Max or 100
+     local step = opts.Step or 1
+     local value = minV
+     local onChanged
+     local function snap(n)
+     n = tonumber(n) or value
+     if step and step > 0 then n = math.floor((n - minV) / step + 0.5) * step + minV end
+     if n < minV then n = minV elseif n > maxV then n = maxV end
+     return n
+     end
+     local hasDesc = opts.Description ~= nil and opts.Description ~= ""
+     local padY = theme.Spacing.inputY
+     local root = Create("Frame", { Name = "SliderRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
+     Size = UDim2.new(1, 0, 0, (opts.Text and (hasDesc and 62 or 46) or 28) + padY * 2), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
+     Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = padY, bottom = padY }) })
+     local valueLabel, titleLabel, descLabel
+     if opts.Text then
+     titleLabel = Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
+     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+     Size = UDim2.new(1, -40, 0, 16), Parent = root }), theme, "label")
+     valueLabel = Create.text(Create("TextLabel", { Name = "Value", BackgroundTransparency = 1, Text = "0",
+     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Right,
+     Size = UDim2.new(0, 40, 0, 16), Position = UDim2.new(1, -40, 0, 0), Parent = root }), theme, "muted")
+     if hasDesc then
+     descLabel = Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+     TextYAlignment = Enum.TextYAlignment.Top,
+     Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -40, 0, 18), Parent = root }), theme, "muted")
+     end
+     end
+     local track = Create("Frame", { Name = "Track", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
+     Size = UDim2.new(1, 0, 0, TRACK_H), Position = UDim2.new(0, 0, 1, TRACK_Y), Parent = root, Create.corner(TRACK_H / 2) })
+     local trackStroke = Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = track })
+     local fill = Create("Frame", { Name = "Fill", BackgroundColor3 = theme.Colors.primary, BorderSizePixel = 0,
+     Size = UDim2.new(0, 0, 1, 0), Parent = track, Create.corner(TRACK_H / 2) })
+     local handle = Create("Frame", { Name = "Handle", BackgroundColor3 = theme.Colors.foreground, BorderSizePixel = 0, ZIndex = 2,
+     AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(0, HANDLE, 0, HANDLE),
+     Position = UDim2.new(0, 0, 0.5, 0), Parent = track, Create.corner(HANDLE / 2) })
+     local handleScale = Create("UIScale", { Scale = 1, Parent = handle })
+     local halo = Effects.glow(track, theme, theme.Colors.primary, "control", 0, "Halo")
+     Effects.mirror(halo, handle, "control", theme)
+     local hitH = theme.Sizes.sliderHit
+     local hit = Create("Frame", { Name = "Hit", BackgroundTransparency = 1, BorderSizePixel = 0, Active = false, ZIndex = 3,
+     Size = UDim2.new(1, 0, 0, hitH), Position = UDim2.new(0, 0, 1, TRACK_Y + TRACK_H / 2 - hitH / 2), Parent = root })
+     local dragging = false
+     local built = false
+     local function valuePos(scale) return UDim2.new(scale, 0, 0.5, 0) end
+     local function apply(v)
+     value = snap(v)
+     local scale = (maxV > minV) and (value - minV) / (maxV - minV) or 0
+     local direct = dragging or not built
+     Safe.mutate(function()
+     if valueLabel then valueLabel.Text = tostring(value) end
+     if direct then
+     fill.Size = UDim2.new(scale, 0, 1, 0)
+     handle.Position = valuePos(scale)
+     if halo then halo.Position = valuePos(scale) end
+     return
+     end
+     local E, D = Animate.EASING.smooth, Animate.DIR.Out
+     Animate.to(fill, "base", { Size = UDim2.new(scale, 0, 1, 0) }, E, D)
+     Animate.to(handle, "base", { Position = valuePos(scale) }, E, D)
+     if halo then Animate.to(halo, "base", { Position = valuePos(scale) }, E, D) end
+     end)
+     end
+     local commit = Flag.bind(opts, snap(opts.Default or minV), apply)
+     built = true
+     local api = { Frame = root }
+     function api.GetValue() return value end
+     function api.SetValue(v) commit(snap(v)); if opts.Callback then opts.Callback(value) end; if onChanged then onChanged(value) end end
+     function api.OnChanged(fn) onChanged = fn end
+     function api.Destroy() maid:DoCleanup() end
+     local hovering = false
+     local function handleGrow()
+     local s = dragging and theme.Motion.handleGrow or (hovering and theme.Motion.handleHover or 1)
+     Animate.springTo(handleScale, "release", { Scale = s })
+     if halo then Animate.to(halo, "base", { ImageTransparency = dragging and theme.fx(theme).glow or 1 }) end
+     end
+     local enabled = true
+     local function setEnabled(b)
+     local was = enabled
+     enabled = b ~= false
+     Safe.mutate(function()
+     local parts = { { fill, "BackgroundTransparency", 0 }, { handle, "BackgroundTransparency", 0 } }
+     if valueLabel then parts[#parts + 1] = { valueLabel, "TextTransparency", 0 } end
+     Recipes.disabled(parts, not enabled, theme)
+     end)
+     if was and not enabled and dragging then dragging = false; handleGrow() end
+     end
+     if opts.AccentReg then maid:Give(opts.AccentReg(function()
+     root.BackgroundColor3 = theme.Colors.surface
+     track.BackgroundColor3 = theme.Colors.background
+     trackStroke.Color = theme.Colors.border
+     fill.BackgroundColor3 = theme.Colors.primary
+     handle.BackgroundColor3 = theme.Colors.foreground
+     Effects.reskin(halo, theme, "glow", theme.Colors.primary)
+     if titleLabel then titleLabel.TextColor3 = theme.Colors.foreground end
+     if descLabel then descLabel.TextColor3 = theme.Colors.mutedForeground end
+     if valueLabel then valueLabel.TextColor3 = theme.Colors.mutedForeground end
+     end)) end
+     local function fromX(px)
+     local ap, sz = track.AbsolutePosition, track.AbsoluteSize
+     local x0 = ap and ap.X or 0
+     local w = (sz and sz.X) or 1
+     local t = (px - x0) / (w > 0 and w or 1)
+     if t < 0 then t = 0 elseif t > 1 then t = 1 end
+     api.SetValue(minV + t * (maxV - minV))
+     end
+     maid:Give(hit.InputBegan:Connect(function(input)
+     if not enabled then return end
+     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+     dragging = true; handleGrow(); fromX(input.Position.X)
+     end
+     end))
+     maid:Give(UserInputService.InputChanged:Connect(function(input)
+     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+     fromX(input.Position.X)
+     end
+     end))
+     maid:Give(UserInputService.InputEnded:Connect(function(input)
+     if not dragging then return end
+     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+     dragging = false; handleGrow()
+     end
+     end))
+     if Device.SupportsHover() then
+     maid:Give(hit.MouseEnter:Connect(function() hovering = true; if enabled then handleGrow() end end))
+     maid:Give(hit.MouseLeave:Connect(function() hovering = false; handleGrow() end))
+     end
+     function api.SetEnabled(b) setEnabled(b) end
+     if opts.Disabled then setEnabled(false) end
+     maid:Give(root)
+     return api
+    end
+    return Slider
+end
+
+-- Module: components/host
+EmbeddedModules["components/host"] = function()
+    local Host = {}
+    local SIMPLE = {
+     AddLabel = { mod = "Label" },
+     AddParagraph = { mod = "Label", preset = { Variant = "paragraph" } },
+     AddSection = { mod = "Label", preset = { Variant = "section" } },
+     AddSeparator = { mod = "Separator" },
+     AddButton = { mod = "Button" },
+     AddToggle = { mod = "Toggle" },
+     AddTextBox = { mod = "TextBox" },
+     AddNumberBox = { mod = "NumberBox" },
+     AddSelectBox = { mod = "SelectBox" },
+     AddSlider = { mod = "Slider" },
+     AddKeybind = { mod = "Keybind" },
+     AddColorPicker = { mod = "ColorPicker" },
+     AddImage = { mod = "Image" },
+     AddTable = { mod = "Table" },
+     AddProgressBar = { mod = "ProgressBar" },
+     AddResizable = { mod = "Resizable" },
+     AddCard = { mod = "Card" },
+    }
+    function Host.own(control, fn)
+     if type(fn) ~= "function" then error("Host.own(control, fn): fn must be a function", 2) end
+     if control.Maid then control.Maid:Give(fn); return control end
+     local d = control.Destroy
+     control.Destroy = function(...)
+     fn()
+     if d then return d(...) end
+     end
+     return control
+    end
+    function Host.attach(api, ctx)
+     for method, spec in pairs(SIMPLE) do
+     api[method] = function(_, arg)
+     local opts = {}
+     if type(arg) == "string" then
+     opts.Text = arg
+     elseif type(arg) == "function" then
+     opts.Text = arg 
+     elseif type(arg) == "table" then
+     for k, v in pairs(arg) do opts[k] = v end
+     end
+     if spec.preset then
+     for k, v in pairs(spec.preset) do if opts[k] == nil then opts[k] = v end end
+     end
+     opts.Parent = ctx.content
+     opts.LayoutOrder = ctx.nextOrder()
+     opts.Theme = ctx.theme
+     opts.Config = ctx.config
+     opts.Window = ctx.window
+     opts.AccentReg = ctx.accentThemer and ctx.accentThemer.register
+     opts.AccentThemer = ctx.accentThemer
+     opts.RegisterSearchable = ctx.registerSearchable
+     opts.RegisterControl = ctx.registerControl
+     local control = ctx.R[spec.mod].new(opts)
+     if opts.Tooltip and ctx.R.Tooltip and control and control.Frame then
+     local tip = ctx.R.Tooltip.attach(control.Frame, opts.Tooltip, ctx.theme)
+     if tip and tip.Destroy then Host.own(control, tip.Destroy) end
+     end
+     if ctx.registerSearchable and control and control.Frame then
+     local searchText = (type(opts.Text) == "string" and opts.Text) or opts.Title or opts.Name or ""
+     ctx.registerSearchable(control.Frame, searchText)
+     end
+     if control and control.Frame then
+     local C = ctx.R.Create
+     local scrim = C("Frame", { Name = "LockScrim", BackgroundColor3 = ctx.theme.Colors.background,
+     BackgroundTransparency = ctx.theme.Opacity.scrim, BorderSizePixel = 0, Visible = false, ZIndex = 50,
+     Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame, C.corner(ctx.theme.Radius.md) })
+     local shield = C("ImageButton", { Name = "LockShield", AutoButtonColor = false, BackgroundTransparency = 1,
+     Active = true, Visible = false, ZIndex = 51, Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame })
+     control.SetLocked = function(b) local v = b and true or false; ctx.R.Safe.mutate(function() scrim.Visible = v; shield.Visible = v end) end
+     if ctx.accentThemer then
+     Host.own(control, ctx.accentThemer.register(function() scrim.BackgroundColor3 = ctx.theme.Colors.background end))
+     end
+     if opts.Locked then control.SetLocked(true) end
+     if ctx.registerControl then ctx.registerControl(control) end
+     end
+     return control
+     end
+     end
+    end
+    return Host
 end
 
 -- Module: components/window
@@ -1712,683 +2954,34 @@ EmbeddedModules["components/window"] = function()
     return Window
 end
 
--- Module: core/recipes
-EmbeddedModules["core/recipes"] = function()
-    local Recipes = {}
-    local Create, Theme, Animate, Icons, Safe, Device
-    function Recipes.Init(R)
-     Create = R.Create; Theme = R.Theme; Animate = R.Animate; Icons = R.Icons; Safe = R.Safe; Device = R.Device
+-- Module: core/safe
+EmbeddedModules["core/safe"] = function()
+    local Safe = {}
+    local Overlay
+    local RunService = game:GetService("RunService")
+    local queue = {} 
+    local flushConn = nil
+    function Safe.Init(R) Overlay = R.Overlay end
+    local function defaultHasCapability()
+     return (pcall(function()
+     local root = Overlay and Overlay.peek and Overlay.peek()
+     if root then root.BackgroundTransparency = root.BackgroundTransparency end
+     end))
     end
-    local function noop() end
-    local NOOP_HANDLE = { reskin = noop, disconnect = noop }
-    local function themeOf(opts) return (opts and opts.theme) or Theme end
-    local function disconnectAll(conns)
-     return function()
-     for i = #conns, 1, -1 do
-     local c = conns[i]
-     if c and c.Disconnect then c:Disconnect() end
-     conns[i] = nil
-     end
-     end
+    local hasCapability = defaultHasCapability
+    function Safe._setCapabilityCheck(fn) hasCapability = fn or defaultHasCapability end
+    local function flush()
+     flushConn = nil
+     local i = 1
+     while i <= #queue do local job = queue[i]; i = i + 1; pcall(job) end
+     for k = #queue, 1, -1 do queue[k] = nil end
     end
-    local function colorOf(theme, c, default)
-     if type(c) == "string" then return theme.Colors[c] or theme.Colors[default] end
-     if c ~= nil then return c end
-     return theme.Colors[default]
+    function Safe.mutate(fn)
+     if hasCapability() then return fn() end
+     queue[#queue + 1] = fn
+     if not flushConn then flushConn = RunService.Heartbeat:Once(flush) end
     end
-    local function isButton(inst)
-     local cls = inst.ClassName
-     return cls == "TextButton" or cls == "ImageButton"
-    end
-    local function isPress(input)
-     local t = input and input.UserInputType
-     return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
-    end
-    local function onPress(conns, src, down, up)
-     if isButton(src) then
-     conns[#conns + 1] = src.MouseButton1Down:Connect(down)
-     conns[#conns + 1] = src.MouseButton1Up:Connect(up)
-     else
-     conns[#conns + 1] = src.InputBegan:Connect(function(i) if isPress(i) then down() end end)
-     conns[#conns + 1] = src.InputEnded:Connect(function(i) if isPress(i) then up() end end)
-     end
-    end
-    local function pointerHover() return Device.SupportsHover() and Device.GetInput() ~= "Touch" end
-    local function pick(state, rest, hover, press)
-     if state == "press" then return press elseif state == "hover" then return hover end
-     return rest
-    end
-    local function hoverParts(kind, host, opts, theme)
-     if kind == "wash" then
-     local inset = opts.inset or {}
-     local ix, iy = inset.x or inset[1] or 0, inset.y or inset[2] or 0
-     local wash = Create("Frame", {
-     Name = "Hover", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1, BorderSizePixel = 0,
-     Size = UDim2.new(1, 2 * ix, 1, 2 * iy), Position = UDim2.new(0, -ix, 0, -iy),
-     ZIndex = 0, Active = false, Parent = host,
-     })
-     if opts.corner then Create.corner(opts.corner).Parent = wash end
-     local hoverA, pressA = opts.hoverAlpha or theme.Opacity.hoverWash, opts.pressAlpha or theme.Opacity.pressWash
-     return { { wash, "BackgroundTransparency", function(s) return pick(s, 1, hoverA, pressA) end } }, wash
-     elseif kind == "fill" then
-     local restA = host.BackgroundTransparency or 1
-     local hoverA = opts.hoverAlpha or theme.Opacity.rowHover
-     local pressA = opts.pressAlpha or hoverA
-     return { { host, "BackgroundTransparency", function(s) return pick(s, restA, hoverA, pressA) end } }, nil
-     elseif kind == "text" then
-     local function tint(s)
-     if s == "rest" then return colorOf(theme, opts.rest, "mutedForeground") end
-     return colorOf(theme, opts.hover, "foreground")
-     end
-     local parts = {}
-     if opts.label then parts[#parts + 1] = { opts.label, "TextColor3", tint } end
-     if opts.icon then parts[#parts + 1] = { opts.icon, "ImageColor3", tint } end
-     return parts, nil
-     end
-     error("Recipes.hover: kind must be 'wash' | 'text' | 'fill', got " .. tostring(kind), 3)
-    end
-    local function bindHover(sources, opts)
-     opts = opts or {}
-     local theme = themeOf(opts)
-     if not Device.SupportsHover() then return NOOP_HANDLE end
-     local kind = opts.kind or "wash"
-     local parts, wash = hoverParts(kind, opts.host or sources[1], opts, theme)
-     local state, hovering, pressed = "rest", false, false
-     local function paint(next, instant)
-     state = next
-     local dur = (next == "press") and "press" or "hover"
-     for _, p in ipairs(parts) do
-     local inst, prop, v = p[1], p[2], p[3](next)
-     if instant then inst[prop] = v else Animate.to(inst, dur, { [prop] = v }) end
-     end
-     end
-     local function enter() hovering = true; paint(pressed and "press" or "hover") end
-     local function leave() hovering = false; pressed = false; paint("rest") end
-     local function down() pressed = true; paint("press") end
-     local function up()
-     pressed = false
-     if hovering and pointerHover() then paint("hover") else hovering = false; paint("rest") end
-     end
-     local conns = {}
-     for _, src in ipairs(sources) do
-     conns[#conns + 1] = src.MouseEnter:Connect(enter)
-     conns[#conns + 1] = src.MouseLeave:Connect(leave)
-     onPress(conns, src, down, up)
-     end
-     return {
-     Frame = wash,
-     reskin = function()
-     if wash then wash.BackgroundColor3 = theme.Colors.foreground end
-     if kind == "text" then paint(state, true) end
-     end,
-     disconnect = disconnectAll(conns),
-     }
-    end
-    function Recipes.hover(hit, opts) return bindHover({ hit }, opts) end
-    function Recipes.press(hit, scaleHost, opts)
-     if scaleHost == nil then return { disconnect = noop } end
-     local theme = themeOf(opts)
-     local us = scaleHost:FindFirstChildOfClass("UIScale") or Create("UIScale", { Scale = 1, Parent = scaleHost })
-     local pressed = false
-     local function down() pressed = true; Animate.to(us, "press", { Scale = theme.Motion.pressScale }) end
-     local function up() if pressed then pressed = false; Animate.springTo(us, "release", { Scale = 1 }) end end
-     local conns = {}
-     onPress(conns, hit, down, up)
-     conns[#conns + 1] = hit.MouseLeave:Connect(up)
-     return { Scale = us, disconnect = disconnectAll(conns) }
-    end
-    local function centreOf(inst)
-     local p, s, a = inst.Position, inst.Size, inst.AnchorPoint
-     if not p or not s then return UDim2.new(0.5, 0, 0.5, 0) end
-     local ax, ay = a and a.X or 0, a and a.Y or 0
-     return UDim2.new(p.X.Scale + s.X.Scale * (0.5 - ax), p.X.Offset + s.X.Offset * (0.5 - ax),
-     p.Y.Scale + s.Y.Scale * (0.5 - ay), p.Y.Offset + s.Y.Offset * (0.5 - ay))
-    end
-    function Recipes.iconButton(btn, opts)
-     opts = opts or {}
-     local theme = themeOf(opts)
-     local size = opts.hitSize or (Device.IsTouch() and theme.Sizes.touchHit or theme.Sizes.iconButton)
-     local hit = Create("ImageButton", {
-     Name = (btn.Name or btn.ClassName) .. "Hit", BackgroundTransparency = 1, ImageTransparency = 1, BorderSizePixel = 0,
-     AutoButtonColor = false, Active = true, AnchorPoint = Vector2.new(0.5, 0.5), Position = centreOf(btn),
-     Size = UDim2.new(0, size, 0, size), ZIndex = (btn.ZIndex or 1) + 1, Parent = opts.parent or btn.Parent,
-     })
-     local sources = { btn, hit }
-     local function restC() return colorOf(theme, opts.rest, "mutedForeground") end
-     local function hoverC() return colorOf(theme, opts.hover, "foreground") end
-     if opts.icon then Icons.apply(btn, opts.icon, restC()) end
-     local wash = bindHover(sources, { theme = theme, host = hit, corner = theme.Radius.sm, kind = "wash" })
-     local conns, hovering = {}, false
-     if Device.SupportsHover() then
-     local function enter() hovering = true; Icons.tint(btn, hoverC()) end
-     local function leave() hovering = false; Icons.tint(btn, restC()) end
-     local function up() if not pointerHover() then leave() end end
-     for _, src in ipairs(sources) do
-     conns[#conns + 1] = src.MouseEnter:Connect(enter)
-     conns[#conns + 1] = src.MouseLeave:Connect(leave)
-     conns[#conns + 1] = src.MouseButton1Up:Connect(up)
-     end
-     end
-     if opts.onClick then
-     for _, src in ipairs(sources) do conns[#conns + 1] = src.MouseButton1Click:Connect(opts.onClick) end
-     end
-     local disconnectOwn = disconnectAll(conns)
-     return {
-     Hit = hit,
-     reskin = function()
-     local c = hovering and hoverC() or restC()
-     if opts.icon then Icons.apply(btn, opts.icon, c) else btn.ImageColor3 = c end
-     wash.reskin()
-     end,
-     disconnect = function() disconnectOwn(); wash.disconnect() end,
-     }
-    end
-    function Recipes.focus(stroke, host, getColor, opts)
-     opts = opts or {}
-     local theme = themeOf(opts)
-     local restThickness = stroke.Thickness or 1
-     local restAlphaOpt = opts.restAlpha
-     local capturedAlpha = stroke.Transparency or 0
-     local function restAlpha()
-     if type(restAlphaOpt) == "function" then return restAlphaOpt() or 0 end
-     if type(restAlphaOpt) == "number" then return restAlphaOpt end
-     return capturedAlpha
-     end
-     local function apply(focused)
-     focused = focused and true or false
-     local goal = { Thickness = focused and theme.Stroke.focusThickness or restThickness }
-     local rest = restAlpha()
-     if rest > 0 then goal.Transparency = focused and theme.Stroke.control or rest end
-     if getColor then goal.Color = getColor(focused) end
-     Animate.to(stroke, "fast", goal)
-     end
-     local function on() apply(true) end
-     local function off() apply(false) end
-     local conns = {}
-     local function bind(name, fn)
-     local ok, sig = pcall(function() return host[name] end)
-     if ok and sig ~= nil then conns[#conns + 1] = sig:Connect(fn) end
-     end
-     bind("Focused", on); bind("FocusLost", off)
-     bind("SelectionGained", on); bind("SelectionLost", off)
-     pcall(function()
-     host.SelectionImageObject = Create("Frame", { Name = "SelectionImage", BackgroundTransparency = 1, BorderSizePixel = 0 })
-     end)
-     return { set = apply, disconnect = disconnectAll(conns) }
-    end
-    function Recipes.disabled(parts, on, theme)
-     theme = theme or Theme
-     local alpha = theme.Opacity.disabled
-     for _, p in ipairs(parts or {}) do
-     local inst, prop, rest = p[1], p[2], p[3]
-     if inst and prop then
-     if rest == nil then rest = 0 end
-     Animate.to(inst, "fast", { [prop] = on and alpha or rest })
-     end
-     end
-    end
-    function Recipes.empty(parent, opts)
-     opts = opts or {}
-     local theme = themeOf(opts)
-     local z = opts.zIndex
-     local frame = Create("Frame", {
-     Name = "Empty", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 1, 0),
-     Visible = false, Active = false, ZIndex = z, Parent = parent,
-     Create("UIListLayout", {
-     FillDirection = Enum.FillDirection.Vertical, SortOrder = Enum.SortOrder.LayoutOrder,
-     HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center,
-     Padding = UDim.new(0, theme.Spacing.gap),
-     }),
-     })
-     local icon
-     if opts.icon then
-     icon = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, LayoutOrder = 1, ZIndex = z,
-     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), Parent = frame })
-     Icons.apply(icon, opts.icon, theme.Colors.mutedForeground)
-     end
-     local label = Create("TextLabel", { Name = "Text", BackgroundTransparency = 1, Text = opts.text or "",
-     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Center, TextWrapped = true,
-     AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), LayoutOrder = 2, ZIndex = z, Parent = frame })
-     Create.text(label, theme, "muted")
-     return {
-     Frame = frame,
-     SetVisible = function(b) frame.Visible = b and true or false end,
-     reskin = function()
-     label.TextColor3 = theme.Colors.mutedForeground
-     if icon then Icons.apply(icon, opts.icon, theme.Colors.mutedForeground) end
-     end,
-     }
-    end
-    function Recipes.scrollbar(sf, theme)
-     theme = theme or Theme
-     sf.ScrollBarThickness = theme.Sizes.scrollbar
-     sf.ScrollBarImageColor3 = theme.Colors.border
-     sf.ScrollBarImageTransparency = theme.Scrollbar.alpha
-     local id = theme.Scrollbar.imageId
-     if id and id ~= "" then sf.TopImage = id; sf.MidImage = id; sf.BottomImage = id end
-     return sf
-    end
-    return Recipes
-end
-
--- Module: components/toggle
-EmbeddedModules["components/toggle"] = function()
-    local Toggle = {}
-    local Create, DefaultTheme, Animate, Maid, Flag, Safe, Effects, Recipes
-    function Toggle.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe
-     Effects = R.Effects; Recipes = R.Recipes
-    end
-    local FALLBACK = { knobRim = 0.7 }
-    local TRACK_W, TRACK_H = 44, 24
-    function Toggle.new(opts)
-     opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local maid = Maid.new()
-     local value = false
-     local onChanged
-     local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-     local rowH = hasDesc and 50 or 34
-     local padY = hasDesc and 8 or 0
-     local btn = Create("TextButton", {
-     Name = "Toggle", AutoButtonColor = false, Text = "",
-     BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
-     Size = UDim2.new(1, 0, 0, rowH), LayoutOrder = opts.LayoutOrder or 0,
-     Parent = opts.Parent,
-     Create.corner(theme.Radius.md),
-     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = padY, bottom = padY }),
-     })
-     local label = Create.text(Create("TextLabel", {
-     Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Toggle",
-     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-     TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-     Size = UDim2.new(1, -54, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn,
-     }), theme, "label")
-     local desc
-     if hasDesc then
-     desc = Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
-     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-     TextYAlignment = Enum.TextYAlignment.Top,
-     Position = UDim2.new(0, 0, 0, 18), Size = UDim2.new(1, -54, 0, 18), Parent = btn }), theme, "muted")
-     end
-     local track = Create("Frame", {
-     Name = "Track", BackgroundColor3 = theme.Colors.switchTrackOff, BorderSizePixel = 0, ZIndex = 2,
-     Size = UDim2.new(0, TRACK_W, 0, TRACK_H), Position = UDim2.new(1, -TRACK_W, 0.5, -TRACK_H / 2),
-     Parent = btn, Create.corner(TRACK_H / 2),
-     })
-     local trackStroke = Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = track })
-     local knobSize = theme.Sizes.knob
-     local knobPad = (TRACK_H - knobSize) / 2
-     local knobY = -knobSize / 2
-     local offX, onX = knobPad, TRACK_W - knobSize - knobPad
-     local stretchW = knobSize * theme.Motion.knobStretch
-     local knob = Create("Frame", {
-     Name = "Knob", BackgroundColor3 = theme.Colors.foreground, BorderSizePixel = 0, ZIndex = 3,
-     Size = UDim2.new(0, knobSize, 0, knobSize), Position = UDim2.new(0, offX, 0.5, knobY),
-     Parent = track, Create.corner(knobSize / 2),
-     })
-     local knobStroke = Create.stroke(theme.Colors.background, 1, theme.Stroke.knob or FALLBACK.knobRim)
-     knobStroke.Parent = knob
-     local glow = Effects.glow(btn, theme, theme.Colors.primary, "control", 1, "TrackGlow")
-     Effects.mirror(glow, track, "control", theme)
-     local function knobRest() return UDim2.new(0, value and onX or offX, 0.5, knobY) end
-     local built = false
-     local function apply(v)
-     value = v and true or false
-     local instant = not built
-     Safe.mutate(function()
-     local trackC = value and theme.Colors.primary or theme.Colors.switchTrackOff
-     local knobC = value and theme.Colors.primaryForeground or theme.Colors.foreground
-     local strokeA = value and 1 or theme.Stroke.control
-     local glowA = value and theme.fx(theme).glow or 1
-     if instant then
-     knob.Position = knobRest(); knob.Size = UDim2.new(0, knobSize, 0, knobSize)
-     knob.BackgroundColor3 = knobC; track.BackgroundColor3 = trackC
-     trackStroke.Transparency = strokeA
-     if glow then glow.ImageTransparency = glowA end
-     return
-     end
-     Animate.springTo(knob, "release", { Position = knobRest(), Size = UDim2.new(0, knobSize, 0, knobSize) })
-     Animate.to(knob, "base", { BackgroundColor3 = knobC })
-     Animate.to(track, "base", { BackgroundColor3 = trackC })
-     Animate.to(trackStroke, "fast", { Transparency = strokeA })
-     if glow then Animate.to(glow, "base", { ImageTransparency = glowA }) end
-     end)
-     end
-     local commit = Flag.bind(opts, opts.Default == true, apply)
-     built = true
-     local hover = Recipes.hover(btn, { theme = theme, corner = theme.Radius.md,
-     inset = { x = theme.Spacing.inputX, y = padY } })
-     maid:Give(hover.disconnect)
-     local enabled = true
-     local function setEnabled(b)
-     enabled = b ~= false
-     Safe.mutate(function()
-     local parts = { { track, "BackgroundTransparency", 0 }, { knob, "BackgroundTransparency", 0 },
-     { label, "TextTransparency", 0 } }
-     if desc then parts[#parts + 1] = { desc, "TextTransparency", 0 } end
-     Recipes.disabled(parts, not enabled, theme)
-     end)
-     end
-     local pressed = false
-     local function pressKnob()
-     pressed = true
-     Animate.to(knob, "press", {
-     Size = UDim2.new(0, stretchW, 0, knobSize),
-     Position = UDim2.new(0, value and (TRACK_W - knobPad - stretchW) or knobPad, 0.5, knobY),
-     })
-     end
-     local function releaseKnob()
-     if not pressed then return end
-     pressed = false
-     Animate.springTo(knob, "release", { Size = UDim2.new(0, knobSize, 0, knobSize), Position = knobRest() })
-     end
-     if opts.AccentReg then maid:Give(opts.AccentReg(function()
-     btn.BackgroundColor3 = theme.Colors.surface
-     label.TextColor3 = theme.Colors.foreground
-     if desc then desc.TextColor3 = theme.Colors.mutedForeground end
-     trackStroke.Color = theme.Colors.border
-     knobStroke.Color = theme.Colors.background
-     Effects.reskin(glow, theme, "glow", theme.Colors.primary)
-     hover.reskin()
-     apply(value)
-     end)) end
-     local api = { Frame = btn }
-     function api.Get() return value end
-     function api.Set(v)
-     commit(v and true or false)
-     if opts.Callback then opts.Callback(value) end
-     if onChanged then onChanged(value) end
-     end
-     function api.OnChanged(fn) onChanged = fn end
-     function api.SetEnabled(b) setEnabled(b) end
-     function api.Destroy() maid:DoCleanup() end
-     maid:Give(btn.MouseButton1Down:Connect(function() if enabled then pressKnob() end end))
-     maid:Give(btn.MouseButton1Up:Connect(releaseKnob))
-     maid:Give(btn.MouseLeave:Connect(releaseKnob))
-     maid:Give(btn.MouseButton1Click:Connect(function() if enabled then api.Set(not value) end end))
-     maid:Give(btn)
-     if opts.Disabled then setEnabled(false) end
-     return api
-    end
-    return Toggle
-end
-
--- Module: components/image
-EmbeddedModules["components/image"] = function()
-    local Image = {}
-    local Create, DefaultTheme, Icons, Safe, Asset, Animate, Effects
-    function Image.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Icons = R.Icons; Safe = R.Safe
-     Asset = R.Asset; Animate = R.Animate; Effects = R.Effects
-    end
-    local RESOLVE_TIMEOUT = 60
-    function Image.new(opts)
-     opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local img = Create("ImageLabel", {
-     Name = "Image", BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
-     Image = "", ImageColor3 = opts.Color or Color3.fromRGB(255, 255, 255),
-     Size = UDim2.new(1, 0, 0, opts.Height or 80), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
-     })
-     local glyphColor = function() return opts.Color or theme.Colors.foreground end
-     if opts.Lucide then Icons.apply(img, opts.Lucide, glyphColor()) end
-     local unreg = (opts.Lucide and not opts.Color and opts.AccentReg) and opts.AccentReg(function()
-     Icons.apply(img, opts.Lucide, glyphColor())
-     end)
-     local src = (not opts.Lucide and type(opts.Image) == "string" and opts.Image ~= "") and opts.Image or nil
-     local resolvable = src ~= nil and Asset.resolvable(src)
-     local landed, armed, dead, owned, gaveUp = false, false, false, false, false
-     local skel, loadConn = nil, nil
-     local function waiting()
-     if gaveUp then return false end
-     if resolvable and not owned and not landed then return true end
-     return img.IsLoaded == false
-     end
-     local function settle()
-     if not armed or waiting() then return end
-     armed = false
-     if loadConn then loadConn:Disconnect(); loadConn = nil end
-     if skel then skel.Stop(); skel = nil end
-     Animate.to(img, "base", { ImageTransparency = 0 })
-     end
-     if resolvable then
-     Asset.imageAsync(src, function(id)
-     landed = true
-     Safe.mutate(function()
-     if dead or owned then return end
-     img.Image = id
-     settle()
-     end)
-     end, function()
-     landed = true
-     Safe.mutate(function()
-     if dead or owned then return end
-     gaveUp = true
-     settle()
-     end)
-     end)
-     elseif src then
-     img.Image = src
-     end
-     if waiting() then
-     armed = true
-     img.ImageTransparency = 1 
-     skel = Effects.skeleton(img, theme, { radius = theme.Radius.sm })
-     loadConn = img:GetPropertyChangedSignal("IsLoaded"):Connect(function()
-     Safe.mutate(function() if not dead then settle() end end)
-     end)
-     task.delay(RESOLVE_TIMEOUT, function()
-     Safe.mutate(function()
-     if dead or not armed then return end
-     gaveUp = true
-     settle() 
-     end)
-     end)
-     end
-     return {
-     Frame = img,
-     SetImage = function(v) Safe.mutate(function() owned = true; img.Image = v; settle() end) end,
-     Destroy = function()
-     dead = true
-     if loadConn then loadConn:Disconnect(); loadConn = nil end
-     if skel then skel.Stop(); skel = nil end
-     if unreg then unreg() end
-     img:Destroy()
-     end,
-     }
-    end
-    return Image
-end
-
--- Module: components/host
-EmbeddedModules["components/host"] = function()
-    local Host = {}
-    local SIMPLE = {
-     AddLabel = { mod = "Label" },
-     AddParagraph = { mod = "Label", preset = { Variant = "paragraph" } },
-     AddSection = { mod = "Label", preset = { Variant = "section" } },
-     AddSeparator = { mod = "Separator" },
-     AddButton = { mod = "Button" },
-     AddToggle = { mod = "Toggle" },
-     AddTextBox = { mod = "TextBox" },
-     AddNumberBox = { mod = "NumberBox" },
-     AddSelectBox = { mod = "SelectBox" },
-     AddSlider = { mod = "Slider" },
-     AddKeybind = { mod = "Keybind" },
-     AddColorPicker = { mod = "ColorPicker" },
-     AddImage = { mod = "Image" },
-     AddTable = { mod = "Table" },
-     AddProgressBar = { mod = "ProgressBar" },
-     AddResizable = { mod = "Resizable" },
-     AddCard = { mod = "Card" },
-    }
-    function Host.own(control, fn)
-     if type(fn) ~= "function" then error("Host.own(control, fn): fn must be a function", 2) end
-     if control.Maid then control.Maid:Give(fn); return control end
-     local d = control.Destroy
-     control.Destroy = function(...)
-     fn()
-     if d then return d(...) end
-     end
-     return control
-    end
-    function Host.attach(api, ctx)
-     for method, spec in pairs(SIMPLE) do
-     api[method] = function(_, arg)
-     local opts = {}
-     if type(arg) == "string" then
-     opts.Text = arg
-     elseif type(arg) == "function" then
-     opts.Text = arg 
-     elseif type(arg) == "table" then
-     for k, v in pairs(arg) do opts[k] = v end
-     end
-     if spec.preset then
-     for k, v in pairs(spec.preset) do if opts[k] == nil then opts[k] = v end end
-     end
-     opts.Parent = ctx.content
-     opts.LayoutOrder = ctx.nextOrder()
-     opts.Theme = ctx.theme
-     opts.Config = ctx.config
-     opts.Window = ctx.window
-     opts.AccentReg = ctx.accentThemer and ctx.accentThemer.register
-     opts.AccentThemer = ctx.accentThemer
-     local control = ctx.R[spec.mod].new(opts)
-     if opts.Tooltip and ctx.R.Tooltip and control and control.Frame then
-     local tip = ctx.R.Tooltip.attach(control.Frame, opts.Tooltip, ctx.theme)
-     if tip and tip.Destroy then Host.own(control, tip.Destroy) end
-     end
-     if ctx.registerSearchable and control and control.Frame then
-     local searchText = (type(opts.Text) == "string" and opts.Text) or opts.Title or opts.Name or ""
-     ctx.registerSearchable(control.Frame, searchText)
-     end
-     if control and control.Frame then
-     local C = ctx.R.Create
-     local scrim = C("Frame", { Name = "LockScrim", BackgroundColor3 = ctx.theme.Colors.background,
-     BackgroundTransparency = ctx.theme.Opacity.scrim, BorderSizePixel = 0, Visible = false, ZIndex = 50,
-     Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame, C.corner(ctx.theme.Radius.md) })
-     local shield = C("ImageButton", { Name = "LockShield", AutoButtonColor = false, BackgroundTransparency = 1,
-     Active = true, Visible = false, ZIndex = 51, Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame })
-     control.SetLocked = function(b) local v = b and true or false; ctx.R.Safe.mutate(function() scrim.Visible = v; shield.Visible = v end) end
-     if ctx.accentThemer then
-     Host.own(control, ctx.accentThemer.register(function() scrim.BackgroundColor3 = ctx.theme.Colors.background end))
-     end
-     if opts.Locked then control.SetLocked(true) end
-     if ctx.registerControl then ctx.registerControl(control) end
-     end
-     return control
-     end
-     end
-    end
-    return Host
-end
-
--- Module: core/numfmt
-EmbeddedModules["core/numfmt"] = function()
-    local Numfmt = {}
-    local UNITS = { { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "k" } }
-    local function trim(n, dec)
-     dec = dec or 0
-     local s = string.format("%." .. dec .. "f", n)
-     if dec > 0 then
-     s = s:gsub("0+$", "")
-     s = s:gsub("%.$", "")
-     end
-     if s == "-0" then s = "0" end
-     return s
-    end
-    local function compact(n, dec)
-     local a = math.abs(n)
-     if a < 1e3 then return trim(n, dec) end
-     for _, u in ipairs(UNITS) do
-     if a >= u[1] then return trim(n / u[1], dec) .. u[2] end
-     end
-     return trim(n, dec)
-    end
-    local function comma(n, dec)
-     local neg = n < 0
-     local a = math.abs(n)
-     local intpart = math.floor(a)
-     local frac = ""
-     if dec > 0 then
-     local f = trim(a - intpart, dec) 
-     local dot = f:find("%.")
-     if dot then frac = f:sub(dot) end 
-     end
-     local s = tostring(intpart)
-     s = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
-     s = s:gsub("^,", "")
-     return (neg and "-" or "") .. s .. frac
-    end
-    function Numfmt.format(n, opts)
-     opts = opts or {}
-     n = tonumber(n) or 0
-     local body
-     if opts.Format == "compact" then body = compact(n, opts.Decimals or 1)
-     elseif opts.Format == "comma" then body = comma(n, opts.Decimals or 1)
-     elseif opts.Decimals ~= nil then body = trim(n, opts.Decimals)
-     else body = tostring(n) end
-     return (opts.Prefix or "") .. body .. (opts.Suffix or "")
-    end
-    local MULT = { k = 1e3, m = 1e6, b = 1e9, t = 1e12 }
-    function Numfmt.parse(s, opts)
-     opts = opts or {}
-     s = tostring(s or "")
-     if opts.Prefix and opts.Prefix ~= "" and s:sub(1, #opts.Prefix) == opts.Prefix then
-     s = s:sub(#opts.Prefix + 1)
-     end
-     if opts.Suffix and opts.Suffix ~= "" and s:sub(-#opts.Suffix) == opts.Suffix then
-     s = s:sub(1, #s - #opts.Suffix)
-     end
-     s = s:gsub(",", "")
-     s = s:gsub("%s", "")
-     s = s:gsub("^%+", "")
-     local mult = 1
-     local low = s:sub(-1):lower()
-     if MULT[low] then mult = MULT[low]; s = s:sub(1, #s - 1) end
-     local num = tonumber(s)
-     if num == nil then return nil end
-     return num * mult
-    end
-    return Numfmt
-end
-
--- Module: core/maid
-EmbeddedModules["core/maid"] = function()
-    local Maid = {}
-    Maid.__index = Maid
-    function Maid.new()
-     return setmetatable({ _tasks = {} }, Maid)
-    end
-    function Maid:Give(task)
-     self._tasks[#self._tasks + 1] = task
-     return task
-    end
-    local function cleanupTask(t)
-     local kind = (typeof and typeof(t)) or type(t)
-     if kind == "function" then
-     t()
-     elseif kind == "Instance" then
-     t:Destroy()
-     elseif kind == "RBXScriptConnection" then
-     t:Disconnect()
-     elseif kind == "table" then
-     if type(t.Disconnect) == "function" then t:Disconnect()
-     elseif type(t.Destroy) == "function" then t:Destroy()
-     end
-     end
-    end
-    function Maid:DoCleanup()
-     local tasks = self._tasks
-     self._tasks = {}
-     for i = #tasks, 1, -1 do
-     local ok, err = pcall(cleanupTask, tasks[i])
-     if not ok and warn then warn("Maid task error: " .. tostring(err)) end
-     end
-    end
-    Maid.Destroy = Maid.DoCleanup
-    return Maid
+    return Safe
 end
 
 -- Module: core/icons
@@ -2705,553 +3298,675 @@ EmbeddedModules["core/icons"] = function()
     return Icons
 end
 
--- Module: core/themer
-EmbeddedModules["core/themer"] = function()
-    local Themer = {}
-    function Themer.Init(_) end
-    Themer.ACCENTS = {
-     { Name = "Adaptive", Primary = Color3.fromRGB(250, 250, 250), Foreground = Color3.fromRGB(24, 24, 27) },
-     { Name = "Indigo", Primary = Color3.fromRGB(99, 102, 241), Foreground = Color3.fromRGB(250, 250, 250) },
-     { Name = "Violet", Primary = Color3.fromRGB(139, 92, 246), Foreground = Color3.fromRGB(250, 250, 250) },
-     { Name = "Emerald", Primary = Color3.fromRGB(16, 185, 129), Foreground = Color3.fromRGB(250, 250, 250) },
-     { Name = "Sky", Primary = Color3.fromRGB(56, 189, 248), Foreground = Color3.fromRGB(24, 24, 27) },
-     { Name = "Rose", Primary = Color3.fromRGB(244, 63, 94), Foreground = Color3.fromRGB(250, 250, 250) },
+-- Module: core/animate
+EmbeddedModules["core/animate"] = function()
+    local TweenService = game:GetService("TweenService")
+    local Animate = {}
+    local Theme
+    local motionTbl 
+    local enabled, explicit = true, false
+    local DEFAULT_DUR = 0.18
+    local FALLBACK = { spin = 0.8, exit = 0.14, exitScale = 0.96, popSlide = 6 }
+    function Animate.Init(R)
+     Theme = R.Theme
+     Animate.Motion = motionTbl or Theme.Motion
+    end
+    Animate.EASING = {
+     pop = Enum.EasingStyle.Back, smooth = Enum.EasingStyle.Quint,
+     enter = Enum.EasingStyle.Quint, exit = Enum.EasingStyle.Quart,
+     snap = Enum.EasingStyle.Quad or Enum.EasingStyle.Quart, 
     }
-    function Themer.accent(name)
-     for _, a in ipairs(Themer.ACCENTS) do if a.Name == name then return a end end
-     return nil
+    Animate.DIR = { In = Enum.EasingDirection.In, Out = Enum.EasingDirection.Out, InOut = Enum.EasingDirection.InOut }
+    local function token(name)
+     local v = motionTbl and motionTbl[name]
+     if type(v) ~= "number" and Theme and Theme.Motion then v = Theme.Motion[name] end
+     if type(v) == "number" then return v end
+     return FALLBACK[name]
     end
-    function Themer.names()
-     local out = {}
-     for _, a in ipairs(Themer.ACCENTS) do out[#out + 1] = a.Name end
-     return out
+    local function resolve(duration)
+     if type(duration) == "number" then return duration end
+     if type(duration) == "string" then return token(duration) or DEFAULT_DUR end
+     return DEFAULT_DUR
     end
-    function Themer.new()
-     local fns = {}
-     local self = {}
-     function self.register(fn)
-     fns[fn] = true
-     return function() fns[fn] = nil end
-     end
-     function self.reskin(reason)
-     for fn in pairs(fns) do pcall(fn, reason) end
-     end
-     function self.setAccent(primary, foreground)
-     self.reskin("accent") 
-     end
-     return self
+    local function resolveDelay(delay)
+     if type(delay) == "number" then return delay end
+     if type(delay) == "string" then return token(delay) or 0 end
+     return 0
     end
-    return Themer
+    function Animate.useMotion(tbl)
+     motionTbl = type(tbl) == "table" and tbl or nil
+     Animate.Motion = motionTbl or (Theme and Theme.Motion)
+    end
+    function Animate.info(duration, style, dir, delay)
+     return TweenInfo.new(duration, style or Enum.EasingStyle.Quart, dir or Enum.EasingDirection.Out, 0, false, delay or 0)
+    end
+    function Animate.setEnabled(b) enabled = b and true or false; explicit = true end
+    function Animate.applyDefault(b)
+     if not explicit then enabled = b and true or false end
+     return enabled
+    end
+    function Animate.isEnabled() return enabled end
+    function Animate.isExplicit() return explicit end
+    local function instantTween()
+     return { Completed = { Connect = function(_, fn) if fn then fn() end; return { Disconnect = function() end } end } }
+    end
+    local function applyNow(instance, goalProps)
+     for k, v in pairs(goalProps) do instance[k] = v end
+    end
+    function Animate.to(instance, duration, goalProps, style, dir, delay)
+     if not enabled then
+     applyNow(instance, goalProps)
+     return instantTween()
+     end
+     local tween = TweenService:Create(instance, Animate.info(resolve(duration), style, dir, resolveDelay(delay)), goalProps)
+     tween:Play()
+     return tween
+    end
+    function Animate.toThen(instance, duration, goalProps, onComplete, style, dir, delay)
+     if not enabled then
+     applyNow(instance, goalProps)
+     if onComplete then onComplete() end
+     return instantTween()
+     end
+     local tween = TweenService:Create(instance, Animate.info(resolve(duration), style, dir, resolveDelay(delay)), goalProps)
+     if onComplete then tween.Completed:Connect(onComplete) end
+     tween:Play()
+     return tween
+    end
+    function Animate.springTo(instance, duration, goalProps)
+     return Animate.to(instance, duration, goalProps, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    end
+    function Animate.rotateTo(instance, duration, deg, style, dir)
+     return Animate.to(instance, duration, { Rotation = deg },
+     style or Enum.EasingStyle.Back, dir or Enum.EasingDirection.Out)
+    end
+    function Animate.exitTo(instance, duration, goalProps, onDone)
+     return Animate.toThen(instance, duration, goalProps, onDone, Animate.EASING.exit, Animate.DIR.In)
+    end
+    function Animate.chain(steps, onDone)
+     local i = 0
+     local function step()
+     i = i + 1
+     local s = steps and steps[i]
+     if not s then if onDone then onDone() end; return end
+     Animate.toThen(s[1], s[2], s[3], step, s[4], s[5], s[6])
+     end
+     step()
+    end
+    function Animate.loop(instance, duration, goalProps, style, reverses, repeatCount)
+     reverses = reverses == true
+     if not enabled then
+     if not reverses then applyNow(instance, goalProps) end
+     return { Cancel = function() end }
+     end
+     local info = TweenInfo.new(resolve(duration), style or Enum.EasingStyle.Linear, Enum.EasingDirection.InOut,
+     repeatCount or -1, reverses, 0)
+     local tween = TweenService:Create(instance, info, goalProps)
+     tween:Play()
+     return { Cancel = function() tween:Cancel() end }
+    end
+    function Animate.spin(img, duration)
+     img.Rotation = 0
+     if not enabled then return { Cancel = function() img.Rotation = 0 end } end
+     local handle = Animate.loop(img, duration or token("spin"), { Rotation = 360 }, Enum.EasingStyle.Linear, false, -1)
+     return { Cancel = function() handle.Cancel(); img.Rotation = 0 end }
+    end
+    function Animate.pulse(instance, duration, goalProps, style, cycles)
+     return Animate.loop(instance, duration, goalProps, style, true, cycles or -1)
+    end
+    local function uiScaleOf(inst)
+     local us = inst:FindFirstChildOfClass("UIScale")
+     if not us then us = Instance.new("UIScale"); us.Parent = inst end
+     return us
+    end
+    function Animate.pop(inst, duration)
+     local us = uiScaleOf(inst)
+     us.Scale = 0.9
+     return Animate.to(us, duration or "base", { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    end
+    function Animate.popIn(frame, edge)
+     local us = uiScaleOf(frame)
+     if not enabled then us.Scale = 1; return instantTween() end
+     local target = frame.Position
+     us.Scale = token("exitScale")
+     if target then
+     local dy = (edge == "up") and token("popSlide") or -token("popSlide")
+     frame.Position = UDim2.new(target.X.Scale, target.X.Offset, target.Y.Scale, target.Y.Offset + dy)
+     Animate.to(frame, "fast", { Position = target }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+     end
+     return Animate.springTo(us, "base", { Scale = 1 })
+    end
+    function Animate.popOut(frame, onDone)
+     local us = uiScaleOf(frame)
+     return Animate.toThen(us, token("exit"), { Scale = token("exitScale") }, onDone, Animate.EASING.exit, Animate.DIR.In)
+    end
+    return Animate
 end
 
--- Module: core/effects
-EmbeddedModules["core/effects"] = function()
-    local Effects = {}
-    local Create, Theme, Animate, Safe, Device
-    local SKELETON = { period = 1.1, rotation = 15 }
-    local meta = setmetatable({}, { __mode = "k" })
-    function Effects.Init(R)
-     Create = R.Create; Theme = R.Theme; Animate = R.Animate; Safe = R.Safe; Device = R.Device
-    end
-    local function need(theme, fn)
-     if type(theme) ~= "table" or type(theme.Effect) ~= "table" then
-     error("Effects." .. fn .. ": theme (Theme.new instance) required", 3)
+-- Module: core/numfmt
+EmbeddedModules["core/numfmt"] = function()
+    local Numfmt = {}
+    local UNITS = { { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "k" } }
+    local function trim(n, dec)
+     dec = dec or 0
+     local s = string.format("%." .. dec .. "f", n)
+     if dec > 0 then
+     s = s:gsub("0+$", "")
+     s = s:gsub("%.$", "")
      end
-     return theme
+     if s == "-0" then s = "0" end
+     return s
     end
-    local function metaOf(layer)
-     local m = meta[layer]
-     if not m then m = {}; meta[layer] = m end
-     return m
-    end
-    local function levelOf(theme, level, layer)
-     local key = level or (meta[layer] and meta[layer].level) or "control"
-     local lv = theme.Effect[key]
-     if type(lv) ~= "table" or type(lv.spread) ~= "number" then
-     error("Effects: unknown level '" .. tostring(key) .. "' (window/dialog/popover/toast/tooltip/control)", 3)
+    local function compact(n, dec)
+     local a = math.abs(n)
+     if a < 1e3 then return trim(n, dec) end
+     for _, u in ipairs(UNITS) do
+     if a >= u[1] then return trim(n / u[1], dec) .. u[2] end
      end
-     return lv
+     return trim(n, dec)
     end
-    local function shadowId(theme)
-     local id = theme.Effect.shadowId
-     if type(id) ~= "string" or id == "" then return nil end
-     return id
-    end
-    local function sliceLayer(parent, theme, props)
-     local img = Create("ImageLabel", {
-     Name = props.name, Image = shadowId(theme), ScaleType = Enum.ScaleType.Slice,
-     ImageColor3 = props.color, ImageTransparency = props.alpha,
-     AnchorPoint = Vector2.new(0.5, 0.5), Active = false, BackgroundTransparency = 1,
-     ZIndex = props.zIndex or 0, Parent = parent,
-     })
-     if Rect and Rect.new then
-     local s = theme.Effect.slice
-     img.SliceCenter = Rect.new(s.x0, s.y0, s.x1, s.y1)
+    local function comma(n, dec)
+     local neg = n < 0
+     local a = math.abs(n)
+     local intpart = math.floor(a)
+     local frac = ""
+     if dec > 0 then
+     local f = trim(a - intpart, dec) 
+     local dot = f:find("%.")
+     if dot then frac = f:sub(dot) end 
      end
-     return img
+     local s = tostring(intpart)
+     s = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+     s = s:gsub("^,", "")
+     return (neg and "-" or "") .. s .. frac
     end
-    function Effects.shadow(parent, theme, opts)
-     need(theme, "shadow"); opts = opts or {}
-     if not shadowId(theme) then return nil end
-     local img = sliceLayer(parent, theme, {
-     name = opts.name or "Shadow", color = Color3.new(0, 0, 0), alpha = Theme.fx(theme).shadow, zIndex = opts.zIndex,
-     })
-     local m = metaOf(img); m.kind = "shadow"; m.level = opts.level
-     return img
-    end
-    local function glowAllowed(theme)
-     local mode = theme.Effect.controlGlow
-     if mode == "off" or mode == false then return false end
-     if mode == "auto" and Device.IsMobile() then return false end
-     return true
-    end
-    function Effects.glow(parent, theme, colorToken, level, zIndex, name)
-     need(theme, "glow")
-     if colorToken == nil then error("Effects.glow: colorToken (a theme.Colors value) required", 2) end
-     if not shadowId(theme) or not glowAllowed(theme) then return nil end
-     local img = sliceLayer(parent, theme, { name = name or "Glow", color = colorToken, alpha = 1, zIndex = zIndex })
-     local m = metaOf(img); m.kind = "glow"; m.level = level; m.token = colorToken
-     return img
-    end
-    local function growth(theme, m)
-     return m.lifted and 2 * theme.Effect.lift.spreadDelta or 0
-    end
-    local function writeGeometry(shadow, theme, m, rest, xs, xo, ys, yo)
-     m.rest = rest
-     local g = growth(theme, m)
-     shadow.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
-     shadow.Position = UDim2.new(xs, xo, ys, yo)
-    end
-    function Effects.place(shadow, x, y, w, h, level, theme)
-     if not shadow then return nil end
-     need(theme, "place")
-     local lv, m = levelOf(theme, level, shadow), metaOf(shadow)
-     writeGeometry(shadow, theme, m, { 0, w + 2 * lv.spread, 0, h + 2 * lv.spread }, 0, x + w / 2, 0, y + h / 2 + lv.offsetY)
-     return shadow
-    end
-    function Effects.mirror(shadow, host, level, theme)
-     if not (shadow and host) then return nil end
-     need(theme, "mirror")
-     local pos, size = host.Position, host.Size
-     if not (pos and size) then return shadow end
-     local lv, m = levelOf(theme, level, shadow), metaOf(shadow)
-     local a = host.AnchorPoint
-     local ax, ay = a and a.X or 0, a and a.Y or 0
-     local sp = 2 * lv.spread
-     writeGeometry(shadow, theme, m, { size.X.Scale, size.X.Offset + sp, size.Y.Scale, size.Y.Offset + sp },
-     pos.X.Scale + (0.5 - ax) * size.X.Scale, pos.X.Offset + (0.5 - ax) * size.X.Offset,
-     pos.Y.Scale + (0.5 - ay) * size.Y.Scale, pos.Y.Offset + (0.5 - ay) * size.Y.Offset + lv.offsetY)
-     return shadow
-    end
-    function Effects.follow(shadow, host, level, theme, maid)
-     if not (shadow and host) then return nil end
-     need(theme, "follow")
-     levelOf(theme, level, shadow)
-     local function sync()
-     local ap, as = host.AbsolutePosition, host.AbsoluteSize
-     if not (ap and as) then return end
-     local parent = shadow.Parent
-     local pp = parent and parent.AbsolutePosition
-     local px, py = pp and pp.X or 0, pp and pp.Y or 0
-     Effects.place(shadow, ap.X - px, ap.Y - py, as.X, as.Y, level, theme)
-     end
-     local function deferred() Safe.mutate(sync) end
-     local c1 = host:GetPropertyChangedSignal("AbsoluteSize"):Connect(deferred)
-     local c2 = host:GetPropertyChangedSignal("AbsolutePosition"):Connect(deferred)
-     local handle = { Sync = sync, Disconnect = function() c1:Disconnect(); c2:Disconnect() end }
-     if maid then maid:Give(handle) end
-     sync()
-     return handle
-    end
-    local function rimStops(fx) return { { 0, fx.edgeTop }, { 1, fx.edgeBottom } } end
-    local function paintRim(g, fx)
-     g.Rotation = 90
-     g.Transparency = NumberSequence.new({
-     NumberSequenceKeypoint.new(0, fx.edgeTop), NumberSequenceKeypoint.new(1, fx.edgeBottom),
-     })
-     return g
-    end
-    function Effects.rim(stroke, theme)
-     if not stroke then return nil end
-     local fx = Theme.fx(need(theme, "rim"))
-     local g = stroke:FindFirstChildOfClass("UIGradient")
-     if g then return paintRim(g, fx) end
-     g = Create.shade({ rotation = 90, stops = rimStops(fx) })
-     g.Name = "Rim"; g.Parent = stroke
-     return g
-    end
-    local function restOf(shadow, m)
-     if m.rest then return m.rest end
-     local s = shadow.Size
-     if not s then return nil end
-     m.rest = { s.X.Scale, s.X.Offset, s.Y.Scale, s.Y.Offset }
-     return m.rest
-    end
-    local function shadowAlpha(theme, lifted)
-     local fx = Theme.fx(theme)
-     return lifted and (fx.shadow + theme.Effect.lift.alphaDelta) or fx.shadow
-    end
-    function Effects.lift(shadow, theme, on, alpha)
-     if not shadow then return nil end
-     need(theme, "lift")
-     local m = metaOf(shadow)
-     m.lifted = on and true or false
-     local goal = { ImageTransparency = type(alpha) == "number" and alpha or shadowAlpha(theme, m.lifted) }
-     local rest = restOf(shadow, m)
-     if rest then
-     local g = growth(theme, m)
-     goal.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
-     end
-     return Animate.to(shadow, "fast", goal)
-    end
-    function Effects.reskin(layer, theme, kind, colorToken)
-     if not layer then return nil end
-     need(theme, "reskin")
-     local m = meta[layer]
-     kind = kind or (m and m.kind)
-     if kind == "shadow" then
-     layer.ImageTransparency = shadowAlpha(theme, m and m.lifted)
-     elseif kind == "glow" then
-     local tok = colorToken or (m and m.token)
-     if tok then layer.ImageColor3 = tok; metaOf(layer).token = tok end
-     if (layer.ImageTransparency or 1) < 1 then layer.ImageTransparency = Theme.fx(theme).glow end
-     elseif kind == "rim" then
-     if layer.ClassName == "UIStroke" then return Effects.rim(layer, theme) end
-     paintRim(layer, Theme.fx(theme))
-     else
-     error("Effects.reskin: kind 'shadow' | 'glow' | 'rim' required", 2)
-     end
-     return layer
-    end
-    function Effects.skeleton(parent, theme, opts)
-     need(theme, "skeleton"); opts = opts or {}
-     local sk = theme.Effect.skeleton or SKELETON
-     local frame = Create("Frame", {
-     Name = opts.name or "Skeleton", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
-     Size = opts.size or UDim2.new(1, 0, 1, 0), Position = opts.position, ZIndex = opts.zIndex,
-     Active = false, Parent = parent,
-     })
-     Create.corner(opts.radius or theme.Radius.sm).Parent = frame
-     local white = Color3.new(1, 1, 1)
-     local band = opts.band or sk.band or Theme.fx(theme).inset
-     local g = Create.gradient({ rotation = sk.rotation or SKELETON.rotation, stops = { { 0, white }, { 0.5, band }, { 1, white } } })
-     g.Name = "Shimmer"; g.Offset = Vector2.new(-1, 0); g.Parent = frame
-     local loop = Animate.loop(g, sk.period or SKELETON.period, { Offset = Vector2.new(1, 0) }, Enum.EasingStyle.Linear)
-     local stopped = false
-     local function Stop()
-     if stopped then return end
-     stopped = true
-     loop.Cancel()
-     if frame.Parent == nil then frame:Destroy(); return end
-     Animate.exitTo(frame, "exit", { BackgroundTransparency = 1 }, function() frame:Destroy() end)
-     end
-     return { Frame = frame, Gradient = g, Stop = Stop }
-    end
-    return Effects
-end
-
--- Module: components/separator
-EmbeddedModules["components/separator"] = function()
-    local Separator = {}
-    local Create, DefaultTheme
-    function Separator.Init(R) Create = R.Create; DefaultTheme = R.Theme end
-    function Separator.new(opts)
+    function Numfmt.format(n, opts)
      opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local frame = Create("Frame", {
-     Name = "Separator",
-     BackgroundColor3 = theme.Colors.border,
-     BackgroundTransparency = theme.Stroke.divider, 
-     BorderSizePixel = 0,
-     Size = UDim2.new(1, 0, 0, 1),
-     LayoutOrder = opts.LayoutOrder or 0,
-     Parent = opts.Parent,
-     })
-     local unreg = opts.AccentReg and opts.AccentReg(function() frame.BackgroundColor3 = theme.Colors.border end)
-     return { Frame = frame, Destroy = function() if unreg then unreg() end; frame:Destroy() end }
+     n = tonumber(n) or 0
+     local body
+     if opts.Format == "compact" then body = compact(n, opts.Decimals or 1)
+     elseif opts.Format == "comma" then body = comma(n, opts.Decimals or 1)
+     elseif opts.Decimals ~= nil then body = trim(n, opts.Decimals)
+     else body = tostring(n) end
+     return (opts.Prefix or "") .. body .. (opts.Suffix or "")
     end
-    return Separator
+    local MULT = { k = 1e3, m = 1e6, b = 1e9, t = 1e12 }
+    function Numfmt.parse(s, opts)
+     opts = opts or {}
+     s = tostring(s or "")
+     if opts.Prefix and opts.Prefix ~= "" and s:sub(1, #opts.Prefix) == opts.Prefix then
+     s = s:sub(#opts.Prefix + 1)
+     end
+     if opts.Suffix and opts.Suffix ~= "" and s:sub(-#opts.Suffix) == opts.Suffix then
+     s = s:sub(1, #s - #opts.Suffix)
+     end
+     s = s:gsub(",", "")
+     s = s:gsub("%s", "")
+     s = s:gsub("^%+", "")
+     local mult = 1
+     local low = s:sub(-1):lower()
+     if MULT[low] then mult = MULT[low]; s = s:sub(1, #s - 1) end
+     local num = tonumber(s)
+     if num == nil then return nil end
+     return num * mult
+    end
+    return Numfmt
 end
 
--- Module: components/numberbox
-EmbeddedModules["components/numberbox"] = function()
-    local RunService = game:GetService("RunService")
-    local NumberBox = {}
-    local Create, DefaultTheme, Maid, Icons, Flag, Numfmt, Safe, Animate, Recipes
-    function NumberBox.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Icons = R.Icons; Flag = R.Flag; Numfmt = R.Numfmt; Safe = R.Safe
-     Animate = R.Animate; Recipes = R.Recipes
+-- Module: components/card
+EmbeddedModules["components/card"] = function()
+    local Card = {}
+    local Create, DefaultTheme, Maid, Asset, Button, Safe
+    function Card.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Asset = R.Asset; Button = R.Button; Safe = R.Safe
     end
-    function NumberBox.new(opts)
+    function Card.new(opts)
      opts = opts or {}
      local theme = opts.Theme or DefaultTheme
      local maid = Maid.new()
-     local minV, maxV, step = opts.Min, opts.Max, opts.Step or 1
-     local value = opts.Default or 0
+     local card = Create("Frame", { Name = "Card", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
+     AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), LayoutOrder = opts.LayoutOrder or 0,
+     Parent = opts.Parent, Create.corner(theme.Radius.md),
+     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX, top = theme.Spacing.inputY, bottom = theme.Spacing.inputY }),
+     Create.listLayout({ Padding = theme.Spacing.gap }) })
+     Create.stroke(theme.Colors.border, 1).Parent = card
+     local lo = 0
+     local banner
+     local function makeBanner(image)
+     lo = lo + 1
+     banner = Create("ImageLabel", { Name = "Banner", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
+     Image = image, ScaleType = Enum.ScaleType.Crop, Size = UDim2.new(1, 0, 0, 80), LayoutOrder = lo,
+     Parent = card, Create.corner(theme.Radius.sm) })
+     end
+     if Asset.resolvable(opts.Banner) then
+     makeBanner("")
+     Asset.imageAsync(opts.Banner, function(id) Safe.mutate(function() banner.Image = id end) end)
+     else
+     local resolved = Asset.image(opts.Banner)
+     if resolved then makeBanner(resolved) end
+     end
+     if opts.Title then
+     lo = lo + 1
+     Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title,
+     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+     TextTruncate = Enum.TextTruncate.AtEnd, Size = UDim2.new(1, 0, 0, 18), LayoutOrder = lo, Parent = card }),
+     theme, "label")
+     end
+     if opts.Body then
+     lo = lo + 1
+     Create.text(Create("TextLabel", { Name = "Body", BackgroundTransparency = 1, Text = opts.Body,
+     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+     TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = Enum.AutomaticSize.Y,
+     Size = UDim2.new(1, 0, 0, 0), LayoutOrder = lo, Parent = card }), theme, "muted")
+     end
+     if opts.Buttons and #opts.Buttons > 0 then
+     lo = lo + 1
+     local row = Create("Frame", { Name = "Actions", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34),
+     LayoutOrder = lo, Parent = card,
+     Create.listLayout({ Padding = theme.Spacing.gap, FillDirection = Enum.FillDirection.Horizontal }) })
+     for i, b in ipairs(opts.Buttons) do
+     local control = Button.new({ Parent = row, Text = b.Text, Variant = b.Variant, Callback = b.Callback,
+     Theme = theme, AccentReg = opts.AccentReg, AutoWidth = true, LayoutOrder = i })
+     maid:Give(control)
+     end
+     end
+     if opts.AccentReg then maid:Give(opts.AccentReg(function()
+     card.BackgroundColor3 = theme.Colors.card
+     local st = card:FindFirstChildOfClass("UIStroke"); if st then st.Color = theme.Colors.border end
+     if banner then banner.BackgroundColor3 = theme.Colors.surface end
+     local ti = card:FindFirstChild("Title"); if ti then ti.TextColor3 = theme.Colors.foreground end
+     local bo = card:FindFirstChild("Body"); if bo then bo.TextColor3 = theme.Colors.mutedForeground end
+     end)) end
+     maid:Give(card)
+     return { Frame = card, Destroy = function() maid:DoCleanup() end }
+    end
+    return Card
+end
+
+-- Module: components/textbox
+EmbeddedModules["components/textbox"] = function()
+    local TextBox = {}
+    local Create, DefaultTheme, Maid, Icons, Flag, Animate, Safe, Recipes
+    function TextBox.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Icons = R.Icons; Flag = R.Flag; Animate = R.Animate; Safe = R.Safe
+     Recipes = R.Recipes
+    end
+    local function btnPalette(theme, variant)
+     if variant == "destructive" then return theme.Colors.destructive, theme.Colors.primaryForeground end
+     if variant == "secondary" then return theme.Colors.surface, theme.Colors.foreground end
+     if variant == "outline" then return theme.Colors.card, theme.Colors.foreground, theme.Colors.border end
+     if variant == "ghost" then return theme.Colors.card, theme.Colors.foreground end
+     return theme.Colors.primary, theme.Colors.primaryForeground 
+    end
+    local function roleColor(theme, role)
+     if role == "muted" then return theme.Colors[theme.Icon.structural] end
+     if role == "success" then return theme.Colors.success end
+     return theme.Colors[theme.Icon.accent]
+    end
+    local ERROR_H = 18
+    function TextBox.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local maid = Maid.new()
      local hasLabel = opts.Text ~= nil and opts.Text ~= ""
      local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-     local rowH = (not hasLabel) and 30 or (hasDesc and 56 or 46)
-     local enabled = true
-     local hovering = false 
-     local function clamp(n)
-     n = tonumber(n) or value
-     if minV then n = math.max(minV, n) end
-     if maxV then n = math.min(maxV, n) end
-     return n
+     local fullWidth = (opts.FullWidth and hasLabel) and true or false
+     local boxH = fullWidth and 36 or 30
+     local boxX, boxW, boxTop, baseH, titleTop, descTop
+     if not hasLabel then
+     boxX, boxW, boxTop, baseH = UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, boxH), 0, boxH
+     elseif fullWidth then
+     titleTop = 12
+     descTop = titleTop + 22
+     boxTop = titleTop + (hasDesc and 44 or 26)
+     boxX, boxW, baseH = UDim2.new(0, 0, 0, boxTop), UDim2.new(1, 0, 0, boxH), boxTop + boxH + 12
+     else
+     baseH = hasDesc and 56 or 46
+     boxTop = math.floor((baseH - boxH) / 2)
+     boxX, boxW = UDim2.new(0.5, 4, 0, boxTop), UDim2.new(0.5, -4, 0, boxH)
      end
-     local root = Create("Frame", { Name = "NumberBoxRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
-     Size = UDim2.new(1, 0, 0, rowH), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
-     Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
+     local real = opts.Default or ""
+     local masked = opts.Password and true or false
+     local revealed = false
+     local suppress = false
+     local state = { focused = false, invalid = false }
+     local enabled = true
+     local dimParts, dimRest = {}, {} 
+     local themed = {} 
+     local function reTheme() for _, fn in ipairs(themed) do fn() end end
+     local api = {} 
+     local root = Create("Frame", {
+     Name = "TextBoxRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
+     Size = UDim2.new(1, 0, 0, baseH), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
+     Create.corner(theme.Radius.md),
+     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }),
+     })
+     themed[#themed + 1] = function() root.BackgroundColor3 = theme.Colors.surface end
      if hasLabel then
-     Create.text(Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
+     local title = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
      TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-     TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-     Position = UDim2.new(0, 0, 0, hasDesc and 6 or 0),
-     Size = UDim2.new(0.5, -8, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = root }), theme, "label")
+     TextYAlignment = (hasDesc or fullWidth) and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+     Position = fullWidth and UDim2.new(0, 0, 0, titleTop) or UDim2.new(0, 0, 0, hasDesc and 6 or 0),
+     Size = fullWidth and UDim2.new(1, 0, 0, 18)
+     or UDim2.new(0.5, -8, hasDesc and 0 or 1, hasDesc and 18 or 0),
+     Parent = root })
+     Create.text(title, theme, "label")
+     themed[#themed + 1] = function() title.TextColor3 = theme.Colors.foreground end
      if hasDesc then
-     Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+     local desc = Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
      TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
      TextYAlignment = Enum.TextYAlignment.Top,
-     Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(0.5, -8, 0, 26), Parent = root }), theme, "muted")
+     Position = fullWidth and UDim2.new(0, 0, 0, descTop) or UDim2.new(0, 0, 0, 26),
+     Size = fullWidth and UDim2.new(1, 0, 0, 18) or UDim2.new(0.5, -8, 0, 26), Parent = root })
+     Create.text(desc, theme, "muted")
+     themed[#themed + 1] = function() desc.TextColor3 = theme.Colors.mutedForeground end
      end
      end
-     local box = Create("Frame", { Name = "Box", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
-     Position = hasLabel and UDim2.new(0.5, 4, 0.5, -15) or UDim2.new(0, 0, 0, 0),
-     Size = hasLabel and UDim2.new(0.5, -4, 0, 30) or UDim2.new(1, 0, 0, 30),
-     Parent = root, Create.corner(theme.Radius.input) })
-     local boxStroke = Create.stroke(theme.Colors.border, 1); boxStroke.Parent = box
-     local function structural() return theme.Colors[theme.Icon.structural] end
-     local function stepBtn(name, icon, x)
-     local b = Create("ImageButton", { Name = name, AutoButtonColor = false, BackgroundColor3 = theme.Colors.surface,
-     Size = UDim2.new(0, 26, 1, -6), Position = x, Parent = box, Create.corner(theme.Radius.sm) })
-     local img = Create("ImageLabel", { BackgroundTransparency = 1, ImageTransparency = 0, Size = UDim2.new(0, 14, 0, 14),
-     Position = UDim2.new(0.5, -7, 0.5, -7), Parent = b })
-     Icons.apply(img, icon, structural())
-     local hover = Recipes.hover(b, { theme = theme, host = b, corner = theme.Radius.sm, kind = "wash" })
-     maid:Give(hover.disconnect)
-     maid:Give(Recipes.press(b, img, { theme = theme }).disconnect)
-     return b, img, hover
+     local box = Create("Frame", {
+     Name = "Box", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
+     ClipsDescendants = true,
+     Position = boxX, Size = boxW, Parent = root, Create.corner(theme.Radius.input),
+     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }),
+     Create.listLayout({ FillDirection = Enum.FillDirection.Horizontal, Padding = 6 }),
+     })
+     themed[#themed + 1] = function() box.BackgroundColor3 = theme.Colors.background end
+     box:FindFirstChildOfClass("UIListLayout").VerticalAlignment = Enum.VerticalAlignment.Center
+     local stroke = Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = box })
+     local function strokeColor()
+     if state.invalid then return theme.Colors.destructive end
+     if state.focused then return theme.Colors.ring end
+     return theme.Colors.border
      end
-     local minus, minusImg, minusHover = stepBtn("Minus", "minus", UDim2.new(0, 3, 0.5, -12))
-     local plus, plusImg, plusHover = stepBtn("Plus", "plus", UDim2.new(1, -29, 0.5, -12))
-     local input = Create.text(Create("TextBox", { Name = "Input", BackgroundTransparency = 1, Text = tostring(value),
-     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Center, ClearTextOnFocus = false,
-     Position = UDim2.new(0, 32, 0, 0), Size = UDim2.new(1, -64, 1, 0), Parent = box }), theme, "body")
-     local atMin, atMax = false, false
-     local dimmed = { [minusImg] = false, [plusImg] = false }
-     local function glyphAlpha(img) return (dimmed[img] or not enabled) and theme.Opacity.disabled or 0 end
-     local function dim(img, off)
-     if dimmed[img] == off then return end
-     dimmed[img] = off
-     Animate.to(img, "fast", { ImageTransparency = glyphAlpha(img) })
+     themed[#themed + 1] = function() stroke.Color = strokeColor() end
+     local input = Create("TextBox", {
+     Name = "Input", BackgroundTransparency = 1, Text = real,
+     PlaceholderText = opts.Placeholder or "", PlaceholderColor3 = theme.Colors.mutedForeground,
+     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+     TextYAlignment = Enum.TextYAlignment.Center, ClearTextOnFocus = false,
+     TextEditable = not opts.Copyable, LayoutOrder = 3, Size = UDim2.new(0, 0, 1, 0), Parent = box,
+     Create("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill }),
+     })
+     Create.text(input, theme, "body")
+     themed[#themed + 1] = function()
+     input.TextColor3 = enabled and theme.Colors.foreground or theme.Colors.mutedForeground
+     input.PlaceholderColor3 = theme.Colors.mutedForeground
      end
-     local function updateBounds()
-     atMin = minV ~= nil and value <= minV
-     atMax = maxV ~= nil and value >= maxV
+     local function display() return (masked and not revealed) and string.rep("*", #real) or real end
+     local function render()
+     local d = display()
+     if input.Text == d then return end
      Safe.mutate(function()
-     dim(minusImg, atMin); minus.Active = not atMin
-     dim(plusImg, atMax); plus.Active = not atMax
+     suppress = true
+     input.Text = d
+     if masked and not revealed then input.CursorPosition = #d + 1 end
+     suppress = false
      end)
      end
-     local function fmt(n)
-     return Numfmt.format(n, { Format = opts.Format, Decimals = opts.Decimals, Prefix = opts.Prefix, Suffix = opts.Suffix })
+     local function apply(v)
+     real = tostring(v or "")
+     if opts.MaxLength and #real > opts.MaxLength then real = real:sub(1, opts.MaxLength) end
+     render()
      end
-     local focused = false
-     local function strokeColor(f) return f and theme.Colors.ring or theme.Colors.border end
-     local function render() Safe.mutate(function() input.Text = focused and tostring(value) or fmt(value) end) end
-     local function apply(n) value = clamp(n); render(); updateBounds() end
-     local commit = Flag.bind(opts, clamp(opts.Default or 0), apply)
-     local function set(n) commit(clamp(n)); if opts.Callback then opts.Callback(value) end end
-     local bumping = false
-     local function bump(dir)
-     if bumping or dir == nil or not Animate.isEnabled() then return end
-     local rest = box.Position
-     bumping = true
-     Animate.chain({
-     { box, "press", { Position = UDim2.new(rest.X.Scale, rest.X.Offset + dir * theme.Motion.bumpPx,
-     rest.Y.Scale, rest.Y.Offset) }, Animate.EASING.snap, Animate.DIR.Out },
-     { box, "press", { Position = rest }, Animate.EASING.snap, Animate.DIR.Out },
-     }, function() bumping = false end)
+     local commit = Flag.bind(opts, opts.Default or "", apply)
+     maid:Give(input:GetPropertyChangedSignal("Text"):Connect(function()
+     if suppress then return end
+     local vis = input.Text
+     if masked and not revealed then
+     if #vis > #real then real = real .. vis:sub(#real + 1)
+     elseif #vis < #real then real = real:sub(1, #vis) end
+     else
+     real = vis
      end
+     if opts.MaxLength and #real > opts.MaxLength then real = real:sub(1, opts.MaxLength) end
+     render()
+     end))
+     maid:Give(input.FocusLost:Connect(function()
+     commit(real)
+     if opts.Callback then opts.Callback(real, api) end
+     end))
+     local function mkIconButton(name, icon, colorRole, order, onClick)
+     local glyph, role = icon, colorRole
+     local btn = Create("ImageButton", { Name = name, BackgroundTransparency = 1,
+     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = order, Parent = box })
+     Icons.apply(btn, glyph, roleColor(theme, role))
+     dimParts[#dimParts + 1] = btn
+     local hover
+     if colorRole == "muted" then
+     hover = Recipes.hover(btn, { theme = theme, kind = "text", icon = btn,
+     rest = theme.Icon.structural, hover = theme.Icon.structuralActive })
+     maid:Give(hover.disconnect)
+     end
+     maid:Give(Recipes.press(btn, btn, { theme = theme }).disconnect)
+     themed[#themed + 1] = function()
+     Icons.apply(btn, glyph, roleColor(theme, role))
+     if hover then hover.reskin() end 
+     end
+     if onClick then maid:Give(btn.MouseButton1Click:Connect(function() if enabled then onClick() end end)) end
+     return btn, function(g, r)
+     glyph, role = g or glyph, r or role
+     Icons.apply(btn, glyph, roleColor(theme, role))
+     end
+     end
+     local function mkAffix(name, text, order)
+     local lbl = Create("TextLabel", { Name = name, BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.X,
+     Text = text, TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left,
+     TextYAlignment = Enum.TextYAlignment.Center,
+     Size = UDim2.new(0, 0, 1, 0), LayoutOrder = order, Parent = box })
+     Create.text(lbl, theme, "body")
+     themed[#themed + 1] = function() lbl.TextColor3 = theme.Colors.mutedForeground end
+     return lbl
+     end
+     local function mkDecorIcon(name, icon, order)
+     local img = Create("ImageLabel", { Name = name, BackgroundTransparency = 1,
+     Size = UDim2.new(0, 16, 0, 16), LayoutOrder = order, Parent = box })
+     Icons.apply(img, icon, theme.Colors.mutedForeground)
+     themed[#themed + 1] = function() Icons.apply(img, icon, theme.Colors.mutedForeground) end
+     return img
+     end
+     if opts.LeadingIcon then mkDecorIcon("LeadingIcon", opts.LeadingIcon, 1) end
+     if opts.Prefix then mkAffix("Prefix", opts.Prefix, 2) end
+     if opts.Suffix then mkAffix("Suffix", opts.Suffix, 4) end
+     if opts.TrailingIcon then mkDecorIcon("TrailingIcon", opts.TrailingIcon, 5) end
+     local function mkTextButton(spec, order)
+     local bg, fg, line = btnPalette(theme, spec.Variant or "default")
+     local btn = Create("TextButton", { Name = "Button" .. order, AutoButtonColor = false,
+     BackgroundColor3 = bg, BackgroundTransparency = 0,
+     AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 0, theme.Sizes.chip),
+     Text = spec.Text, TextColor3 = fg,
+     LayoutOrder = order, Parent = box, Create.corner(theme.Radius.sm),
+     Create.padding({ left = theme.Spacing.gap, right = theme.Spacing.gap }) })
+     Create.text(btn, theme, "muted")
+     if line then Create("UIStroke", { Color = line, Thickness = 1, Parent = btn }) end
+     maid:Give(Recipes.hover(btn, { theme = theme, host = btn, kind = "fill",
+     hoverAlpha = theme.Opacity.hoverFill, pressAlpha = theme.Opacity.pressFill }).disconnect)
+     maid:Give(Recipes.press(btn, nil, { theme = theme }).disconnect)
+     themed[#themed + 1] = function()
+     local b2, f2, l2 = btnPalette(theme, spec.Variant or "default")
+     btn.BackgroundColor3 = b2; btn.TextColor3 = f2
+     local s = btn:FindFirstChildOfClass("UIStroke"); if s and l2 then s.Color = l2 end
+     end
+     return btn
+     end
+     if opts.Buttons then
+     for i, spec in ipairs(opts.Buttons) do
+     local order = 5 + i
+     if spec.Icon then
+     mkIconButton("Button" .. i, spec.Icon, "primary", order,
+     spec.Callback and function() spec.Callback(real, api) end or nil)
+     else
+     local btn = mkTextButton(spec, order)
+     btn.Name = "Button" .. i
+     if spec.Callback then
+     maid:Give(btn.MouseButton1Click:Connect(function() if enabled then spec.Callback(real, api) end end))
+     end
+     end
+     end
+     end
+     if opts.Clearable then
+     local clear
+     clear = mkIconButton("Clear", "x", "muted", 29, function()
+     commit(""); if opts.Callback then opts.Callback(real, api) end
+     Animate.pop(clear, "fast")
+     if input.CaptureFocus then input:CaptureFocus() end
+     end)
+     local shown
+     local function sync()
+     local show = #real > 0
+     if shown == show then return end
+     local first = shown == nil
+     shown = show
+     Safe.mutate(function()
+     if first then
+     clear.Visible = show; clear.ImageTransparency = show and 0 or 1
+     elseif show then
+     clear.Visible = true
+     Animate.to(clear, "fast", { ImageTransparency = 0 })
+     else
+     Animate.toThen(clear, "fast", { ImageTransparency = 1 },
+     function() Safe.mutate(function() clear.Visible = false end) end)
+     end
+     end)
+     end
+     sync()
+     maid:Give(input:GetPropertyChangedSignal("Text"):Connect(sync))
+     end
+     local spinner, spin 
+     local function stopSpin() if spin then spin.Cancel(); spin = nil end end
+     local function mkSpinner()
+     if spinner then return spinner end
+     spinner = Create("ImageLabel", { Name = "Spinner", BackgroundTransparency = 1, Visible = false,
+     Size = UDim2.new(0, 16, 0, 16), LayoutOrder = 40, Parent = box })
+     Icons.apply(spinner, "loader", theme.Colors.mutedForeground)
+     themed[#themed + 1] = function() Icons.apply(spinner, "loader", theme.Colors.mutedForeground) end
+     return spinner
+     end
+     local function setLoading(b)
+     Safe.mutate(function()
+     local s = mkSpinner()
+     s.Visible = b and true or false
+     stopSpin()
+     if b then spin = Animate.spin(s) end
+     end)
+     end
+     if opts.Loading then setLoading(true) end
+     if opts.Password then
+     local eye, setEyeGlyph
+     eye, setEyeGlyph = mkIconButton("Eye", "eye", "muted", 28, function()
+     revealed = not revealed
+     setEyeGlyph(revealed and "eye-off" or "eye")
+     Animate.pop(eye, "fast") 
+     render()
+     end)
+     end
+     if opts.Copyable then
+     local setCopyGlyph
+     local copyGen = 0
+     local _, setter = mkIconButton("Copy", "copy", "primary", 30, function()
+     if setclipboard then pcall(setclipboard, real) end
+     copyGen = copyGen + 1
+     local gen = copyGen
+     Safe.mutate(function() setCopyGlyph("check", "success") end)
+     task.delay(theme.Motion.copyRevert, function()
+     if gen ~= copyGen then return end
+     Safe.mutate(function() setCopyGlyph("copy", "primary") end)
+     end)
+     end)
+     setCopyGlyph = setter
+     end
+     local focus = Recipes.focus(stroke, input, function(focused)
+     state.focused = focused
+     return strokeColor()
+     end, { theme = theme })
+     maid:Give(focus.disconnect)
      local function setEnabled(b)
      b = b and true or false
      if enabled == b then return end
      enabled = b
      Safe.mutate(function()
-     input.TextEditable = b
-     Recipes.disabled({
-     { box, "BackgroundTransparency", 0 },
-     { minusImg, "ImageTransparency", dimmed[minusImg] and theme.Opacity.disabled or 0 },
-     { plusImg, "ImageTransparency", dimmed[plusImg] and theme.Opacity.disabled or 0 },
-     }, not b, theme)
+     input.TextEditable = b and not opts.Copyable
+     input.TextColor3 = b and theme.Colors.foreground or theme.Colors.mutedForeground
+     local parts = { { box, "BackgroundTransparency", 0 } }
+     for _, inst in ipairs(dimParts) do
+     if not b then dimRest[inst] = inst.ImageTransparency or 0 end
+     parts[#parts + 1] = { inst, "ImageTransparency", dimRest[inst] or 0 }
+     end
+     Recipes.disabled(parts, not b, theme)
      end)
      end
-     local function holdRepeat(btn, stepFn, atBoundFn, dir)
-     local conn, held
-     local function stop()
-     held = false
-     if conn then conn:Disconnect(); conn = nil end
-     end
-     maid:Give(btn.MouseButton1Down:Connect(function()
-     if not enabled then return end
-     if atBoundFn() then bump(dir); return end
-     held = true
-     stepFn() 
-     local elapsed, since = 0, 0
-     conn = RunService.Heartbeat:Connect(function(dt)
-     if not held then return end
-     elapsed = elapsed + dt
-     if elapsed < 0.35 then return end 
-     since = since + dt
-     local interval = math.max(0.03, 0.12 - (elapsed - 0.35) * 0.06) 
-     if since >= interval then
-     since = 0
-     if atBoundFn() then stop(); return end
-     stepFn()
-     end
-     end)
-     end))
-     maid:Give(btn.MouseButton1Up:Connect(stop))
-     maid:Give(btn.MouseLeave:Connect(stop))
-     maid:Give(stop)
-     end
-     holdRepeat(minus, function() set(value - step) end, function() return atMin end, -1)
-     holdRepeat(plus, function() set(value + step) end, function() return atMax end, 1)
-     maid:Give(input.Focused:Connect(function() focused = true; input.Text = tostring(value) end))
-     maid:Give(input.FocusLost:Connect(function()
-     focused = false
-     local parsed = Numfmt.parse(input.Text, { Prefix = opts.Prefix, Suffix = opts.Suffix })
-     if parsed ~= nil then set(parsed) else render() end
-     end))
-     maid:Give(Recipes.focus(boxStroke, input, strokeColor, { theme = theme }).disconnect)
-     maid:Give(box.MouseEnter:Connect(function() hovering = true end))
-     maid:Give(box.MouseLeave:Connect(function() hovering = false end))
-     maid:Give(box.InputChanged:Connect(function(io)
-     if io.UserInputType == Enum.UserInputType.MouseWheel and enabled and (hovering or focused) then
-     local dir = (io.Position.Z >= 0) and 1 or -1
-     set(value + step * dir)
-     end
-     end))
-     maid:Give(root)
      if opts.Disabled then setEnabled(false) end
-     if opts.AccentReg then maid:Give(opts.AccentReg(function()
-     root.BackgroundColor3 = theme.Colors.surface
-     box.BackgroundColor3 = theme.Colors.background
-     boxStroke.Color = strokeColor(focused)
-     input.TextColor3 = theme.Colors.foreground
-     local ti = root:FindFirstChild("Title"); if ti then ti.TextColor3 = theme.Colors.foreground end
-     local de = root:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
-     minus.BackgroundColor3 = theme.Colors.surface; plus.BackgroundColor3 = theme.Colors.surface
-     Icons.apply(minusImg, "minus", structural()); Icons.apply(plusImg, "plus", structural())
-     minusHover.reskin(); plusHover.reskin() 
-     updateBounds()
-     end)) end
-     return {
-     Frame = root,
-     GetValue = function() return value end,
-     SetValue = function(n) set(n) end,
-     SetMin = function(n) minV = n; set(value) end,
-     SetMax = function(n) maxV = n; set(value) end,
-     SetEnabled = function(b) setEnabled(b) end,
-     Destroy = function() maid:DoCleanup() end,
-     }
-    end
-    return NumberBox
-end
-
--- Module: components/tooltip
-EmbeddedModules["components/tooltip"] = function()
-    local Tooltip = {}
-    local Create, DefaultTheme, Maid, Overlay, Animate, Device, Safe, Effects
-    local TextService = game:GetService("TextService")
-    function Tooltip.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Animate = R.Animate
-     Device = R.Device; Safe = R.Safe; Effects = R.Effects
-    end
-    local GLYPH_W = 0.55
-    local function measure(text, size)
-     local ok, v = pcall(function()
-     return TextService:GetTextSize(text, size, Enum.Font.BuilderSans, Vector2.new(10000, 10000))
+     local message
+     local function mkMessage()
+     if message then return message end
+     message = Create("TextLabel", { Name = "Error", BackgroundTransparency = 1, Visible = false,
+     Text = "", TextColor3 = theme.Colors.destructive, TextXAlignment = Enum.TextXAlignment.Left,
+     TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true,
+     Position = UDim2.new(boxX.X.Scale, boxX.X.Offset, 0, boxTop + boxH + 2),
+     Size = UDim2.new(boxW.X.Scale, boxW.X.Offset, 0, 16), Parent = root })
+     Create.text(message, theme, "muted")
+     themed[#themed + 1] = function() message.TextColor3 = theme.Colors.destructive end
+     return message
+     end
+     local shaking = false
+     local function shake()
+     if shaking or not Animate.isEnabled() then return end
+     local sh = theme.Motion.shake
+     local rest = box.Position
+     local steps = {}
+     for i = 1, sh.steps do
+     local dx = (i % 2 == 1) and sh.amp or -sh.amp
+     steps[i] = { box, sh.step,
+     { Position = UDim2.new(rest.X.Scale, rest.X.Offset + dx, rest.Y.Scale, rest.Y.Offset) },
+     Enum.EasingStyle.Sine, Animate.DIR.InOut }
+     end
+     steps[#steps + 1] = { box, sh.step, { Position = rest }, Enum.EasingStyle.Sine, Animate.DIR.Out }
+     shaking = true
+     Animate.chain(steps, function() shaking = false end)
+     end
+     local function setInvalid(msg)
+     state.invalid = true
+     Safe.mutate(function()
+     local m = mkMessage(); m.Text = msg or ""
+     if not m.Visible then m.Visible = true; m.TextTransparency = 1 end
+     stroke.Color = strokeColor()
+     Animate.to(root, "base", { Size = UDim2.new(1, 0, 0, baseH + ERROR_H) })
+     Animate.to(m, "base", { TextTransparency = 0 })
+     shake()
      end)
-     if ok and v and v.X then return v.X end
-     return #tostring(text) * size * GLYPH_W
+     end
+     local function setValid()
+     state.invalid = false
+     Safe.mutate(function()
+     stroke.Color = strokeColor()
+     Animate.to(root, "base", { Size = UDim2.new(1, 0, 0, baseH) })
+     if message and message.Visible then
+     Animate.toThen(message, "fast", { TextTransparency = 1 },
+     function() Safe.mutate(function() message.Visible = false end) end)
+     end
+     end)
+     end
+     local function runValidate()
+     if not opts.Validate then return end
+     local ok, msg = opts.Validate(real)
+     if ok then setValid() else setInvalid(msg) end
+     end
+     maid:Give(input.FocusLost:Connect(runValidate))
+     if opts.AccentReg then maid:Give(opts.AccentReg(reTheme)) end
+     maid:Give(stopSpin)
+     maid:Give(root)
+     api.Frame = root
+     api.GetText = function() return real end
+     api.SetText = function(s) commit(tostring(s)); runValidate(); if opts.Callback then opts.Callback(real, api) end end
+     api.Focus = function() input:CaptureFocus() end
+     api.Clear = function() commit("") end
+     api.SetDisabled = function(b) setEnabled(not b) end
+     api.SetEnabled = function(b) setEnabled(b) end
+     api.SetInvalid = function(msg) setInvalid(msg) end
+     api.SetValid = function() setValid() end
+     api.SetLoading = function(b) setLoading(b) end
+     api.Destroy = function() maid:DoCleanup() end
+     return api
     end
-    function Tooltip.attach(target, text, themeArg)
-     local theme = themeArg or DefaultTheme
-     local maid = Maid.new()
-     local handle = { Destroy = function() maid:DoCleanup() end }
-     if Device and Device.IsTouch() then return handle end
-     local tip, shadow, armed
-     local function geometry(scale)
-     local T = theme.Tooltip
-     local ap, as = target.AbsolutePosition, target.AbsoluteSize
-     local tx, ty = (ap and ap.X or 0), (ap and ap.Y or 0)
-     local tw, th = (as and as.X or 0), (as and as.Y or 0)
-     local gap, hgt = T.gap * scale, T.height * scale
-     local w = (measure(text, theme.Font.muted.Size) + 2 * T.padX) * scale
-     local vp = Overlay.viewport()
-     local y = ty - gap 
-     if y - hgt < 0 then y = ty + th + gap + hgt end 
-     if y > vp.Y then y = vp.Y end
-     local half = w / 2
-     local x = math.max(half, math.min(tx + tw / 2, vp.X - half))
-     return x, y, w, hgt
-     end
-     local function build()
-     if tip then return end
-     local T = theme.Tooltip
-     local scale = Overlay.scale() 
-     local x, y, w, hgt = geometry(scale)
-     tip = Create("TextLabel", {
-     Name = "Tooltip", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1,
-     BorderSizePixel = 0, Text = text, TextColor3 = theme.Colors.background, TextTransparency = 1,
-     AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0, x, 0, y),
-     Size = UDim2.new(0, 0, 0, T.height), AutomaticSize = Enum.AutomaticSize.X,
-     ZIndex = Overlay.Z.tooltip,
-     Create.corner(theme.Radius.sm), Create.padding({ left = T.padX, right = T.padX }),
-     })
-     Create.text(tip, theme, "muted")
-     local us = Create("UIScale", { Scale = scale * theme.Motion.popFrom, Parent = tip })
-     Overlay.mount(tip)
-     shadow = Effects.shadow(tip.Parent, theme, { name = "TooltipShadow", level = "tooltip",
-     zIndex = Overlay.Z.tooltip - 1 })
-     if shadow then
-     shadow.ImageTransparency = 1
-     Effects.place(shadow, x - w / 2, y - hgt, w, hgt, "tooltip", theme)
-     Animate.to(shadow, "fast", { ImageTransparency = (theme.fx or DefaultTheme.fx)(theme).shadow })
-     end
-     Animate.springTo(us, "fast", { Scale = scale })
-     Animate.to(tip, "fast", { BackgroundTransparency = 0, TextTransparency = 0 })
-     end
-     local function hide()
-     local t, s = tip, shadow
-     tip, shadow = nil, nil
-     if not t then return end
-     if s then Animate.to(s, "exit", { ImageTransparency = 1 }, Animate.EASING.exit, Animate.DIR.In) end
-     Animate.toThen(t, "exit", { BackgroundTransparency = 1, TextTransparency = 1 }, function()
-     t:Destroy()
-     if s then s:Destroy() end
-     end, Animate.EASING.exit, Animate.DIR.In)
-     end
-     local function onEnter()
-     if tip then return end
-     local token = {}
-     armed = token
-     local function fire()
-     if armed == token and not tip then Safe.mutate(build) end
-     end
-     if type(task) == "table" and task.delay then task.delay(theme.Tooltip.delay, fire) else fire() end
-     end
-     local function onLeave()
-     armed = nil
-     hide()
-     end
-     maid:Give(target.MouseEnter:Connect(onEnter))
-     maid:Give(target.MouseLeave:Connect(onLeave))
-     maid:Give(function() onLeave() end)
-     return handle
-    end
-    return Tooltip
+    return TextBox
 end
 
 -- Module: components/notification
@@ -3719,283 +4434,6 @@ EmbeddedModules["components/notification"] = function()
     return Notification
 end
 
--- Module: core/signal
-EmbeddedModules["core/signal"] = function()
-    local Signal = {}
-    Signal.__index = Signal
-    function Signal.new()
-     return setmetatable({ _handlers = {}, _order = {} }, Signal)
-    end
-    function Signal:Connect(fn)
-     self._order[#self._order + 1] = fn
-     self._handlers[fn] = true
-     return { Disconnect = function()
-     self._handlers[fn] = nil
-     for i, f in ipairs(self._order) do if f == fn then table.remove(self._order, i) break end end
-     end }
-    end
-    function Signal:Once(fn)
-     local conn
-     conn = self:Connect(function(...) conn.Disconnect(); fn(...) end)
-     return conn
-    end
-    function Signal:Fire(...)
-     local snapshot = {}
-     for i, fn in ipairs(self._order) do snapshot[i] = fn end
-     for _, fn in ipairs(snapshot) do if self._handlers[fn] then fn(...) end end
-    end
-    function Signal:DisconnectAll()
-     self._handlers = {}; self._order = {}
-    end
-    return Signal
-end
-
--- Module: core/device
-EmbeddedModules["core/device"] = function()
-    local UserInputService = game:GetService("UserInputService")
-    local GuiService = game:GetService("GuiService")
-    local Device = {}
-    local Signal
-    local DEFAULTS = { TabletMaxAspect = 1.55, TabletMinDiagonal = math.huge }
-    local cfg = { TabletMaxAspect = DEFAULTS.TabletMaxAspect, TabletMinDiagonal = DEFAULTS.TabletMinDiagonal }
-    local function viewport()
-     local cam = workspace and workspace.CurrentCamera
-     local vp = cam and cam.ViewportSize
-     if vp and vp.X and vp.X > 0 then return vp end
-     return { X = 1280, Y = 720 }
-    end
-    function Device.GetType()
-     if GuiService and GuiService.IsTenFootInterface and GuiService:IsTenFootInterface() then
-     return "Console"
-     end
-     local touch = UserInputService.TouchEnabled
-     local mouse = UserInputService.MouseEnabled
-     if touch and not mouse then
-     local vp = viewport()
-     local a, b = math.max(vp.X, vp.Y), math.min(vp.X, vp.Y)
-     local aspect = (b > 0) and (a / b) or 1
-     local diag = math.sqrt(vp.X * vp.X + vp.Y * vp.Y)
-     if aspect <= cfg.TabletMaxAspect or diag >= cfg.TabletMinDiagonal then return "Tablet" end
-     return "Mobile"
-     end
-     return "Desktop"
-    end
-    function Device.IsMobile() return Device.GetType() == "Mobile" end
-    function Device.IsTablet() return Device.GetType() == "Tablet" end
-    function Device.IsDesktop() return Device.GetType() == "Desktop" end
-    function Device.IsConsole() return Device.GetType() == "Console" end
-    function Device.IsTouch() return UserInputService.TouchEnabled == true end
-    local function readService(name, prop)
-     local ok, v = pcall(function() return game:GetService(name)[prop] end)
-     if ok then return v end
-     return nil
-    end
-    function Device.SupportsHover() return readService("UserInputService", "MouseEnabled") == true end
-    function Device.PrefersReducedMotion() return readService("GuiService", "ReducedMotionEnabled") == true end
-    function Device.GetInput()
-     local t = UserInputService.GetLastInputType and UserInputService:GetLastInputType()
-     local name = (t and t.Name) or ""
-     if name == "Touch" then return "Touch" end
-     if name:find("Gamepad") then return "Gamepad" end
-     return "KeyboardMouse"
-    end
-    local lastType, lastInput
-    function Device._recompute()
-     local t, i = Device.GetType(), Device.GetInput()
-     if t ~= lastType or i ~= lastInput then
-     lastType, lastInput = t, i
-     if Device.Changed then Device.Changed:Fire({ Type = t, Input = i, Viewport = viewport() }) end
-     end
-    end
-    function Device.Configure(opts)
-     if type(opts) == "table" then
-     if tonumber(opts.TabletMaxAspect) then cfg.TabletMaxAspect = tonumber(opts.TabletMaxAspect) end
-     if tonumber(opts.TabletMinDiagonal) then cfg.TabletMinDiagonal = tonumber(opts.TabletMinDiagonal) end
-     end
-     Device._recompute()
-    end
-    local connected = false
-    function Device.Init(R)
-     Signal = R.Signal
-     cfg.TabletMaxAspect = DEFAULTS.TabletMaxAspect
-     cfg.TabletMinDiagonal = DEFAULTS.TabletMinDiagonal
-     if not Device.Changed then Device.Changed = Signal.new() end
-     lastType, lastInput = Device.GetType(), Device.GetInput()
-     if connected then return end
-     connected = true
-     local function hook(sig) if sig and sig.Connect then sig:Connect(function() Device._recompute() end) end end
-     hook(UserInputService.LastInputTypeChanged)
-     if UserInputService.GetPropertyChangedSignal then
-     hook(UserInputService:GetPropertyChangedSignal("TouchEnabled"))
-     hook(UserInputService:GetPropertyChangedSignal("MouseEnabled"))
-     hook(UserInputService:GetPropertyChangedSignal("KeyboardEnabled"))
-     end
-     local cam = workspace and workspace.CurrentCamera
-     if cam and cam.GetPropertyChangedSignal then hook(cam:GetPropertyChangedSignal("ViewportSize")) end
-    end
-    return Device
-end
-
--- Module: components/tab
-EmbeddedModules["components/tab"] = function()
-    local Tab = {}
-    local Create, DefaultTheme, Animate, Maid, Icons, Accordion, Host, REG, Safe, Recipes, Device
-    function Tab.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate
-     Maid = R.Maid; Icons = R.Icons; Accordion = R.Accordion; Host = R.Host; REG = R; Safe = R.Safe
-     Recipes = R.Recipes; Device = R.Device
-    end
-    function Tab.new(opts)
-     opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local maid = Maid.new()
-     local order = 0
-     local selected = false
-     local function tintRole() return selected and theme.Icon.structuralActive or theme.Icon.structural end
-     local function tint() return theme.Colors[tintRole()] end
-     local button = Create("TextButton", {
-     Name = "TabButton",
-     Text = "",
-     AutoButtonColor = false,
-     BackgroundColor3 = theme.Colors.surface,
-     BackgroundTransparency = 1,
-     Size = UDim2.new(1, 0, 0, 34),
-     LayoutOrder = opts.LayoutOrder or 0,
-     Parent = opts.SidebarParent,
-     Create.corner(theme.Radius.md),
-     Create.padding({ left = 10, right = 10 }),
-     })
-     local icon = Create("ImageLabel", {
-     Name = "Icon",
-     BackgroundTransparency = 1,
-     Size = UDim2.new(0, 16, 0, 16),
-     Position = UDim2.new(0, 4, 0.5, -8),
-     Parent = button,
-     })
-     if opts.Icon then Icons.apply(icon, opts.Icon, tint()) else icon.Visible = false end
-     local label = Create("TextLabel", {
-     Name = "Label",
-     BackgroundTransparency = 1,
-     Text = opts.Name or "Tab",
-     TextColor3 = tint(),
-     TextXAlignment = Enum.TextXAlignment.Left,
-     TextTruncate = Enum.TextTruncate.AtEnd,
-     Size = UDim2.new(1, opts.Icon and -30 or -6, 1, 0),
-     Position = UDim2.new(0, opts.Icon and 30 or 6, 0, 0),
-     Parent = button,
-     })
-     Create.text(label, theme, "label")
-     local hoverOpts = { theme = theme, kind = "text", label = label, icon = icon,
-     rest = tintRole(), hover = theme.Icon.structuralActive }
-     local hover = Recipes.hover(button, hoverOpts)
-     maid:Give(hover.disconnect)
-     local function paintState(animated)
-     hoverOpts.rest = tintRole()
-     local c = tint()
-     if animated then
-     Animate.to(button, "fast", { BackgroundTransparency = selected and 0 or 1 })
-     Animate.to(label, "hover", { TextColor3 = c })
-     if opts.Icon then Icons.tint(icon, c, "hover") end
-     else
-     button.BackgroundColor3 = theme.Colors.surface
-     label.TextColor3 = c
-     if opts.Icon then Icons.apply(icon, opts.Icon, c) end
-     hover.reskin() 
-     end
-     end
-     local content = Create("Frame", {
-     Name = "TabContent",
-     BackgroundTransparency = 1,
-     Visible = false,
-     Size = UDim2.new(1, 0, 0, 0),
-     AutomaticSize = Enum.AutomaticSize.Y,
-     Parent = opts.ContentParent,
-     Create.listLayout({ Padding = theme.Spacing.gap }),
-     Create.padding({ all = theme.Spacing.pad }),
-     })
-     local contentLayout = content:FindFirstChildOfClass("UIListLayout")
-     local contentPad = theme.Spacing.pad
-     local function panelH()
-     local sf = content.Parent
-     local s = sf and sf.AbsoluteSize
-     return (s and s.Y and s.Y > 0 and s.Y) or 360
-     end
-     local function syncCanvas()
-     Safe.mutate(function()
-     local sf = content.Parent
-     if selected and sf then
-     local acs = contentLayout.AbsoluteContentSize
-     sf.CanvasSize = UDim2.new(0, 0, 0, ((acs and acs.Y) or 0) + contentPad * 2)
-     end
-     end)
-     end
-     maid:Give(contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas))
-     local api = { Button = button, Content = content, Maid = maid }
-     function api:IsSelected() return selected end
-     function api:Select(dir)
-     selected = true
-     local sign = (dir == -1) and -1 or 1
-     content.Position = UDim2.new(0, 0, 0, sign * panelH())
-     content.Visible = true
-     if content.Parent then content.Parent.CanvasPosition = Vector2.new(0, 0) end
-     syncCanvas()
-     Animate.to(content, "slow", { Position = UDim2.new(0, 0, 0, 0) }, Animate.EASING.smooth)
-     paintState(true)
-     end
-     function api:Deselect(dir)
-     if not selected then content.Visible = false; return end 
-     selected = false
-     local sign = (dir == -1) and -1 or 1
-     Animate.toThen(content, "slow", { Position = UDim2.new(0, 0, 0, -sign * panelH()) }, function()
-     if not selected then content.Visible = false; content.Position = UDim2.new(0, 0, 0, 0) end
-     end, Animate.EASING.smooth)
-     paintState(true)
-     end
-     function api.MountRow(child)
-     order = order + 1
-     child.LayoutOrder = order
-     child.Parent = content
-     return order
-     end
-     Host.attach(api, {
-     R = REG, content = content, theme = theme, config = opts.Config, window = opts.Window,
-     registerSearchable = opts.RegisterSearchable, accentThemer = opts.AccentThemer,
-     registerControl = opts.RegisterControl,
-     nextOrder = function() order = order + 1; return order end,
-     })
-     if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function() paintState(false) end)) end
-     function api:AddAccordion(accOpts)
-     accOpts = accOpts or {}
-     order = order + 1
-     accOpts.Parent = content
-     accOpts.LayoutOrder = order
-     accOpts.Theme = theme
-     accOpts.Config = opts.Config
-     accOpts.Window = opts.Window
-     accOpts.RegisterSearchable = opts.RegisterSearchable
-     accOpts.AccentThemer = opts.AccentThemer
-     accOpts.RegisterControl = opts.RegisterControl
-     return Accordion.new(accOpts)
-     end
-     function api:SetIcon(name) opts.Icon = name; Safe.mutate(function() Icons.apply(icon, name, tint()); icon.Visible = true end) end
-     function api:SetTitle(s) Safe.mutate(function() label.Text = s end) end
-     if Device.SupportsHover() then
-     local function wash(on)
-     if not selected then Animate.to(button, "hover", { BackgroundTransparency = on and theme.Opacity.tabHover or 1 }) end
-     end
-     maid:Give(button.MouseEnter:Connect(function() wash(true) end))
-     maid:Give(button.MouseLeave:Connect(function() wash(false) end))
-     maid:Give(button.MouseButton1Up:Connect(function() if Device.GetInput() == "Touch" then wash(false) end end))
-     end
-     maid:Give(button.MouseButton1Click:Connect(function() if opts.OnActivate then opts.OnActivate(api) end end))
-     maid:Give(button)
-     maid:Give(content)
-     function api.Destroy() maid:DoCleanup() end
-     return api
-    end
-    return Tab
-end
-
 -- Module: core/theme
 EmbeddedModules["core/theme"] = function()
     local Theme = {}
@@ -4150,411 +4588,455 @@ EmbeddedModules["core/theme"] = function()
     return Theme
 end
 
--- Module: core/flag
-EmbeddedModules["core/flag"] = function()
-    local Flag = {}
-    function Flag.bind(opts, default, apply)
-     opts = opts or {}
-     local config, flag = opts.Config, opts.Flag
-     local value = default
-     if config and flag then
-     config:Register(flag, default, apply)
-     local saved = config:Get(flag)
-     if saved ~= nil then value = saved end
-     end
-     apply(value)
-     return function(v)
-     apply(v)
-     if config and flag then config:Set(flag, v) end
-     end
+-- Module: core/overlay
+EmbeddedModules["core/overlay"] = function()
+    local Overlay = {}
+    local Create, Mount
+    local root = nil
+    local catcher = nil 
+    local popovers = {} 
+    local DEFAULT_SCALE = 1
+    local uiScale = DEFAULT_SCALE
+    local dialogDepth = 0 
+    Overlay.Z = { catcher = 1000, popover = 1001, modal = 1500, fab = 1700, toast = 1800, tooltip = 2000 }
+    local DEFAULT_GAP = 4
+    local FALLBACK_VIEWPORT = { X = 1920, Y = 1080 }
+    function Overlay.Init(R) Create = R.Create; Mount = R.Mount end
+    local function anon(readable)
+     if Mount and Mount.anonName then return Mount.anonName(readable) end
+     return readable
     end
-    return Flag
+    local function ensureCatcher()
+     if catcher and catcher.Parent ~= nil then return end
+     if not root then return end
+     catcher = Create("ImageButton", {
+     Name = anon("OverlayCatcher"), AutoButtonColor = false, BackgroundTransparency = 1,
+     Active = true, Size = UDim2.new(1, 0, 1, 0), ZIndex = Overlay.Z.catcher, Parent = root,
+     })
+     catcher.MouseButton1Click:Connect(function() Overlay.closeAll() end)
+    end
+    local function removeCatcher()
+     if catcher then catcher:Destroy(); catcher = nil end
+    end
+    function Overlay.peek()
+     if root and root.Parent ~= nil then return root end
+     return nil
+    end
+    function Overlay.get(parentGui)
+     if root and root.Parent ~= nil then return root end
+     root = Create("Frame", {
+     Name = anon("OverlayRoot"),
+     BackgroundTransparency = 1,
+     Size = UDim2.new(1, 0, 1, 0),
+     ZIndex = Overlay.Z.catcher,
+     ClipsDescendants = false,
+     Parent = parentGui,
+     })
+     return root
+    end
+    function Overlay.mount(element)
+     assert(root, "Overlay.get(parentGui) must be called before mount")
+     element.Parent = root
+     return element
+    end
+    function Overlay.trackPopover(closeFn) popovers[closeFn] = true; ensureCatcher(); return closeFn end
+    function Overlay.untrackPopover(closeFn)
+     popovers[closeFn] = nil
+     if next(popovers) == nil then removeCatcher() end
+    end
+    function Overlay.closeAll()
+     local fns = popovers; popovers = {}
+     for fn in pairs(fns) do pcall(fn) end
+     removeCatcher()
+    end
+    function Overlay.viewport()
+     if root then
+     local s = root.AbsoluteSize
+     if s and (s.X or 0) > 0 and (s.Y or 0) > 0 then return s end
+     end
+     return { X = FALLBACK_VIEWPORT.X, Y = FALLBACK_VIEWPORT.Y } 
+    end
+    function Overlay.placePopover(anchorPos, anchorSize, w, h, gap)
+     gap = gap or DEFAULT_GAP
+     local ax, ay = anchorPos and anchorPos.X or 0, anchorPos and anchorPos.Y or 0
+     local ah = anchorSize and anchorSize.Y or 0
+     local vp = Overlay.viewport()
+     local below = ay + ah + gap
+     local above = ay - gap - h
+     local openUp = (below + h > vp.Y) and (above >= 0)
+     local y = openUp and above or below
+     local x = math.max(0, math.min(ax, vp.X - w - gap))
+     return x, y, openUp
+    end
+    function Overlay.setScale(n)
+     if type(n) ~= "number" or n ~= n or n <= 0 then
+     error("Overlay.setScale(n): positive number expected, got " .. tostring(n), 2)
+     end
+     uiScale = n
+     return n
+    end
+    function Overlay.scale() return uiScale end
+    function Overlay.pushDialog() dialogDepth = dialogDepth + 1; return dialogDepth end
+    function Overlay.popDialog() dialogDepth = math.max(0, dialogDepth - 1); return dialogDepth end
+    function Overlay.dialogDepth() return dialogDepth end
+    function Overlay.reset()
+     root = nil; catcher = nil; popovers = {}
+     uiScale = DEFAULT_SCALE; dialogDepth = 0
+    end
+    return Overlay
 end
 
--- Module: components/textbox
-EmbeddedModules["components/textbox"] = function()
-    local TextBox = {}
-    local Create, DefaultTheme, Maid, Icons, Flag, Animate, Safe, Recipes
-    function TextBox.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Icons = R.Icons; Flag = R.Flag; Animate = R.Animate; Safe = R.Safe
-     Recipes = R.Recipes
+-- Module: components/image
+EmbeddedModules["components/image"] = function()
+    local Image = {}
+    local Create, DefaultTheme, Icons, Safe, Asset, Animate, Effects
+    function Image.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Icons = R.Icons; Safe = R.Safe
+     Asset = R.Asset; Animate = R.Animate; Effects = R.Effects
     end
-    local function btnPalette(theme, variant)
-     if variant == "destructive" then return theme.Colors.destructive, theme.Colors.primaryForeground end
-     if variant == "secondary" then return theme.Colors.surface, theme.Colors.foreground end
-     if variant == "outline" then return theme.Colors.card, theme.Colors.foreground, theme.Colors.border end
-     if variant == "ghost" then return theme.Colors.card, theme.Colors.foreground end
-     return theme.Colors.primary, theme.Colors.primaryForeground 
+    local RESOLVE_TIMEOUT = 60
+    function Image.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local img = Create("ImageLabel", {
+     Name = "Image", BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
+     Image = "", ImageColor3 = opts.Color or Color3.fromRGB(255, 255, 255),
+     Size = UDim2.new(1, 0, 0, opts.Height or 80), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
+     })
+     local glyphColor = function() return opts.Color or theme.Colors.foreground end
+     if opts.Lucide then Icons.apply(img, opts.Lucide, glyphColor()) end
+     local unreg = (opts.Lucide and not opts.Color and opts.AccentReg) and opts.AccentReg(function()
+     Icons.apply(img, opts.Lucide, glyphColor())
+     end)
+     local src = (not opts.Lucide and type(opts.Image) == "string" and opts.Image ~= "") and opts.Image or nil
+     local resolvable = src ~= nil and Asset.resolvable(src)
+     local landed, armed, dead, owned, gaveUp = false, false, false, false, false
+     local skel, loadConn = nil, nil
+     local function waiting()
+     if gaveUp then return false end
+     if resolvable and not owned and not landed then return true end
+     return img.IsLoaded == false
+     end
+     local function settle()
+     if not armed or waiting() then return end
+     armed = false
+     if loadConn then loadConn:Disconnect(); loadConn = nil end
+     if skel then skel.Stop(); skel = nil end
+     Animate.to(img, "base", { ImageTransparency = 0 })
+     end
+     if resolvable then
+     Asset.imageAsync(src, function(id)
+     landed = true
+     Safe.mutate(function()
+     if dead or owned then return end
+     img.Image = id
+     settle()
+     end)
+     end, function()
+     landed = true
+     Safe.mutate(function()
+     if dead or owned then return end
+     gaveUp = true
+     settle()
+     end)
+     end)
+     elseif src then
+     img.Image = src
+     end
+     if waiting() then
+     armed = true
+     img.ImageTransparency = 1 
+     skel = Effects.skeleton(img, theme, { radius = theme.Radius.sm })
+     loadConn = img:GetPropertyChangedSignal("IsLoaded"):Connect(function()
+     Safe.mutate(function() if not dead then settle() end end)
+     end)
+     task.delay(RESOLVE_TIMEOUT, function()
+     Safe.mutate(function()
+     if dead or not armed then return end
+     gaveUp = true
+     settle() 
+     end)
+     end)
+     end
+     return {
+     Frame = img,
+     SetImage = function(v) Safe.mutate(function() owned = true; img.Image = v; settle() end) end,
+     Destroy = function()
+     dead = true
+     if loadConn then loadConn:Disconnect(); loadConn = nil end
+     if skel then skel.Stop(); skel = nil end
+     if unreg then unreg() end
+     img:Destroy()
+     end,
+     }
     end
-    local function roleColor(theme, role)
-     if role == "muted" then return theme.Colors[theme.Icon.structural] end
-     if role == "success" then return theme.Colors.success end
-     return theme.Colors[theme.Icon.accent]
+    return Image
+end
+
+-- Module: components/progressbar
+EmbeddedModules["components/progressbar"] = function()
+    local ProgressBar = {}
+    local Create, DefaultTheme, Animate, Safe
+    function ProgressBar.Init(R) Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Safe = R.Safe end
+    local IND = { width = 0.3, rest = 0.5, period = 1.1 }
+    local function clamp01(n) n = tonumber(n) or 0; if n < 0 then return 0 elseif n > 1 then return 1 end return n end
+    function ProgressBar.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local value = clamp01(opts.Default or 0)
+     local root = Create("Frame", { Name = "ProgressBar", BackgroundTransparency = 1,
+     Size = UDim2.new(1, 0, 0, 8), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
+     local track = Create("Frame", { Name = "Track", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
+     Size = UDim2.new(1, 0, 1, 0), Parent = root, Create.corner(4) })
+     local trackStroke = Create.stroke(theme.Colors.border, 1, theme.Stroke.track)
+     trackStroke.Parent = track
+     local fill = Create("Frame", { Name = "Fill", BackgroundColor3 = opts.Color or theme.Colors.primary, BorderSizePixel = 0,
+     Size = UDim2.new(value, 0, 1, 0), Visible = value > 0, Parent = track, Create.corner(4) })
+     Create("UISizeConstraint", { MinSize = Vector2.new(theme.Sizes.progress, 0), Parent = fill })
+     local unreg
+     if opts.AccentReg then
+     unreg = opts.AccentReg(function()
+     track.BackgroundColor3 = theme.Colors.surface
+     trackStroke.Color = theme.Colors.border
+     if not opts.Color then fill.BackgroundColor3 = theme.Colors.primary end
+     end)
+     end
+     local function durationFor(delta)
+     return theme.Motion.base + math.abs(delta) * (theme.Motion.slow - theme.Motion.base)
+     end
+     local ind = theme.Effect and theme.Effect.indeterminate or IND
+     local sweepW, sweepRest = ind.width or IND.width, ind.rest or IND.rest
+     local sweepPeriod = ind.period or IND.period
+     local indet, sweep = false, nil
+     local function stopSweep()
+     if not indet then return end
+     indet = false
+     if sweep then sweep.Cancel(); sweep = nil end
+     track.ClipsDescendants = false
+     fill.Position = UDim2.new(0, 0, 0, 0)
+     end
+     local function Set(p)
+     local prev = value
+     value = clamp01(p) 
+     local done = value >= 1 and prev < 1
+     Safe.mutate(function()
+     stopSweep() 
+     fill.Visible = value > 0
+     Animate.to(fill, durationFor(value - prev), { Size = UDim2.new(value, 0, 1, 0) },
+     Animate.EASING.smooth, Animate.DIR.Out)
+     if done then
+     fill.BackgroundTransparency = theme.Opacity.flash
+     Animate.to(fill, "base", { BackgroundTransparency = 0 })
+     end
+     end)
+     end
+     local function SetIndeterminate(b)
+     local on = b and true or false
+     Safe.mutate(function()
+     if not on then
+     stopSweep()
+     fill.Visible = value > 0
+     Animate.to(fill, "base", { Size = UDim2.new(value, 0, 1, 0) },
+     Animate.EASING.smooth, Animate.DIR.Out)
+     return
+     end
+     if indet then return end 
+     indet = true
+     fill.Visible = true
+     fill.BackgroundTransparency = 0 
+     if not Animate.isEnabled() then
+     fill.Position = UDim2.new(0, 0, 0, 0)
+     fill.Size = UDim2.new(sweepRest, 0, 1, 0)
+     return
+     end
+     track.ClipsDescendants = true 
+     fill.Size = UDim2.new(sweepW, 0, 1, 0)
+     fill.Position = UDim2.new(-sweepW, 0, 0, 0)
+     sweep = Animate.loop(fill, sweepPeriod, { Position = UDim2.new(1, 0, 0, 0) }, Animate.EASING.smooth)
+     end)
+     end
+     if opts.Indeterminate then SetIndeterminate(true) end
+     return {
+     Frame = root,
+     Get = function() return value end,
+     Set = Set,
+     SetIndeterminate = SetIndeterminate,
+     Destroy = function() stopSweep(); if unreg then unreg() end; root:Destroy() end,
+     }
     end
-    local ERROR_H = 18
-    function TextBox.new(opts)
+    return ProgressBar
+end
+
+-- Module: components/table
+EmbeddedModules["components/table"] = function()
+    local Table = {}
+    local Create, DefaultTheme, Maid, Safe, Recipes
+    function Table.Init(R) Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Safe = R.Safe; Recipes = R.Recipes end
+    local ROW_H, BODY_Y, CELL_INSET = 24, 26, 4
+    function Table.new(opts)
      opts = opts or {}
      local theme = opts.Theme or DefaultTheme
      local maid = Maid.new()
-     local hasLabel = opts.Text ~= nil and opts.Text ~= ""
-     local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-     local fullWidth = (opts.FullWidth and hasLabel) and true or false
-     local boxH = fullWidth and 36 or 30
-     local boxX, boxW, boxTop, baseH, titleTop, descTop
-     if not hasLabel then
-     boxX, boxW, boxTop, baseH = UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, boxH), 0, boxH
-     elseif fullWidth then
-     titleTop = 12
-     descTop = titleTop + 22
-     boxTop = titleTop + (hasDesc and 44 or 26)
-     boxX, boxW, baseH = UDim2.new(0, 0, 0, boxTop), UDim2.new(1, 0, 0, boxH), boxTop + boxH + 12
-     else
-     baseH = hasDesc and 56 or 46
-     boxTop = math.floor((baseH - boxH) / 2)
-     boxX, boxW = UDim2.new(0.5, 4, 0, boxTop), UDim2.new(0.5, -4, 0, boxH)
+     local cols = opts.Columns or {}
+     local root = Create("Frame", { Name = "Table", BackgroundTransparency = 1,
+     Size = UDim2.new(1, 0, 0, (opts.Height or 120) + BODY_Y), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
+     local rowHovers = {}
+     local function dropRowHovers()
+     for i = #rowHovers, 1, -1 do rowHovers[i](); rowHovers[i] = nil end
      end
-     local real = opts.Default or ""
-     local masked = opts.Password and true or false
-     local revealed = false
-     local suppress = false
-     local state = { focused = false, invalid = false }
-     local enabled = true
-     local dimParts, dimRest = {}, {} 
-     local themed = {} 
-     local function reTheme() for _, fn in ipairs(themed) do fn() end end
-     local api = {} 
-     local root = Create("Frame", {
-     Name = "TextBoxRow", BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = 0,
-     Size = UDim2.new(1, 0, 0, baseH), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent,
-     Create.corner(theme.Radius.md),
-     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }),
-     })
-     themed[#themed + 1] = function() root.BackgroundColor3 = theme.Colors.surface end
-     if hasLabel then
-     local title = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Text,
-     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-     TextYAlignment = (hasDesc or fullWidth) and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-     Position = fullWidth and UDim2.new(0, 0, 0, titleTop) or UDim2.new(0, 0, 0, hasDesc and 6 or 0),
-     Size = fullWidth and UDim2.new(1, 0, 0, 18)
-     or UDim2.new(0.5, -8, hasDesc and 0 or 1, hasDesc and 18 or 0),
-     Parent = root })
-     Create.text(title, theme, "label")
-     themed[#themed + 1] = function() title.TextColor3 = theme.Colors.foreground end
-     if hasDesc then
-     local desc = Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
-     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-     TextYAlignment = Enum.TextYAlignment.Top,
-     Position = fullWidth and UDim2.new(0, 0, 0, descTop) or UDim2.new(0, 0, 0, 26),
-     Size = fullWidth and UDim2.new(1, 0, 0, 18) or UDim2.new(0.5, -8, 0, 26), Parent = root })
-     Create.text(desc, theme, "muted")
-     themed[#themed + 1] = function() desc.TextColor3 = theme.Colors.mutedForeground end
+     local function makeRow(parent, cells, header, order)
+     local row = Create("Frame", { Name = header and "Header" or "Row",
+     BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = header and 1 or 0,
+     Size = UDim2.new(1, 0, 0, ROW_H), LayoutOrder = order or 0, Parent = parent,
+     Create.corner(header and 0 or theme.Radius.xs),
+     Create.listLayout({ Padding = CELL_INSET, FillDirection = Enum.FillDirection.Horizontal }) })
+     if header then Create.padding({ left = CELL_INSET, right = CELL_INSET }).Parent = row end
+     if not header then
+     local hv = Recipes.hover(row, { theme = theme, kind = "fill" })
+     rowHovers[#rowHovers + 1] = hv.disconnect
      end
+     for i, text in ipairs(cells) do
+     local cell = Create.text(Create("TextLabel", { Name = "Cell", BackgroundTransparency = 1, Text = tostring(text),
+     TextColor3 = header and theme.Colors.mutedForeground or theme.Colors.foreground,
+     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+     Size = UDim2.new(0, 0, 1, 0), LayoutOrder = i, Parent = row }), theme, "muted")
+     local face = header and theme.FontFace and theme.FontFace(Enum.FontWeight.Medium)
+     if face then cell.FontFace = face end
+     Create("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill, Parent = cell })
      end
-     local box = Create("Frame", {
-     Name = "Box", BackgroundColor3 = theme.Colors.background, BorderSizePixel = 0,
-     ClipsDescendants = true,
-     Position = boxX, Size = boxW, Parent = root, Create.corner(theme.Radius.input),
-     Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }),
-     Create.listLayout({ FillDirection = Enum.FillDirection.Horizontal, Padding = 6 }),
-     })
-     themed[#themed + 1] = function() box.BackgroundColor3 = theme.Colors.background end
-     box:FindFirstChildOfClass("UIListLayout").VerticalAlignment = Enum.VerticalAlignment.Center
-     local stroke = Create("UIStroke", { Color = theme.Colors.border, Thickness = 1, Parent = box })
-     local function strokeColor()
-     if state.invalid then return theme.Colors.destructive end
-     if state.focused then return theme.Colors.ring end
-     return theme.Colors.border
+     return row
      end
-     themed[#themed + 1] = function() stroke.Color = strokeColor() end
-     local input = Create("TextBox", {
-     Name = "Input", BackgroundTransparency = 1, Text = real,
-     PlaceholderText = opts.Placeholder or "", PlaceholderColor3 = theme.Colors.mutedForeground,
-     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-     TextYAlignment = Enum.TextYAlignment.Center, ClearTextOnFocus = false,
-     TextEditable = not opts.Copyable, LayoutOrder = 3, Size = UDim2.new(0, 0, 1, 0), Parent = box,
-     Create("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill }),
-     })
-     Create.text(input, theme, "body")
-     themed[#themed + 1] = function()
-     input.TextColor3 = enabled and theme.Colors.foreground or theme.Colors.mutedForeground
-     input.PlaceholderColor3 = theme.Colors.mutedForeground
+     makeRow(root, cols, true, 0)
+     local rule = Create("Frame", { Name = "HeaderRule", BackgroundColor3 = theme.Colors.border,
+     BackgroundTransparency = theme.Stroke.divider, BorderSizePixel = 0,
+     Position = UDim2.new(0, 0, 0, BODY_Y - 1), Size = UDim2.new(1, 0, 0, 1), Parent = root })
+     local body = Create("ScrollingFrame", { Name = "Body", BackgroundColor3 = theme.Colors.surface,
+     BackgroundTransparency = 0.5, BorderSizePixel = 0,
+     Position = UDim2.new(0, 0, 0, BODY_Y), Size = UDim2.new(1, 0, 1, -BODY_Y),
+     AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(0, 0, 0, 0), Parent = root,
+     Create.corner(theme.Radius.sm), Create.padding({ all = CELL_INSET }), Create.listLayout({ Padding = 2 }) })
+     Recipes.scrollbar(body, theme)
+     local emptyArea = Create("Frame", { Name = "EmptyArea", BackgroundTransparency = 1, Active = false,
+     Position = UDim2.new(0, 0, 0, BODY_Y), Size = UDim2.new(1, 0, 1, -BODY_Y), ZIndex = 2, Parent = root })
+     local empty = Recipes.empty(emptyArea, { theme = theme, text = "No rows", icon = "inbox", zIndex = 2 })
+     local order = 0
+     local api = { Frame = root, Body = body }
+     function api.AddRow(cells)
+     order = order + 1
+     local o = order
+     local row
+     Safe.mutate(function() row = makeRow(body, cells, false, o); empty.SetVisible(false) end)
+     return row
      end
-     local function display() return (masked and not revealed) and string.rep("*", #real) or real end
-     local function render()
-     local d = display()
-     if input.Text == d then return end
+     function api.Clear()
+     order = 0
      Safe.mutate(function()
-     suppress = true
-     input.Text = d
-     if masked and not revealed then input.CursorPosition = #d + 1 end
-     suppress = false
+     dropRowHovers()
+     for _, c in ipairs(body:GetChildren()) do if c.Name == "Row" then c:Destroy() end end
+     empty.SetVisible(true)
      end)
      end
-     local function apply(v)
-     real = tostring(v or "")
-     if opts.MaxLength and #real > opts.MaxLength then real = real:sub(1, opts.MaxLength) end
-     render()
-     end
-     local commit = Flag.bind(opts, opts.Default or "", apply)
-     maid:Give(input:GetPropertyChangedSignal("Text"):Connect(function()
-     if suppress then return end
-     local vis = input.Text
-     if masked and not revealed then
-     if #vis > #real then real = real .. vis:sub(#real + 1)
-     elseif #vis < #real then real = real:sub(1, #vis) end
-     else
-     real = vis
-     end
-     if opts.MaxLength and #real > opts.MaxLength then real = real:sub(1, opts.MaxLength) end
-     render()
-     end))
-     maid:Give(input.FocusLost:Connect(function()
-     commit(real)
-     if opts.Callback then opts.Callback(real, api) end
-     end))
-     local function mkIconButton(name, icon, colorRole, order, onClick)
-     local glyph, role = icon, colorRole
-     local btn = Create("ImageButton", { Name = name, BackgroundTransparency = 1,
-     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = order, Parent = box })
-     Icons.apply(btn, glyph, roleColor(theme, role))
-     dimParts[#dimParts + 1] = btn
-     local hover
-     if colorRole == "muted" then
-     hover = Recipes.hover(btn, { theme = theme, kind = "text", icon = btn,
-     rest = theme.Icon.structural, hover = theme.Icon.structuralActive })
-     maid:Give(hover.disconnect)
-     end
-     maid:Give(Recipes.press(btn, btn, { theme = theme }).disconnect)
-     themed[#themed + 1] = function()
-     Icons.apply(btn, glyph, roleColor(theme, role))
-     if hover then hover.reskin() end 
-     end
-     if onClick then maid:Give(btn.MouseButton1Click:Connect(function() if enabled then onClick() end end)) end
-     return btn, function(g, r)
-     glyph, role = g or glyph, r or role
-     Icons.apply(btn, glyph, roleColor(theme, role))
-     end
-     end
-     local function mkAffix(name, text, order)
-     local lbl = Create("TextLabel", { Name = name, BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.X,
-     Text = text, TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left,
-     TextYAlignment = Enum.TextYAlignment.Center,
-     Size = UDim2.new(0, 0, 1, 0), LayoutOrder = order, Parent = box })
-     Create.text(lbl, theme, "body")
-     themed[#themed + 1] = function() lbl.TextColor3 = theme.Colors.mutedForeground end
-     return lbl
-     end
-     local function mkDecorIcon(name, icon, order)
-     local img = Create("ImageLabel", { Name = name, BackgroundTransparency = 1,
-     Size = UDim2.new(0, 16, 0, 16), LayoutOrder = order, Parent = box })
-     Icons.apply(img, icon, theme.Colors.mutedForeground)
-     themed[#themed + 1] = function() Icons.apply(img, icon, theme.Colors.mutedForeground) end
-     return img
-     end
-     if opts.LeadingIcon then mkDecorIcon("LeadingIcon", opts.LeadingIcon, 1) end
-     if opts.Prefix then mkAffix("Prefix", opts.Prefix, 2) end
-     if opts.Suffix then mkAffix("Suffix", opts.Suffix, 4) end
-     if opts.TrailingIcon then mkDecorIcon("TrailingIcon", opts.TrailingIcon, 5) end
-     local function mkTextButton(spec, order)
-     local bg, fg, line = btnPalette(theme, spec.Variant or "default")
-     local btn = Create("TextButton", { Name = "Button" .. order, AutoButtonColor = false,
-     BackgroundColor3 = bg, BackgroundTransparency = 0,
-     AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 0, theme.Sizes.chip),
-     Text = spec.Text, TextColor3 = fg,
-     LayoutOrder = order, Parent = box, Create.corner(theme.Radius.sm),
-     Create.padding({ left = theme.Spacing.gap, right = theme.Spacing.gap }) })
-     Create.text(btn, theme, "muted")
-     if line then Create("UIStroke", { Color = line, Thickness = 1, Parent = btn }) end
-     maid:Give(Recipes.hover(btn, { theme = theme, host = btn, kind = "fill",
-     hoverAlpha = theme.Opacity.hoverFill, pressAlpha = theme.Opacity.pressFill }).disconnect)
-     maid:Give(Recipes.press(btn, nil, { theme = theme }).disconnect)
-     themed[#themed + 1] = function()
-     local b2, f2, l2 = btnPalette(theme, spec.Variant or "default")
-     btn.BackgroundColor3 = b2; btn.TextColor3 = f2
-     local s = btn:FindFirstChildOfClass("UIStroke"); if s and l2 then s.Color = l2 end
-     end
-     return btn
-     end
-     if opts.Buttons then
-     for i, spec in ipairs(opts.Buttons) do
-     local order = 5 + i
-     if spec.Icon then
-     mkIconButton("Button" .. i, spec.Icon, "primary", order,
-     spec.Callback and function() spec.Callback(real, api) end or nil)
-     else
-     local btn = mkTextButton(spec, order)
-     btn.Name = "Button" .. i
-     if spec.Callback then
-     maid:Give(btn.MouseButton1Click:Connect(function() if enabled then spec.Callback(real, api) end end))
-     end
-     end
-     end
-     end
-     if opts.Clearable then
-     local clear
-     clear = mkIconButton("Clear", "x", "muted", 29, function()
-     commit(""); if opts.Callback then opts.Callback(real, api) end
-     Animate.pop(clear, "fast")
-     if input.CaptureFocus then input:CaptureFocus() end
-     end)
-     local shown
-     local function sync()
-     local show = #real > 0
-     if shown == show then return end
-     local first = shown == nil
-     shown = show
-     Safe.mutate(function()
-     if first then
-     clear.Visible = show; clear.ImageTransparency = show and 0 or 1
-     elseif show then
-     clear.Visible = true
-     Animate.to(clear, "fast", { ImageTransparency = 0 })
-     else
-     Animate.toThen(clear, "fast", { ImageTransparency = 1 },
-     function() Safe.mutate(function() clear.Visible = false end) end)
-     end
-     end)
-     end
-     sync()
-     maid:Give(input:GetPropertyChangedSignal("Text"):Connect(sync))
-     end
-     local spinner, spin 
-     local function stopSpin() if spin then spin.Cancel(); spin = nil end end
-     local function mkSpinner()
-     if spinner then return spinner end
-     spinner = Create("ImageLabel", { Name = "Spinner", BackgroundTransparency = 1, Visible = false,
-     Size = UDim2.new(0, 16, 0, 16), LayoutOrder = 40, Parent = box })
-     Icons.apply(spinner, "loader", theme.Colors.mutedForeground)
-     themed[#themed + 1] = function() Icons.apply(spinner, "loader", theme.Colors.mutedForeground) end
-     return spinner
-     end
-     local function setLoading(b)
-     Safe.mutate(function()
-     local s = mkSpinner()
-     s.Visible = b and true or false
-     stopSpin()
-     if b then spin = Animate.spin(s) end
-     end)
-     end
-     if opts.Loading then setLoading(true) end
-     if opts.Password then
-     local eye, setEyeGlyph
-     eye, setEyeGlyph = mkIconButton("Eye", "eye", "muted", 28, function()
-     revealed = not revealed
-     setEyeGlyph(revealed and "eye-off" or "eye")
-     Animate.pop(eye, "fast") 
-     render()
-     end)
-     end
-     if opts.Copyable then
-     local setCopyGlyph
-     local copyGen = 0
-     local _, setter = mkIconButton("Copy", "copy", "primary", 30, function()
-     if setclipboard then pcall(setclipboard, real) end
-     copyGen = copyGen + 1
-     local gen = copyGen
-     Safe.mutate(function() setCopyGlyph("check", "success") end)
-     task.delay(theme.Motion.copyRevert, function()
-     if gen ~= copyGen then return end
-     Safe.mutate(function() setCopyGlyph("copy", "primary") end)
-     end)
-     end)
-     setCopyGlyph = setter
-     end
-     local focus = Recipes.focus(stroke, input, function(focused)
-     state.focused = focused
-     return strokeColor()
-     end, { theme = theme })
-     maid:Give(focus.disconnect)
-     local function setEnabled(b)
-     b = b and true or false
-     if enabled == b then return end
-     enabled = b
-     Safe.mutate(function()
-     input.TextEditable = b and not opts.Copyable
-     input.TextColor3 = b and theme.Colors.foreground or theme.Colors.mutedForeground
-     local parts = { { box, "BackgroundTransparency", 0 } }
-     for _, inst in ipairs(dimParts) do
-     if not b then dimRest[inst] = inst.ImageTransparency or 0 end
-     parts[#parts + 1] = { inst, "ImageTransparency", dimRest[inst] or 0 }
-     end
-     Recipes.disabled(parts, not b, theme)
-     end)
-     end
-     if opts.Disabled then setEnabled(false) end
-     local message
-     local function mkMessage()
-     if message then return message end
-     message = Create("TextLabel", { Name = "Error", BackgroundTransparency = 1, Visible = false,
-     Text = "", TextColor3 = theme.Colors.destructive, TextXAlignment = Enum.TextXAlignment.Left,
-     TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true,
-     Position = UDim2.new(boxX.X.Scale, boxX.X.Offset, 0, boxTop + boxH + 2),
-     Size = UDim2.new(boxW.X.Scale, boxW.X.Offset, 0, 16), Parent = root })
-     Create.text(message, theme, "muted")
-     themed[#themed + 1] = function() message.TextColor3 = theme.Colors.destructive end
-     return message
-     end
-     local shaking = false
-     local function shake()
-     if shaking or not Animate.isEnabled() then return end
-     local sh = theme.Motion.shake
-     local rest = box.Position
-     local steps = {}
-     for i = 1, sh.steps do
-     local dx = (i % 2 == 1) and sh.amp or -sh.amp
-     steps[i] = { box, sh.step,
-     { Position = UDim2.new(rest.X.Scale, rest.X.Offset + dx, rest.Y.Scale, rest.Y.Offset) },
-     Enum.EasingStyle.Sine, Animate.DIR.InOut }
-     end
-     steps[#steps + 1] = { box, sh.step, { Position = rest }, Enum.EasingStyle.Sine, Animate.DIR.Out }
-     shaking = true
-     Animate.chain(steps, function() shaking = false end)
-     end
-     local function setInvalid(msg)
-     state.invalid = true
-     Safe.mutate(function()
-     local m = mkMessage(); m.Text = msg or ""
-     if not m.Visible then m.Visible = true; m.TextTransparency = 1 end
-     stroke.Color = strokeColor()
-     Animate.to(root, "base", { Size = UDim2.new(1, 0, 0, baseH + ERROR_H) })
-     Animate.to(m, "base", { TextTransparency = 0 })
-     shake()
-     end)
-     end
-     local function setValid()
-     state.invalid = false
-     Safe.mutate(function()
-     stroke.Color = strokeColor()
-     Animate.to(root, "base", { Size = UDim2.new(1, 0, 0, baseH) })
-     if message and message.Visible then
-     Animate.toThen(message, "fast", { TextTransparency = 1 },
-     function() Safe.mutate(function() message.Visible = false end) end)
-     end
-     end)
-     end
-     local function runValidate()
-     if not opts.Validate then return end
-     local ok, msg = opts.Validate(real)
-     if ok then setValid() else setInvalid(msg) end
-     end
-     maid:Give(input.FocusLost:Connect(runValidate))
-     if opts.AccentReg then maid:Give(opts.AccentReg(reTheme)) end
-     maid:Give(stopSpin)
+     function api.SetData(rows) api.Clear(); for _, r in ipairs(rows or {}) do api.AddRow(r) end end
+     function api.Destroy() maid:DoCleanup(); root:Destroy() end
+     api.SetData(opts.Rows)
      maid:Give(root)
-     api.Frame = root
-     api.GetText = function() return real end
-     api.SetText = function(s) commit(tostring(s)); runValidate(); if opts.Callback then opts.Callback(real, api) end end
-     api.Focus = function() input:CaptureFocus() end
-     api.Clear = function() commit("") end
-     api.SetDisabled = function(b) setEnabled(not b) end
-     api.SetEnabled = function(b) setEnabled(b) end
-     api.SetInvalid = function(msg) setInvalid(msg) end
-     api.SetValid = function() setValid() end
-     api.SetLoading = function(b) setLoading(b) end
-     api.Destroy = function() maid:DoCleanup() end
+     maid:Give(dropRowHovers)
+     if opts.AccentReg then maid:Give(opts.AccentReg(function()
+     body.BackgroundColor3 = theme.Colors.surface
+     Recipes.scrollbar(body, theme) 
+     rule.BackgroundColor3 = theme.Colors.border
+     empty.reskin() 
+     local header = root:FindFirstChild("Header")
+     if header then for _, c in ipairs(header:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.mutedForeground end end end
+     for _, row in ipairs(body:GetChildren()) do
+     if row.Name == "Row" then
+     row.BackgroundColor3 = theme.Colors.surface
+     for _, c in ipairs(row:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.foreground end end
+     end
+     end
+     end)) end
      return api
     end
-    return TextBox
+    return Table
+end
+
+-- Module: core/create
+EmbeddedModules["core/create"] = function()
+    local Create = {}
+    local function build(className, props)
+     local inst = Instance.new(className)
+     props = props or {}
+     local parent
+     for k, v in pairs(props) do
+     if type(k) == "number" then
+     v.Parent = inst 
+     elseif k == "Parent" then
+     parent = v 
+     else
+     inst[k] = v
+     end
+     end
+     if parent then inst.Parent = parent end
+     return inst
+    end
+    setmetatable(Create, { __call = function(_, className, props) return build(className, props) end })
+    function Create.corner(radius)
+     return Create("UICorner", { CornerRadius = UDim.new(0, radius) })
+    end
+    function Create.padding(t)
+     t = t or {}
+     return Create("UIPadding", {
+     PaddingTop = UDim.new(0, t.top or t.all or 0),
+     PaddingBottom = UDim.new(0, t.bottom or t.all or 0),
+     PaddingLeft = UDim.new(0, t.left or t.all or 0),
+     PaddingRight = UDim.new(0, t.right or t.all or 0),
+     })
+    end
+    function Create.listLayout(opts)
+     opts = opts or {}
+     return Create("UIListLayout", {
+     Padding = UDim.new(0, opts.Padding or 0),
+     FillDirection = opts.FillDirection or Enum.FillDirection.Vertical,
+     SortOrder = opts.SortOrder or Enum.SortOrder.LayoutOrder,
+     })
+    end
+    function Create.stroke(color, thickness, transparency)
+     return Create("UIStroke", { Color = color, Thickness = thickness or 1, Transparency = transparency })
+    end
+    local function keypoints(stops, ctor, what)
+     if type(stops) ~= "table" or #stops == 0 then
+     error("Create." .. what .. ": stops = { {t, value}, ... } required", 3)
+     end
+     local out = {}
+     for i, s in ipairs(stops) do out[i] = ctor(s[1], s[2]) end
+     return out
+    end
+    function Create.gradient(opts)
+     opts = opts or {}
+     return Create("UIGradient", {
+     Rotation = opts.rotation or 0,
+     Color = ColorSequence.new(keypoints(opts.stops, ColorSequenceKeypoint.new, "gradient")),
+     })
+    end
+    function Create.shade(opts)
+     opts = opts or {}
+     return Create("UIGradient", {
+     Rotation = opts.rotation or 0,
+     Transparency = NumberSequence.new(keypoints(opts.stops, NumberSequenceKeypoint.new, "shade")),
+     })
+    end
+    function Create.text(label, theme, role)
+     local fonts = type(theme) == "table" and theme.Font or nil
+     local spec = fonts and (fonts[role] or fonts.body)
+     if not spec then error("Create.text: theme.Font[" .. tostring(role) .. "] (or .body fallback) required", 2) end
+     label.Font = Enum.Font.BuilderSans
+     label.TextSize = spec.Size
+     if spec.LineHeight ~= nil then label.LineHeight = spec.LineHeight end
+     local face = type(theme.FontFace) == "function" and theme.FontFace(spec.Weight) or nil
+     if face ~= nil then label.FontFace = face end
+     return label
+    end
+    return Create
 end
 
 -- Module: components/selectbox
@@ -4567,17 +5049,13 @@ EmbeddedModules["components/selectbox"] = function()
      Icons = R.Icons; Overlay = R.Overlay; Flag = R.Flag; Safe = R.Safe; Recipes = R.Recipes
      Effects = R.Effects; Acrylic = R.Acrylic
     end
-    local POPOVER_FROST = 0.04
     local CARET_OPEN = 180 
     local SKELETON_ROWS = { 0.6, 0.8, 0.45 }
     local SKELETON_H, SKELETON_GAP = 10, 8
     local LOADING_H = #SKELETON_ROWS * SKELETON_H + (#SKELETON_ROWS - 1) * SKELETON_GAP
     local EMPTY_ICON, EMPTY_TEXT = "search", "No results"
     local function emptyH(t) return t.Sizes.icon + t.Spacing.gap * 2 + t.Font.muted.Size end
-    local function frostAlpha(theme)
-     local a = theme.Acrylic and theme.Acrylic.popoverFrost
-     return type(a) == "number" and a or POPOVER_FROST
-    end
+    local function frostAlpha(theme) return theme.Acrylic.popoverFrost end
     local function popOpen(frame, theme, edge, scale)
      if scale == 1 then return Animate.popIn(frame, edge) end
      local us = frame:FindFirstChildOfClass("UIScale")
@@ -5079,166 +5557,357 @@ EmbeddedModules["components/selectbox"] = function()
     return SelectBox
 end
 
--- Module: components/keybind
-EmbeddedModules["components/keybind"] = function()
-    local Keybind = {}
-    local Create, DefaultTheme, Maid, Flag, Safe, Recipes, Animate
-    local UserInputService = game:GetService("UserInputService")
-    function Keybind.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe; Recipes = R.Recipes
-     Animate = R.Animate
+-- Module: core/signal
+EmbeddedModules["core/signal"] = function()
+    local Signal = {}
+    Signal.__index = Signal
+    function Signal.new()
+     return setmetatable({ _handlers = {}, _order = {} }, Signal)
     end
-    local LISTEN_TEXT = "Press a key"
-    local FALLBACK = { low = 0.2, high = 0.7, period = 0.4 }
-    local function pulseTok(theme, k)
-     local v
-     if k == "period" then v = theme.Motion and theme.Motion.pulse
-     else v = theme.Stroke and theme.Stroke.pulse and theme.Stroke.pulse[k] end
-     if type(v) == "number" then return v end
-     return FALLBACK[k]
+    function Signal:Connect(fn)
+     self._order[#self._order + 1] = fn
+     self._handlers[fn] = true
+     return { Disconnect = function()
+     self._handlers[fn] = nil
+     for i, f in ipairs(self._order) do if f == fn then table.remove(self._order, i) break end end
+     end }
     end
-    local ESCAPE = (function()
-     local ok, kc = pcall(function() return Enum.KeyCode.Escape end)
-     if ok then return kc end
-     return nil
-    end)()
-    local function keyName(k)
-     if type(k) == "string" then return k end
-     if k ~= nil then
-     local ok, name = pcall(function() return k.Name end)
-     if ok and type(name) == "string" then return name end
-     end
-     return "Unknown"
+    function Signal:Once(fn)
+     local conn
+     conn = self:Connect(function(...) conn.Disconnect(); fn(...) end)
+     return conn
     end
-    local function toKeyCode(name)
-     local ok, kc = pcall(function() return Enum.KeyCode[name] end)
-     if ok and kc then return kc end
-     return Enum.KeyCode.Unknown
+    function Signal:Fire(...)
+     local snapshot = {}
+     for i, fn in ipairs(self._order) do snapshot[i] = fn end
+     for _, fn in ipairs(snapshot) do if self._handlers[fn] then fn(...) end end
     end
-    function Keybind.new(opts)
+    function Signal:DisconnectAll()
+     self._handlers = {}; self._order = {}
+    end
+    return Signal
+end
+
+-- Module: core/flag
+EmbeddedModules["core/flag"] = function()
+    local Flag = {}
+    function Flag.bind(opts, default, apply)
      opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local maid = Maid.new()
-     local listening = false
-     local enabled = true 
-     local keyCode = "Unknown"
-     local onPressed
-     local hasDesc = opts.Description ~= nil and opts.Description ~= ""
-     local btn = Create("TextButton", { Name = "Keybind", AutoButtonColor = false, Text = "",
-     BackgroundColor3 = theme.Colors.surface, Size = UDim2.new(1, 0, 0, hasDesc and 50 or 34), LayoutOrder = opts.LayoutOrder or 0,
-     Parent = opts.Parent, Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
-     Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Keybind",
-     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-     TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
-     Position = UDim2.new(0, 0, 0, hasDesc and 8 or 0), Size = UDim2.new(1, -80, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn }),
-     theme, "label")
-     if hasDesc then
-     Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
-     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-     TextYAlignment = Enum.TextYAlignment.Top,
-     Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, -80, 0, 18), Parent = btn }), theme, "muted")
+     local config, flag = opts.Config, opts.Flag
+     local value = default
+     if config and flag then
+     config:Register(flag, default, apply)
+     local saved = config:Get(flag)
+     if saved ~= nil then value = saved end
      end
-     local keyBox = Create.text(Create("TextLabel", { Name = "Key", BackgroundColor3 = theme.Colors.background,
-     Text = "...", TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Center,
-     AutomaticSize = Enum.AutomaticSize.X, AnchorPoint = Vector2.new(1, 0.5),
-     Size = UDim2.new(0, 0, 0, theme.Sizes.chip), Position = UDim2.new(1, 0, 0.5, 0), Parent = btn,
-     Create.corner(theme.Radius.sm),
-     Create.padding({ left = theme.Spacing.gap, right = theme.Spacing.gap }),
-     Create("UISizeConstraint", { MinSize = Vector2.new(theme.Sizes.touchHit, theme.Sizes.chip) }) }),
-     theme, "muted")
-     local chipStroke = Create.stroke(theme.Colors.border, 1); chipStroke.Parent = keyBox
-     local function chipColor(on) return on and theme.Colors.ring or theme.Colors.border end
-     local ring = Recipes.focus(chipStroke, keyBox, chipColor, { theme = theme })
-     maid:Give(ring.disconnect)
-     local hover = Recipes.hover(btn, { theme = theme, host = btn, corner = theme.Radius.md,
-     inset = { x = theme.Spacing.inputX, y = 0 } })
-     maid:Give(hover.disconnect)
-     maid:Give(Recipes.press(btn, keyBox, { theme = theme }).disconnect)
-     local function chipText() return listening and LISTEN_TEXT or keyCode end
-     local function chipTint() return listening and theme.Colors.mutedForeground or theme.Colors.foreground end
-     local function paintChip() keyBox.Text = chipText(); keyBox.TextColor3 = chipTint() end
-     local pulse
-     local function stopPulse()
-     if pulse then pulse.Cancel(); pulse = nil end
-     chipStroke.Transparency = theme.Stroke.control
+     apply(value)
+     return function(v)
+     apply(v)
+     if config and flag then config:Set(flag, v) end
      end
-     local function startPulse()
-     stopPulse()
-     if not Animate.isEnabled() then return end
-     chipStroke.Transparency = pulseTok(theme, "low")
-     pulse = Animate.pulse(chipStroke, pulseTok(theme, "period"),
-     { Transparency = pulseTok(theme, "high") }, Enum.EasingStyle.Sine)
-     end
-     maid:Give(stopPulse)
-     local function setListening(on)
-     listening = on and true or false
-     Safe.mutate(function()
-     paintChip()
-     if listening then startPulse() else stopPulse() end
-     ring.set(listening)
-     end)
-     end
-     local function flashCapture()
-     Safe.mutate(function()
-     Animate.pop(keyBox, "fast")
-     chipStroke.Color = theme.Colors.primary
-     Animate.to(chipStroke, "base", { Color = chipColor(false), Transparency = theme.Stroke.control })
-     end)
-     end
-     local function apply(name)
-     keyCode = keyName(name)
-     Safe.mutate(paintChip)
-     end
-     local commit = Flag.bind(opts, keyName(opts.Default or "Unknown"), apply)
-     local function setKey(k)
-     commit(keyName(k))
-     if opts.OnChanged then opts.OnChanged(toKeyCode(keyCode)) end
-     end
-     local function setEnabled(b)
-     b = b and true or false
-     if enabled == b then return end
-     enabled = b
-     if not b and listening then setListening(false) end
-     Safe.mutate(function()
-     Recipes.disabled({ { keyBox, "BackgroundTransparency", 0 }, { keyBox, "TextTransparency", 0 } }, not b, theme)
-     end)
-     end
-     if opts.Disabled then setEnabled(false) end
-     local api = { Frame = btn }
-     function api.GetKey() return toKeyCode(keyCode) end
-     function api.SetKey(k) setKey(k) end
-     function api.OnPressed(fn) onPressed = fn end
-     function api.SetEnabled(b) setEnabled(b) end
-     function api.Destroy() maid:DoCleanup() end
-     maid:Give(btn.MouseButton1Click:Connect(function()
-     if not enabled then return end
-     setListening(true)
-     end))
-     maid:Give(UserInputService.InputBegan:Connect(function(input, gameProcessed)
-     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-     if listening then
-     if ESCAPE ~= nil and input.KeyCode == ESCAPE then setListening(false); return end
-     flashCapture() 
-     setListening(false) 
-     setKey(input.KeyCode)
-     elseif not gameProcessed and input.KeyCode == toKeyCode(keyCode) then
-     if opts.Callback then opts.Callback() end
-     if onPressed then onPressed() end
-     end
-     end))
-     maid:Give(btn)
-     if opts.AccentReg then maid:Give(opts.AccentReg(function()
-     btn.BackgroundColor3 = theme.Colors.surface
-     local lab = btn:FindFirstChild("Label"); if lab then lab.TextColor3 = theme.Colors.foreground end
-     local de = btn:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
-     keyBox.BackgroundColor3 = theme.Colors.background
-     paintChip() 
-     chipStroke.Color = chipColor(listening)
-     hover.reskin()
-     end)) end
-     return api
     end
-    return Keybind
+    return Flag
+end
+
+-- Module: core/effects
+EmbeddedModules["core/effects"] = function()
+    local Effects = {}
+    local Create, Theme, Animate, Safe, Device
+    local SKELETON = { period = 1.1, rotation = 15 }
+    local meta = setmetatable({}, { __mode = "k" })
+    function Effects.Init(R)
+     Create = R.Create; Theme = R.Theme; Animate = R.Animate; Safe = R.Safe; Device = R.Device
+    end
+    local function need(theme, fn)
+     if type(theme) ~= "table" or type(theme.Effect) ~= "table" then
+     error("Effects." .. fn .. ": theme (Theme.new instance) required", 3)
+     end
+     return theme
+    end
+    local function metaOf(layer)
+     local m = meta[layer]
+     if not m then m = {}; meta[layer] = m end
+     return m
+    end
+    local function levelOf(theme, level, layer)
+     local key = level or (meta[layer] and meta[layer].level) or "control"
+     local lv = theme.Effect[key]
+     if type(lv) ~= "table" or type(lv.spread) ~= "number" then
+     error("Effects: unknown level '" .. tostring(key) .. "' (window/dialog/popover/toast/tooltip/control)", 3)
+     end
+     return lv
+    end
+    local function shadowId(theme)
+     local id = theme.Effect.shadowId
+     if type(id) ~= "string" or id == "" then return nil end
+     return id
+    end
+    local function sliceLayer(parent, theme, props)
+     local img = Create("ImageLabel", {
+     Name = props.name, Image = shadowId(theme), ScaleType = Enum.ScaleType.Slice,
+     ImageColor3 = props.color, ImageTransparency = props.alpha,
+     AnchorPoint = Vector2.new(0.5, 0.5), Active = false, BackgroundTransparency = 1,
+     ZIndex = props.zIndex or 0, Parent = parent,
+     })
+     if Rect and Rect.new then
+     local s = theme.Effect.slice
+     img.SliceCenter = Rect.new(s.x0, s.y0, s.x1, s.y1)
+     end
+     return img
+    end
+    function Effects.shadow(parent, theme, opts)
+     need(theme, "shadow"); opts = opts or {}
+     if not shadowId(theme) then return nil end
+     local img = sliceLayer(parent, theme, {
+     name = opts.name or "Shadow", color = Color3.new(0, 0, 0), alpha = Theme.fx(theme).shadow, zIndex = opts.zIndex,
+     })
+     local m = metaOf(img); m.kind = "shadow"; m.level = opts.level
+     return img
+    end
+    local function glowAllowed(theme)
+     local mode = theme.Effect.controlGlow
+     if mode == "off" or mode == false then return false end
+     if mode == "auto" and Device.IsMobile() then return false end
+     return true
+    end
+    function Effects.glow(parent, theme, colorToken, level, zIndex, name)
+     need(theme, "glow")
+     if colorToken == nil then error("Effects.glow: colorToken (a theme.Colors value) required", 2) end
+     if not shadowId(theme) or not glowAllowed(theme) then return nil end
+     local img = sliceLayer(parent, theme, { name = name or "Glow", color = colorToken, alpha = 1, zIndex = zIndex })
+     local m = metaOf(img); m.kind = "glow"; m.level = level; m.token = colorToken
+     return img
+    end
+    local function growth(theme, m)
+     return m.lifted and 2 * theme.Effect.lift.spreadDelta or 0
+    end
+    local function writeGeometry(shadow, theme, m, rest, xs, xo, ys, yo)
+     m.rest = rest
+     local g = growth(theme, m)
+     shadow.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
+     shadow.Position = UDim2.new(xs, xo, ys, yo)
+    end
+    function Effects.place(shadow, x, y, w, h, level, theme)
+     if not shadow then return nil end
+     need(theme, "place")
+     local lv, m = levelOf(theme, level, shadow), metaOf(shadow)
+     writeGeometry(shadow, theme, m, { 0, w + 2 * lv.spread, 0, h + 2 * lv.spread }, 0, x + w / 2, 0, y + h / 2 + lv.offsetY)
+     return shadow
+    end
+    function Effects.mirror(shadow, host, level, theme)
+     if not (shadow and host) then return nil end
+     need(theme, "mirror")
+     local pos, size = host.Position, host.Size
+     if not (pos and size) then return shadow end
+     local lv, m = levelOf(theme, level, shadow), metaOf(shadow)
+     local a = host.AnchorPoint
+     local ax, ay = a and a.X or 0, a and a.Y or 0
+     local sp = 2 * lv.spread
+     writeGeometry(shadow, theme, m, { size.X.Scale, size.X.Offset + sp, size.Y.Scale, size.Y.Offset + sp },
+     pos.X.Scale + (0.5 - ax) * size.X.Scale, pos.X.Offset + (0.5 - ax) * size.X.Offset,
+     pos.Y.Scale + (0.5 - ay) * size.Y.Scale, pos.Y.Offset + (0.5 - ay) * size.Y.Offset + lv.offsetY)
+     return shadow
+    end
+    function Effects.follow(shadow, host, level, theme, maid)
+     if not (shadow and host) then return nil end
+     need(theme, "follow")
+     levelOf(theme, level, shadow)
+     local function sync()
+     local ap, as = host.AbsolutePosition, host.AbsoluteSize
+     if not (ap and as) then return end
+     local parent = shadow.Parent
+     local pp = parent and parent.AbsolutePosition
+     local px, py = pp and pp.X or 0, pp and pp.Y or 0
+     Effects.place(shadow, ap.X - px, ap.Y - py, as.X, as.Y, level, theme)
+     end
+     local function deferred() Safe.mutate(sync) end
+     local c1 = host:GetPropertyChangedSignal("AbsoluteSize"):Connect(deferred)
+     local c2 = host:GetPropertyChangedSignal("AbsolutePosition"):Connect(deferred)
+     local handle = { Sync = sync, Disconnect = function() c1:Disconnect(); c2:Disconnect() end }
+     if maid then maid:Give(handle) end
+     sync()
+     return handle
+    end
+    local function rimStops(fx) return { { 0, fx.edgeTop }, { 1, fx.edgeBottom } } end
+    local function paintRim(g, fx)
+     g.Rotation = 90
+     g.Transparency = NumberSequence.new({
+     NumberSequenceKeypoint.new(0, fx.edgeTop), NumberSequenceKeypoint.new(1, fx.edgeBottom),
+     })
+     return g
+    end
+    function Effects.rim(stroke, theme)
+     if not stroke then return nil end
+     local fx = Theme.fx(need(theme, "rim"))
+     local g = stroke:FindFirstChildOfClass("UIGradient")
+     if g then return paintRim(g, fx) end
+     g = Create.shade({ rotation = 90, stops = rimStops(fx) })
+     g.Name = "Rim"; g.Parent = stroke
+     return g
+    end
+    local function restOf(shadow, m)
+     if m.rest then return m.rest end
+     local s = shadow.Size
+     if not s then return nil end
+     m.rest = { s.X.Scale, s.X.Offset, s.Y.Scale, s.Y.Offset }
+     return m.rest
+    end
+    local function shadowAlpha(theme, lifted)
+     local fx = Theme.fx(theme)
+     return lifted and (fx.shadow + theme.Effect.lift.alphaDelta) or fx.shadow
+    end
+    function Effects.lift(shadow, theme, on, alpha)
+     if not shadow then return nil end
+     need(theme, "lift")
+     local m = metaOf(shadow)
+     m.lifted = on and true or false
+     local goal = { ImageTransparency = type(alpha) == "number" and alpha or shadowAlpha(theme, m.lifted) }
+     local rest = restOf(shadow, m)
+     if rest then
+     local g = growth(theme, m)
+     goal.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
+     end
+     return Animate.to(shadow, "fast", goal)
+    end
+    function Effects.reskin(layer, theme, kind, colorToken)
+     if not layer then return nil end
+     need(theme, "reskin")
+     local m = meta[layer]
+     kind = kind or (m and m.kind)
+     if kind == "shadow" then
+     layer.ImageTransparency = shadowAlpha(theme, m and m.lifted)
+     elseif kind == "glow" then
+     local tok = colorToken or (m and m.token)
+     if tok then layer.ImageColor3 = tok; metaOf(layer).token = tok end
+     if (layer.ImageTransparency or 1) < 1 then layer.ImageTransparency = Theme.fx(theme).glow end
+     elseif kind == "rim" then
+     if layer.ClassName == "UIStroke" then return Effects.rim(layer, theme) end
+     paintRim(layer, Theme.fx(theme))
+     else
+     error("Effects.reskin: kind 'shadow' | 'glow' | 'rim' required", 2)
+     end
+     return layer
+    end
+    function Effects.skeleton(parent, theme, opts)
+     need(theme, "skeleton"); opts = opts or {}
+     local sk = theme.Effect.skeleton or SKELETON
+     local frame = Create("Frame", {
+     Name = opts.name or "Skeleton", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
+     Size = opts.size or UDim2.new(1, 0, 1, 0), Position = opts.position, ZIndex = opts.zIndex,
+     Active = false, Parent = parent,
+     })
+     Create.corner(opts.radius or theme.Radius.sm).Parent = frame
+     local white = Color3.new(1, 1, 1)
+     local band = opts.band or sk.band or Theme.fx(theme).inset
+     local g = Create.gradient({ rotation = sk.rotation or SKELETON.rotation, stops = { { 0, white }, { 0.5, band }, { 1, white } } })
+     g.Name = "Shimmer"; g.Offset = Vector2.new(-1, 0); g.Parent = frame
+     local loop = Animate.loop(g, sk.period or SKELETON.period, { Offset = Vector2.new(1, 0) }, Enum.EasingStyle.Linear)
+     local stopped = false
+     local function Stop()
+     if stopped then return end
+     stopped = true
+     loop.Cancel()
+     if frame.Parent == nil then frame:Destroy(); return end
+     Animate.exitTo(frame, "exit", { BackgroundTransparency = 1 }, function() frame:Destroy() end)
+     end
+     return { Frame = frame, Gradient = g, Stop = Stop }
+    end
+    return Effects
+end
+
+-- Module: components/tooltip
+EmbeddedModules["components/tooltip"] = function()
+    local Tooltip = {}
+    local Create, DefaultTheme, Maid, Overlay, Animate, Device, Safe, Effects
+    local TextService = game:GetService("TextService")
+    function Tooltip.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Overlay = R.Overlay; Animate = R.Animate
+     Device = R.Device; Safe = R.Safe; Effects = R.Effects
+    end
+    local GLYPH_W = 0.55
+    local function measure(text, size)
+     local ok, v = pcall(function()
+     return TextService:GetTextSize(text, size, Enum.Font.BuilderSans, Vector2.new(10000, 10000))
+     end)
+     if ok and v and v.X then return v.X end
+     return #tostring(text) * size * GLYPH_W
+    end
+    function Tooltip.attach(target, text, themeArg)
+     local theme = themeArg or DefaultTheme
+     local maid = Maid.new()
+     local handle = { Destroy = function() maid:DoCleanup() end }
+     if Device and Device.IsTouch() then return handle end
+     local tip, shadow, armed
+     local function geometry(scale)
+     local T = theme.Tooltip
+     local ap, as = target.AbsolutePosition, target.AbsoluteSize
+     local tx, ty = (ap and ap.X or 0), (ap and ap.Y or 0)
+     local tw, th = (as and as.X or 0), (as and as.Y or 0)
+     local gap, hgt = T.gap * scale, T.height * scale
+     local w = (measure(text, theme.Font.muted.Size) + 2 * T.padX) * scale
+     local vp = Overlay.viewport()
+     local y = ty - gap 
+     if y - hgt < 0 then y = ty + th + gap + hgt end 
+     if y > vp.Y then y = vp.Y end
+     local half = w / 2
+     local x = math.max(half, math.min(tx + tw / 2, vp.X - half))
+     return x, y, w, hgt
+     end
+     local function build()
+     if tip then return end
+     local T = theme.Tooltip
+     local scale = Overlay.scale() 
+     local x, y, w, hgt = geometry(scale)
+     tip = Create("TextLabel", {
+     Name = "Tooltip", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1,
+     BorderSizePixel = 0, Text = text, TextColor3 = theme.Colors.background, TextTransparency = 1,
+     AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0, x, 0, y),
+     Size = UDim2.new(0, 0, 0, T.height), AutomaticSize = Enum.AutomaticSize.X,
+     ZIndex = Overlay.Z.tooltip,
+     Create.corner(theme.Radius.sm), Create.padding({ left = T.padX, right = T.padX }),
+     })
+     Create.text(tip, theme, "muted")
+     local us = Create("UIScale", { Scale = scale * theme.Motion.popFrom, Parent = tip })
+     Overlay.mount(tip)
+     shadow = Effects.shadow(tip.Parent, theme, { name = "TooltipShadow", level = "tooltip",
+     zIndex = Overlay.Z.tooltip - 1 })
+     if shadow then
+     shadow.ImageTransparency = 1
+     Effects.place(shadow, x - w / 2, y - hgt, w, hgt, "tooltip", theme)
+     Animate.to(shadow, "fast", { ImageTransparency = (theme.fx or DefaultTheme.fx)(theme).shadow })
+     end
+     Animate.springTo(us, "fast", { Scale = scale })
+     Animate.to(tip, "fast", { BackgroundTransparency = 0, TextTransparency = 0 })
+     end
+     local function hide()
+     local t, s = tip, shadow
+     tip, shadow = nil, nil
+     if not t then return end
+     if s then Animate.to(s, "exit", { ImageTransparency = 1 }, Animate.EASING.exit, Animate.DIR.In) end
+     Animate.toThen(t, "exit", { BackgroundTransparency = 1, TextTransparency = 1 }, function()
+     t:Destroy()
+     if s then s:Destroy() end
+     end, Animate.EASING.exit, Animate.DIR.In)
+     end
+     local function onEnter()
+     if tip then return end
+     local token = {}
+     armed = token
+     local function fire()
+     if armed == token and not tip then Safe.mutate(build) end
+     end
+     if type(task) == "table" and task.delay then task.delay(theme.Tooltip.delay, fire) else fire() end
+     end
+     local function onLeave()
+     armed = nil
+     hide()
+     end
+     maid:Give(target.MouseEnter:Connect(onEnter))
+     maid:Give(target.MouseLeave:Connect(onLeave))
+     maid:Give(function() onLeave() end)
+     return handle
+    end
+    return Tooltip
 end
 
 -- Module: components/dialog
@@ -5442,1141 +6111,6 @@ EmbeddedModules["components/dialog"] = function()
      return handle
     end
     return Dialog
-end
-
--- Module: core/animate
-EmbeddedModules["core/animate"] = function()
-    local TweenService = game:GetService("TweenService")
-    local Animate = {}
-    local Theme
-    local motionTbl 
-    local enabled, explicit = true, false
-    local DEFAULT_DUR = 0.18
-    local FALLBACK = { spin = 0.8, exit = 0.14, exitScale = 0.96, popSlide = 6 }
-    function Animate.Init(R)
-     Theme = R.Theme
-     Animate.Motion = motionTbl or Theme.Motion
-    end
-    Animate.EASING = {
-     pop = Enum.EasingStyle.Back, smooth = Enum.EasingStyle.Quint,
-     enter = Enum.EasingStyle.Quint, exit = Enum.EasingStyle.Quart,
-     snap = Enum.EasingStyle.Quad or Enum.EasingStyle.Quart, 
-    }
-    Animate.DIR = { In = Enum.EasingDirection.In, Out = Enum.EasingDirection.Out, InOut = Enum.EasingDirection.InOut }
-    local function token(name)
-     local v = motionTbl and motionTbl[name]
-     if type(v) ~= "number" and Theme and Theme.Motion then v = Theme.Motion[name] end
-     if type(v) == "number" then return v end
-     return FALLBACK[name]
-    end
-    local function resolve(duration)
-     if type(duration) == "number" then return duration end
-     if type(duration) == "string" then return token(duration) or DEFAULT_DUR end
-     return DEFAULT_DUR
-    end
-    local function resolveDelay(delay)
-     if type(delay) == "number" then return delay end
-     if type(delay) == "string" then return token(delay) or 0 end
-     return 0
-    end
-    function Animate.useMotion(tbl)
-     motionTbl = type(tbl) == "table" and tbl or nil
-     Animate.Motion = motionTbl or (Theme and Theme.Motion)
-    end
-    function Animate.info(duration, style, dir, delay)
-     return TweenInfo.new(duration, style or Enum.EasingStyle.Quart, dir or Enum.EasingDirection.Out, 0, false, delay or 0)
-    end
-    function Animate.setEnabled(b) enabled = b and true or false; explicit = true end
-    function Animate.applyDefault(b)
-     if not explicit then enabled = b and true or false end
-     return enabled
-    end
-    function Animate.isEnabled() return enabled end
-    function Animate.isExplicit() return explicit end
-    local function instantTween()
-     return { Completed = { Connect = function(_, fn) if fn then fn() end; return { Disconnect = function() end } end } }
-    end
-    local function applyNow(instance, goalProps)
-     for k, v in pairs(goalProps) do instance[k] = v end
-    end
-    function Animate.to(instance, duration, goalProps, style, dir, delay)
-     if not enabled then
-     applyNow(instance, goalProps)
-     return instantTween()
-     end
-     local tween = TweenService:Create(instance, Animate.info(resolve(duration), style, dir, resolveDelay(delay)), goalProps)
-     tween:Play()
-     return tween
-    end
-    function Animate.toThen(instance, duration, goalProps, onComplete, style, dir, delay)
-     if not enabled then
-     applyNow(instance, goalProps)
-     if onComplete then onComplete() end
-     return instantTween()
-     end
-     local tween = TweenService:Create(instance, Animate.info(resolve(duration), style, dir, resolveDelay(delay)), goalProps)
-     if onComplete then tween.Completed:Connect(onComplete) end
-     tween:Play()
-     return tween
-    end
-    function Animate.springTo(instance, duration, goalProps)
-     return Animate.to(instance, duration, goalProps, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-    end
-    function Animate.rotateTo(instance, duration, deg, style, dir)
-     return Animate.to(instance, duration, { Rotation = deg },
-     style or Enum.EasingStyle.Back, dir or Enum.EasingDirection.Out)
-    end
-    function Animate.exitTo(instance, duration, goalProps, onDone)
-     return Animate.toThen(instance, duration, goalProps, onDone, Animate.EASING.exit, Animate.DIR.In)
-    end
-    function Animate.chain(steps, onDone)
-     local i = 0
-     local function step()
-     i = i + 1
-     local s = steps and steps[i]
-     if not s then if onDone then onDone() end; return end
-     Animate.toThen(s[1], s[2], s[3], step, s[4], s[5], s[6])
-     end
-     step()
-    end
-    function Animate.loop(instance, duration, goalProps, style, reverses, repeatCount)
-     reverses = reverses == true
-     if not enabled then
-     if not reverses then applyNow(instance, goalProps) end
-     return { Cancel = function() end }
-     end
-     local info = TweenInfo.new(resolve(duration), style or Enum.EasingStyle.Linear, Enum.EasingDirection.InOut,
-     repeatCount or -1, reverses, 0)
-     local tween = TweenService:Create(instance, info, goalProps)
-     tween:Play()
-     return { Cancel = function() tween:Cancel() end }
-    end
-    function Animate.spin(img, duration)
-     img.Rotation = 0
-     if not enabled then return { Cancel = function() img.Rotation = 0 end } end
-     local handle = Animate.loop(img, duration or token("spin"), { Rotation = 360 }, Enum.EasingStyle.Linear, false, -1)
-     return { Cancel = function() handle.Cancel(); img.Rotation = 0 end }
-    end
-    function Animate.pulse(instance, duration, goalProps, style, cycles)
-     return Animate.loop(instance, duration, goalProps, style, true, cycles or -1)
-    end
-    local function uiScaleOf(inst)
-     local us = inst:FindFirstChildOfClass("UIScale")
-     if not us then us = Instance.new("UIScale"); us.Parent = inst end
-     return us
-    end
-    function Animate.pop(inst, duration)
-     local us = uiScaleOf(inst)
-     us.Scale = 0.9
-     return Animate.to(us, duration or "base", { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-    end
-    function Animate.popIn(frame, edge)
-     local us = uiScaleOf(frame)
-     if not enabled then us.Scale = 1; return instantTween() end
-     local target = frame.Position
-     us.Scale = token("exitScale")
-     if target then
-     local dy = (edge == "up") and token("popSlide") or -token("popSlide")
-     frame.Position = UDim2.new(target.X.Scale, target.X.Offset, target.Y.Scale, target.Y.Offset + dy)
-     Animate.to(frame, "fast", { Position = target }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-     end
-     return Animate.springTo(us, "base", { Scale = 1 })
-    end
-    function Animate.popOut(frame, onDone)
-     local us = uiScaleOf(frame)
-     return Animate.toThen(us, token("exit"), { Scale = token("exitScale") }, onDone, Animate.EASING.exit, Animate.DIR.In)
-    end
-    return Animate
-end
-
--- Module: core/mount
-EmbeddedModules["core/mount"] = function()
-    local Mount = {}
-    function Mount.Init(R) end 
-    function Mount.service(name)
-     local ok, s = pcall(function() return game:GetService(name) end)
-     if not ok or not s then return nil end
-     local okcr, cr = pcall(function() return cloneref or clonereference end)
-     if okcr and type(cr) == "function" then
-     local ok2, ref = pcall(cr, s)
-     if ok2 and ref then return ref end
-     end
-     return s
-    end
-    function Mount.resolve(config)
-     config = config or {}
-     if config.Parent ~= nil then return { parent = config.Parent } end
-     local studio = false
-     local rs = Mount.service("RunService")
-     if rs then local ok, v = pcall(function() return rs:IsStudio() end); studio = ok and v or false end
-     local ok, hui = pcall(function() return gethui and gethui() end)
-     if ok and hui then return { parent = hui, studio = studio } end
-     local protect = nil
-     if type(protectgui) == "function" then
-     protect = protectgui
-     elseif type(syn) == "table" and type(syn.protect_gui) == "function" then
-     protect = syn.protect_gui
-     end
-     local cg = Mount.service("CoreGui")
-     if cg then return { parent = cg, protect = protect, studio = studio } end
-     local players = Mount.service("Players")
-     local lp = players and players.LocalPlayer
-     if lp then
-     local pg = lp:FindFirstChildOfClass("PlayerGui")
-     if not pg then
-     local ok3, w = pcall(function() return lp:WaitForChild("PlayerGui", 5) end)
-     pg = ok3 and w or nil
-     end
-     if pg then return { parent = pg, studio = studio } end
-     end
-     return { parent = nil, studio = studio }
-    end
-    function Mount.guiName(config, studio)
-     config = config or {}
-     if type(config.GuiName) == "string" and config.GuiName ~= "" then return config.GuiName end
-     if config.Stealth == false or studio then return "EzUI" end
-     local hs = Mount.service("HttpService")
-     if hs then
-     local ok, guid = pcall(function() return hs:GenerateGUID(false) end)
-     if ok and guid then return guid end
-     end
-     return "_" .. tostring(math.random(100000, 999999999))
-    end
-    function Mount.finalize(gui, ctx)
-     ctx = ctx or {}
-     gui:SetAttribute("__ezui", true)
-     local parent = gui.Parent
-     if parent then
-     for _, inst in ipairs(parent:GetChildren()) do
-     if inst ~= gui and inst:GetAttribute("__ezui") then inst:Destroy() end
-     end
-     end
-     if ctx.protect and not ctx.studio then pcall(ctx.protect, gui) end
-     return gui
-    end
-    function Mount.anonName(readable)
-     local rs = Mount.service("RunService")
-     local studio = false
-     if rs then local ok, v = pcall(function() return rs:IsStudio() end); studio = ok and v or false end
-     if studio then return readable end
-     local hs = Mount.service("HttpService")
-     if hs then local ok, g = pcall(function() return hs:GenerateGUID(false) end); if ok and g then return g end end
-     return "_" .. tostring(math.random(100000, 999999999))
-    end
-    return Mount
-end
-
--- Module: core/asset
-EmbeddedModules["core/asset"] = function()
-    local Asset = {}
-    local cache = {}
-    function Asset.Init(_) end
-    local function customAssetFn()
-     local fn = getcustomasset or getsynasset or get_custom_asset
-     or rawget(_G, "getcustomasset") or rawget(_G, "getsynasset") or rawget(_G, "get_custom_asset")
-     if type(fn) == "function" then return fn end
-     return nil
-    end
-    local function getCustomAsset(path)
-     local fn = customAssetFn()
-     if not fn then return nil end
-     local ok, res = pcall(fn, path)
-     if ok and type(res) == "string" then return res end
-     return nil
-    end
-    local function djb2(s)
-     local h = 5381
-     for i = 1, #s do h = (h * 33 + string.byte(s, i)) % 2147483647 end
-     return h
-    end
-    local function fetchUrl(url)
-     if cache[url] ~= nil then return cache[url] or nil end
-     local hasFS = type(writefile) == "function" and type(isfile) == "function"
-     if not hasFS then cache[url] = false; return nil end
-     local ext = url:match("%.(%w%w%w%w?)$") or "png"
-     local path = "EzUI/assets/" .. djb2(url) .. "." .. ext
-     if type(makefolder) == "function" then pcall(makefolder, "EzUI"); pcall(makefolder, "EzUI/assets") end
-     if not isfile(path) then
-     local body
-     if type(game.HttpGet) == "function" then
-     local ok, data = pcall(function() return game:HttpGet(url) end)
-     if ok then body = data end
-     end
-     if not body and type(request) == "function" then
-     local ok, resp = pcall(request, { Url = url, Method = "GET" })
-     if ok and type(resp) == "table" then body = resp.Body end
-     end
-     if not body then cache[url] = false; return nil end
-     local okw = pcall(writefile, path, body)
-     if not okw then cache[url] = false; return nil end
-     end
-     local content = getCustomAsset(path)
-     cache[url] = content or false
-     return content
-    end
-    function Asset.image(value)
-     if type(value) ~= "string" or value == "" then return nil end
-     if value:match("^rbxassetid://") or value:match("^rbxasset://") or value:match("^rbxthumb://") then return value end
-     if value:match("^https?://") then return fetchUrl(value) end
-     if value:match("^%d+$") then return "rbxassetid://" .. value end
-     return nil
-    end
-    function Asset.resolvable(value)
-     if type(value) ~= "string" or value == "" then return false end
-     if value:match("^rbxassetid://") or value:match("^rbxasset://")
-     or value:match("^rbxthumb://") or value:match("^%d+$") then return true end
-     if value:match("^https?://") then
-     if cache[value] then return true end
-     if cache[value] == false then return false end 
-     return type(writefile) == "function" and type(isfile) == "function" and customAssetFn() ~= nil
-     end
-     return false
-    end
-    function Asset.imageAsync(value, cb, onFail)
-     local function fail() if onFail then onFail() end end
-     if type(value) ~= "string" or value == "" then fail(); return end
-     if value:match("^rbxassetid://") or value:match("^rbxasset://") or value:match("^rbxthumb://") then
-     cb(value); return
-     end
-     if value:match("^%d+$") then cb("rbxassetid://" .. value); return end
-     if value:match("^https?://") then
-     if cache[value] ~= nil then
-     if cache[value] then cb(cache[value]) else fail() end
-     return
-     end
-     local spawn = (type(task) == "table" and task.spawn) or function(fn) fn() end
-     spawn(function() local id = fetchUrl(value); if id then cb(id) else fail() end end)
-     return
-     end
-     fail() 
-    end
-    return Asset
-end
-
--- Module: core/drag
-EmbeddedModules["core/drag"] = function()
-    local UserInputService = game:GetService("UserInputService")
-    local Drag = {}
-    function Drag.bind(target, opts, maid)
-     local mouseDown = false
-     local activeTouch = nil
-     local startPos = nil
-     local function begin(input)
-     if opts.isActive and not opts.isActive() then return end
-     local t = input.UserInputType
-     if t == Enum.UserInputType.MouseButton1 then
-     mouseDown = true; startPos = input.Position
-     elseif t == Enum.UserInputType.Touch then
-     activeTouch = input; startPos = input.Position
-     else
-     return
-     end
-     if opts.onBegin then opts.onBegin(input) end
-     end
-     local function change(input)
-     if not startPos then return end
-     local isMouse = mouseDown and input.UserInputType == Enum.UserInputType.MouseMovement
-     local isTouch = activeTouch ~= nil and input == activeTouch
-     if not (isMouse or isTouch) then return end
-     local p = input.Position
-     if opts.onChange then opts.onChange(p.X - startPos.X, p.Y - startPos.Y, p) end
-     end
-     local function finish(input)
-     local t = input.UserInputType
-     local relevant = (mouseDown and t == Enum.UserInputType.MouseButton1)
-     or (activeTouch ~= nil and input == activeTouch)
-     if not relevant then return end
-     mouseDown = false; activeTouch = nil; startPos = nil
-     if opts.onEnd then opts.onEnd() end
-     end
-     maid:Give(target.InputBegan:Connect(begin))
-     maid:Give(UserInputService.InputChanged:Connect(change))
-     maid:Give(UserInputService.InputEnded:Connect(finish))
-     maid:Give(target.InputEnded:Connect(finish))
-    end
-    return Drag
-end
-
--- Module: components/button
-EmbeddedModules["components/button"] = function()
-    local Button = {}
-    local Create, DefaultTheme, Animate, Maid, Icons, Safe, Recipes, Device
-    function Button.Init(R)
-     Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid; Icons = R.Icons; Safe = R.Safe
-     Recipes = R.Recipes; Device = R.Device
-    end
-    local function palette(theme, variant)
-     if variant == "destructive" then return theme.Colors.destructive, theme.Colors.primaryForeground, nil end
-     if variant == "secondary" then return theme.Colors.surface, theme.Colors.foreground, nil end
-     if variant == "outline" then return theme.Colors.card, theme.Colors.foreground, theme.Colors.border end
-     if variant == "ghost" then return theme.Colors.surface, theme.Colors.foreground, nil end
-     return theme.Colors.primary, theme.Colors.primaryForeground, nil 
-    end
-    local function pointerHover() return Device.SupportsHover() and Device.GetInput() ~= "Touch" end
-    function Button.new(opts)
-     opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local variant = opts.Variant or "default"
-     local maid = Maid.new()
-     local bg, fg, stroke = palette(theme, variant)
-     local transparent = (variant == "ghost")
-     local auto = opts.AutoWidth and true or false
-     local btn = Create("TextButton", {
-     Name = "Button", AutoButtonColor = false, Text = "",
-     BackgroundTransparency = 1,
-     Size = auto and UDim2.new(0, 0, 0, 34) or UDim2.new(1, 0, 0, 34),
-     AutomaticSize = auto and Enum.AutomaticSize.X or Enum.AutomaticSize.None,
-     LayoutOrder = opts.LayoutOrder or 0,
-     Parent = opts.Parent,
-     })
-     if auto then Create("UISizeConstraint", { MinSize = Vector2.new(72, 0), Parent = btn }) end
-     local surface = Create("Frame", {
-     Name = "Surface", BackgroundColor3 = bg, BackgroundTransparency = transparent and 1 or 0,
-     AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
-     Size = auto and UDim2.new(0, 0, 1, 0) or UDim2.new(1, 0, 1, 0),
-     AutomaticSize = auto and Enum.AutomaticSize.X or Enum.AutomaticSize.None,
-     Active = false, Parent = btn,
-     Create.corner(theme.Radius.md),
-     })
-     local scale = Create("UIScale", { Scale = 1, Parent = surface })
-     local line = stroke and Create("UIStroke", { Color = stroke, Thickness = 1, Parent = surface }) or nil
-     local hovering = false
-     local bgNormal = transparent and 1 or 0
-     local bgHover = transparent and theme.Opacity.ghostHover or theme.Opacity.hoverFill
-     local bgPressed = transparent and theme.Opacity.ghostPress or theme.Opacity.pressFill
-     local hasIcon = opts.Icon ~= nil
-     local label, iconImg
-     if auto then
-     Create.padding({ left = 14, right = 14 }).Parent = surface
-     Create("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal,
-     HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center,
-     SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, theme.Spacing.icon), Parent = surface })
-     if hasIcon then
-     iconImg = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
-     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = 1, Parent = surface })
-     Icons.apply(iconImg, opts.Icon, fg)
-     end
-     label = Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1,
-     Text = opts.Text or "Button", TextColor3 = fg,
-     AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 1, 0),
-     LayoutOrder = 2, Parent = surface }), theme, "label")
-     else
-     if hasIcon then
-     iconImg = Create("ImageLabel", {
-     Name = "Icon", BackgroundTransparency = 1,
-     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), Position = UDim2.new(0.5, -44, 0.5, -theme.Sizes.icon / 2),
-     Parent = surface,
-     })
-     Icons.apply(iconImg, opts.Icon, fg)
-     end
-     label = Create.text(Create("TextLabel", {
-     Name = "Label", BackgroundTransparency = 1,
-     Text = opts.Text or "Button", TextColor3 = fg, Size = UDim2.new(1, 0, 1, 0),
-     Position = UDim2.new(0, hasIcon and 12 or 0, 0, 0),
-     Parent = surface,
-     }), theme, "label")
-     end
-     local enabled, loading, pressed = true, false, false
-     local function blocked() return (not enabled) or loading end
-     local function lineColor() return (variant == "outline" and hovering) and theme.Colors.ring or stroke end
-     local function paintSurface(alpha) Animate.to(surface, "hover", { BackgroundTransparency = alpha }) end
-     local function enter()
-     if blocked() then return end
-     hovering = true
-     paintSurface(bgHover)
-     if line and variant == "outline" then Animate.to(line, "hover", { Color = lineColor() }) end
-     end
-     local function leave()
-     hovering = false
-     if blocked() then return end
-     paintSurface(bgNormal)
-     if pressed then pressed = false; Animate.springTo(scale, "release", { Scale = 1 }) end
-     if line and variant == "outline" then Animate.to(line, "hover", { Color = lineColor() }) end
-     end
-     maid:Give(btn.MouseEnter:Connect(enter))
-     maid:Give(btn.MouseLeave:Connect(leave))
-     maid:Give(btn.MouseButton1Down:Connect(function()
-     if blocked() then return end
-     pressed = true
-     Animate.to(scale, "press", { Scale = theme.Motion.pressScale })
-     Animate.to(surface, "press", { BackgroundTransparency = bgPressed })
-     end))
-     maid:Give(btn.MouseButton1Up:Connect(function()
-     if blocked() then return end
-     pressed = false
-     Animate.springTo(scale, "release", { Scale = 1 })
-     if not pointerHover() then hovering = false end
-     paintSurface(hovering and bgHover or bgNormal)
-     if line and variant == "outline" then Animate.to(line, "hover", { Color = lineColor() }) end
-     end))
-     maid:Give(btn.MouseButton1Click:Connect(function()
-     if blocked() then return end
-     if opts.Action == "ResetConfig" and opts.Window and opts.Window.ResetConfiguration then opts.Window:ResetConfiguration() end
-     if opts.Callback then opts.Callback() end
-     end))
-     maid:Give(btn)
-     local function dimParts()
-     local parts = { { label, "TextTransparency", 0 } }
-     if not transparent then parts[#parts + 1] = { surface, "BackgroundTransparency", bgNormal } end
-     if line then parts[#parts + 1] = { line, "Transparency", theme.Stroke.control } end
-     if iconImg then parts[#parts + 1] = { iconImg, "ImageTransparency", 0 } end
-     return parts
-     end
-     local function setEnabled(en)
-     enabled = en ~= false
-     btn.Active = enabled
-     if enabled then hovering = false; pressed = false end
-     Safe.mutate(function()
-     if enabled then scale.Scale = 1 end
-     Recipes.disabled(dimParts(), not enabled, theme)
-     end)
-     end
-     local spinner, spin
-     local function stopSpin() if spin then spin.Cancel(); spin = nil end end
-     local function mkSpinner()
-     if spinner then return spinner end
-     local props = { Name = "Spinner", BackgroundTransparency = 1, Visible = false,
-     Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = 2, Parent = surface }
-     if not auto then props.Position = UDim2.new(0.5, -theme.Sizes.icon / 2, 0.5, -theme.Sizes.icon / 2) end
-     spinner = Create("ImageLabel", props)
-     Icons.apply(spinner, "loader", fg)
-     return spinner
-     end
-     local function setLoading(b)
-     loading = b and true or false
-     if loading then pressed = false; hovering = false end
-     Safe.mutate(function()
-     local s = mkSpinner()
-     stopSpin()
-     s.Visible = loading
-     if loading then
-     scale.Scale = 1
-     paintSurface(bgNormal)
-     Animate.toThen(label, "fast", { TextTransparency = 1 }, function()
-     if auto and loading then label.Visible = false end
-     end)
-     spin = Animate.spin(s)
-     else
-     label.Visible = true
-     Animate.to(label, "fast", { TextTransparency = 0 })
-     end
-     end)
-     end
-     maid:Give(stopSpin)
-     if opts.AccentReg then maid:Give(opts.AccentReg(function()
-     local nbg, nfg, nstroke = palette(theme, variant)
-     bg, fg, stroke = nbg, nfg, nstroke
-     if not transparent then surface.BackgroundColor3 = nbg end
-     label.TextColor3 = nfg
-     if iconImg then Icons.apply(iconImg, opts.Icon, nfg) end
-     if spinner then Icons.apply(spinner, "loader", nfg) end
-     if line then line.Color = lineColor() end 
-     end)) end
-     if opts.Disabled then setEnabled(false) end
-     if opts.Loading then setLoading(true) end
-     return {
-     Frame = btn,
-     SetText = function(s) Safe.mutate(function() label.Text = s end) end,
-     SetEnabled = setEnabled,
-     SetLoading = setLoading,
-     Destroy = function() maid:DoCleanup() end,
-     }
-    end
-    return Button
-end
-
--- Module: core/safe
-EmbeddedModules["core/safe"] = function()
-    local Safe = {}
-    local Overlay
-    local RunService = game:GetService("RunService")
-    local queue = {} 
-    local flushConn = nil
-    function Safe.Init(R) Overlay = R.Overlay end
-    local function defaultHasCapability()
-     return (pcall(function()
-     local root = Overlay and Overlay.peek and Overlay.peek()
-     if root then root.BackgroundTransparency = root.BackgroundTransparency end
-     end))
-    end
-    local hasCapability = defaultHasCapability
-    function Safe._setCapabilityCheck(fn) hasCapability = fn or defaultHasCapability end
-    local function flush()
-     flushConn = nil
-     local i = 1
-     while i <= #queue do local job = queue[i]; i = i + 1; pcall(job) end
-     for k = #queue, 1, -1 do queue[k] = nil end
-    end
-    function Safe.mutate(fn)
-     if hasCapability() then return fn() end
-     queue[#queue + 1] = fn
-     if not flushConn then flushConn = RunService.Heartbeat:Once(flush) end
-    end
-    return Safe
-end
-
--- Module: core/config
-EmbeddedModules["core/config"] = function()
-    local HttpService = game:GetService("HttpService")
-    local Config = {}
-    Config.__index = Config
-    local function hasFS()
-     return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
-    end
-    function Config.new(opts)
-     opts = opts or {}
-     local self = setmetatable({
-     folder = opts.FolderName or "EzUI",
-     file = opts.FileName or "Settings",
-     autoSave = opts.AutoSave ~= false,
-     autoLoad = opts.AutoLoad ~= false,
-     profile = "Default",
-     values = {},
-     defaults = {},
-     setters = {},
-     }, Config)
-     if self.autoLoad then self:Load() end
-     return self
-    end
-    function Config:_dir() return self.folder .. "/" .. self.file end
-    function Config:_pathFor(name)
-     if name == "Default" then return self.folder .. "/" .. self.file .. ".json" end
-     return self:_dir() .. "/" .. name .. ".json"
-    end
-    function Config:_path() return self:_pathFor(self.profile) end
-    function Config:ActiveProfile() return self.profile end
-    function Config:SwitchProfile(name)
-     self.profile = name or "Default"
-     self:Load()
-     return self.profile
-    end
-    function Config:ListProfiles()
-     local names = { Default = true }
-     if type(listfiles) == "function" then
-     local ok, files = pcall(listfiles, self:_dir())
-     if ok and type(files) == "table" then
-     for _, f in ipairs(files) do
-     local n = tostring(f):match("([^/\\]+)%.json$")
-     if n then names[n] = true end
-     end
-     end
-     end
-     local out = {}
-     for n in pairs(names) do out[#out + 1] = n end
-     return out
-    end
-    function Config:DeleteProfile(name)
-     if type(delfile) == "function" and type(isfile) == "function" then
-     local p = self:_pathFor(name)
-     if isfile(p) then pcall(delfile, p) end
-     end
-    end
-    function Config:Register(flag, default, setValue)
-     self.defaults[flag] = default
-     self.setters[flag] = setValue
-     if self.values[flag] == nil then self.values[flag] = default end
-    end
-    function Config:Get(flag) return self.values[flag] end
-    function Config:Set(flag, value)
-     self.values[flag] = value
-     if self.autoSave then self:Save() end
-    end
-    function Config:GetAllKeys()
-     local keys = {}
-     for k in pairs(self.values) do keys[#keys + 1] = k end
-     return keys
-    end
-    function Config:Save()
-     if not hasFS() then return false end
-     local ok, encoded = pcall(function() return HttpService:JSONEncode(self.values) end)
-     if not ok then return false end
-     if type(makefolder) == "function" then
-     pcall(makefolder, self.folder)
-     if self.profile ~= "Default" then pcall(makefolder, self:_dir()) end
-     end
-     return pcall(writefile, self:_path(), encoded)
-    end
-    function Config:Load()
-     if not hasFS() then return false end
-     local path = self:_path()
-     if not isfile(path) and self.profile == "Default" then
-     local nested = self:_dir() .. "/Default.json"
-     if isfile(nested) then path = nested end
-     end
-     if not isfile(path) then return false end
-     local ok, content = pcall(readfile, path)
-     if not ok then return false end
-     local ok2, decoded = pcall(function() return HttpService:JSONDecode(content) end)
-     if not ok2 or type(decoded) ~= "table" then return false end
-     for flag, value in pairs(decoded) do
-     self.values[flag] = value
-     if self.setters[flag] then pcall(self.setters[flag], value) end
-     end
-     return true
-    end
-    function Config:ResetFlag(flag)
-     local d = self.defaults[flag]
-     self.values[flag] = d
-     if self.setters[flag] then pcall(self.setters[flag], d) end
-     if self.autoSave then self:Save() end
-    end
-    function Config:Reset(opts)
-     opts = opts or {}
-     for flag, d in pairs(self.defaults) do
-     self.values[flag] = d
-     if self.setters[flag] then pcall(self.setters[flag], d) end
-     end
-     if opts.ClearFile and type(delfile) == "function" and hasFS() and isfile(self:_path()) then
-     pcall(delfile, self:_path())
-     else
-     self:Save()
-     end
-    end
-    return Config
-end
-
--- Module: core/acrylic
-EmbeddedModules["core/acrylic"] = function()
-    local Acrylic = {}
-    local Create, Theme, Effects
-    function Acrylic.Init(R) Create = R.Create; Theme = R.Theme; Effects = R.Effects end
-    local FROST = 0.12 
-    local GLINT_FADE = 0.25 
-    local HAIRLINE = 1 
-    local meta = setmetatable({}, { __mode = "k" })
-    local function tokens(theme) return theme.Acrylic or Theme.Acrylic end
-    local function white() return Color3.new(1, 1, 1) end
-    local function resolve(frame, theme, opts)
-     opts = opts or {}
-     local A, m = tokens(theme), meta[frame] or {}
-     local function pick(k, default)
-     local v = opts[k]
-     if v == nil then v = m[k] end
-     if v == nil then v = default end
-     return v
-     end
-     local o = {
-     solid = pick("solid", false) and true or false,
-     strokeAlpha = pick("strokeAlpha", A.strokeAlpha),
-     radius = pick("radius", theme.Radius.window),
-     edge = pick("edge", false) and true or false,
-     padInset = pick("padInset", 0),
-     base = opts.base or theme.Colors.card,
-     transparency = opts.transparency,
-     }
-     meta[frame] = { solid = o.solid, strokeAlpha = o.strokeAlpha, radius = o.radius, edge = o.edge, padInset = o.padInset }
-     return o
-    end
-    local function colorSeq(stops)
-     local kps = {}
-     for i, s in ipairs(stops) do kps[i] = ColorSequenceKeypoint.new(s[1], s[2]) end
-     return ColorSequence.new(kps)
-    end
-    local function numberSeq(stops)
-     local kps = {}
-     for i, s in ipairs(stops) do kps[i] = NumberSequenceKeypoint.new(s[1], s[2]) end
-     return NumberSequence.new(kps)
-    end
-    local function sheenStops(theme, fx)
-     return { { 0, fx.sheenTop or theme.Colors.card }, { 1, fx.sheenBottom } }
-    end
-    local function highlightStops(theme, fx, transparency)
-     local top = 1 - (1 - fx.highlight) * (1 - transparency)
-     return { { 0, top }, { tokens(theme).highlightBand, 1 }, { 1, 1 } }
-    end
-    local function glintStops(theme)
-     local fade = tokens(theme).glintFade or GLINT_FADE
-     return { { 0, 1 }, { fade, 0 }, { 1 - fade, 0 }, { 1, 1 } }
-    end
-    local function layerGeometry(inst, p)
-     inst.Position = UDim2.new(0, -p, 0, -p)
-     inst.Size = UDim2.new(1, 2 * p, 1, 2 * p)
-    end
-    local function glintGeometry(inst, r, p)
-     inst.Position = UDim2.new(0, r - p, 0, -p)
-     inst.Size = UDim2.new(1, 2 * p - 2 * r, 0, HAIRLINE)
-    end
-    local function ensureStroke(frame, theme, o)
-     if frame:FindFirstChildOfClass("UIStroke") then return end
-     Create.stroke(theme.Colors.border, HAIRLINE, o.strokeAlpha).Parent = frame
-    end
-    local function ensureNoise(frame, theme, o, fx)
-     local A = tokens(theme)
-     if A.noiseId == "" or frame:FindFirstChild("AcrylicNoise") then return end
-     local noise = Create("ImageLabel", {
-     Name = "AcrylicNoise", BackgroundTransparency = 1, Image = A.noiseId, ScaleType = Enum.ScaleType.Tile,
-     TileSize = UDim2.new(0, A.tileSize, 0, A.tileSize), ImageColor3 = fx.grainTint, ImageTransparency = fx.grain,
-     ZIndex = 0, Active = false, Parent = frame, Create.corner(o.radius),
-     })
-     layerGeometry(noise, o.padInset)
-    end
-    local function ensureGradient(frame, theme, fx)
-     if frame:FindFirstChildOfClass("UIGradient") then return end
-     Create.gradient({ rotation = 90, stops = sheenStops(theme, fx) }).Parent = frame
-    end
-    local function ensureSheen(frame, theme, o, fx, transparency)
-     if frame:FindFirstChild("AcrylicSheen") then return end
-     local sheen = Create("Frame", {
-     Name = "AcrylicSheen", BackgroundColor3 = white(), BackgroundTransparency = 0, BorderSizePixel = 0,
-     Visible = fx.highlight < 1, ZIndex = 0, Active = false, Parent = frame, Create.corner(o.radius),
-     Create.shade({ rotation = 90, stops = highlightStops(theme, fx, transparency) }),
-     })
-     layerGeometry(sheen, o.padInset)
-    end
-    local function ensureGlint(frame, theme, o, fx)
-     if frame:FindFirstChild("AcrylicGlint") then return end
-     local glint = Create("Frame", {
-     Name = "AcrylicGlint", BackgroundColor3 = white(), BorderSizePixel = 0, BackgroundTransparency = fx.glint,
-     Visible = fx.glint < 1, ZIndex = 0, Active = false, Parent = frame,
-     Create.shade({ rotation = 0, stops = glintStops(theme) }),
-     })
-     glintGeometry(glint, o.radius, o.padInset)
-    end
-    local function paintStroke(frame, theme, o)
-     local stroke = frame:FindFirstChildOfClass("UIStroke")
-     if not stroke then return end
-     stroke.Color = theme.Colors.border
-     stroke.Transparency = o.strokeAlpha
-     if Effects and (o.edge or stroke:FindFirstChildOfClass("UIGradient")) then Effects.rim(stroke, theme) end
-    end
-    local function paintFrost(frame, theme, fx, transparency)
-     local grad = frame:FindFirstChildOfClass("UIGradient")
-     if grad then grad.Color = colorSeq(sheenStops(theme, fx)) end
-     local noise = frame:FindFirstChild("AcrylicNoise")
-     if noise then noise.ImageColor3 = fx.grainTint; noise.ImageTransparency = fx.grain end
-     local sheen = frame:FindFirstChild("AcrylicSheen")
-     if sheen then
-     local g = sheen:FindFirstChildOfClass("UIGradient")
-     if g then g.Transparency = numberSeq(highlightStops(theme, fx, transparency)) end
-     sheen.Visible = fx.highlight < 1
-     end
-     local glint = frame:FindFirstChild("AcrylicGlint")
-     if glint then glint.BackgroundTransparency = fx.glint; glint.Visible = fx.glint < 1 end
-    end
-    local function paint(frame, theme, o)
-     local fx = Theme.fx(theme)
-     frame.BackgroundColor3 = o.base
-     if o.solid then frame.BackgroundTransparency = 0
-     elseif o.transparency ~= nil then frame.BackgroundTransparency = o.transparency end
-     paintStroke(frame, theme, o)
-     if o.edge and not o.solid and frame:FindFirstChildOfClass("UIGradient") then ensureGlint(frame, theme, o, fx) end
-     paintFrost(frame, theme, fx, frame.BackgroundTransparency or 0)
-     return frame
-    end
-    function Acrylic.decorate(frame, theme, opts)
-     local o = resolve(frame, theme, opts)
-     if o.transparency == nil then o.transparency = tokens(theme).frost or FROST end
-     ensureStroke(frame, theme, o)
-     if not o.solid then
-     local fx = Theme.fx(theme)
-     ensureNoise(frame, theme, o, fx)
-     ensureGradient(frame, theme, fx)
-     ensureSheen(frame, theme, o, fx, o.transparency)
-     end
-     return paint(frame, theme, o)
-    end
-    function Acrylic.reskin(frame, theme, opts)
-     return paint(frame, theme, resolve(frame, theme, opts))
-    end
-    return Acrylic
-end
-
--- Module: components/label
-EmbeddedModules["components/label"] = function()
-    local Label = {}
-    local Create, DefaultTheme, Safe
-    local RunService = game:GetService("RunService")
-    local warn = warn or function() end 
-    local spawn = (type(task) == "table" and task.spawn) or function(fn) return fn() end
-    function Label.Init(R) Create = R.Create; DefaultTheme = R.Theme; Safe = R.Safe end
-    local entries = {} 
-    local conn = nil
-    local function stepAll(dt)
-     dt = dt or 0
-     local alive, n = {}, 0
-     for _, e in ipairs(entries) do
-     e.acc = e.acc + dt
-     local keep = true
-     if e.acc >= e.interval then e.acc = 0; keep = e.tick() end 
-     if keep then n = n + 1; alive[n] = e end
-     end
-     entries = alive
-     if n == 0 and conn then conn:Disconnect(); conn = nil end
-    end
-    local function register(entry)
-     entries[#entries + 1] = entry
-     if not conn then conn = RunService.Heartbeat:Connect(stepAll) end
-    end
-    local function unregister(entry)
-     for i = #entries, 1, -1 do if entries[i] == entry then table.remove(entries, i) end end
-     if #entries == 0 and conn then conn:Disconnect(); conn = nil end
-    end
-    function Label.new(opts)
-     opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local variant = opts.Variant or "default"
-     local source = opts.Text or "" 
-     local interval = opts.Interval or 1
-     local color = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
-     local role = (variant == "section") and "overline" or "body"
-     local size = theme.Font[role].Size
-     local frame = Create.text(Create("TextLabel", {
-     Name = "Label",
-     BackgroundTransparency = 1,
-     Text = "", 
-     TextColor3 = color,
-     TextXAlignment = Enum.TextXAlignment.Left,
-     TextYAlignment = Enum.TextYAlignment.Top,
-     TextWrapped = variant == "paragraph",
-     Size = UDim2.new(1, 0, 0, size + 6),
-     AutomaticSize = (variant == "paragraph") and Enum.AutomaticSize.Y or Enum.AutomaticSize.None,
-     LayoutOrder = opts.LayoutOrder or 0,
-     Parent = opts.Parent,
-     }), theme, role)
-     local unreg = opts.AccentReg and opts.AccentReg(function()
-     frame.TextColor3 = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
-     end)
-     local lastText, erroring, entry = nil, false, nil
-     local function applyText(s, direct)
-     s = (variant == "section") and string.upper(tostring(s)) or tostring(s)
-     if s == lastText then return end
-     lastText = s
-     if direct then frame.Text = s else Safe.mutate(function() frame.Text = s end) end
-     end
-     local function evaluate()
-     if type(source) ~= "function" then return end
-     local fn = source
-     spawn(function()
-     local ok, res = pcall(fn)
-     if fn ~= source then return end 
-     if ok then
-     erroring = false
-     applyText(res, false)
-     elseif not erroring then
-     erroring = true
-     warn("[EzUI] Label dynamic text error: " .. tostring(res))
-     end
-     end)
-     end
-     local function startReactive()
-     if entry then return end
-     entry = { acc = 0, interval = interval, tick = function()
-     local ok, parent = pcall(function() return frame.Parent end)
-     if ok and parent == nil then return false end 
-     evaluate() 
-     return true
-     end }
-     register(entry)
-     end
-     local function stopReactive()
-     if entry then unregister(entry); entry = nil end
-     end
-     local function setSource(v, direct)
-     source = v
-     if type(v) == "function" then
-     startReactive()
-     evaluate() 
-     else
-     stopReactive()
-     applyText(v, direct) 
-     end
-     end
-     setSource(source, true) 
-     return {
-     Frame = frame,
-     SetText = function(v) setSource(v, false) end, 
-     Destroy = function() stopReactive(); if unreg then unreg() end; frame:Destroy() end,
-     }
-    end
-    return Label
-end
-
--- Module: components/progressbar
-EmbeddedModules["components/progressbar"] = function()
-    local ProgressBar = {}
-    local Create, DefaultTheme, Animate, Safe
-    function ProgressBar.Init(R) Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Safe = R.Safe end
-    local FALLBACK = { trackStroke = 0.5, flash = 0.35 }
-    local IND = { width = 0.3, rest = 0.5, period = 1.1 }
-    local function clamp01(n) n = tonumber(n) or 0; if n < 0 then return 0 elseif n > 1 then return 1 end return n end
-    function ProgressBar.new(opts)
-     opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local value = clamp01(opts.Default or 0)
-     local root = Create("Frame", { Name = "ProgressBar", BackgroundTransparency = 1,
-     Size = UDim2.new(1, 0, 0, 8), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
-     local track = Create("Frame", { Name = "Track", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
-     Size = UDim2.new(1, 0, 1, 0), Parent = root, Create.corner(4) })
-     local trackStroke = Create.stroke(theme.Colors.border, 1, theme.Stroke.track or FALLBACK.trackStroke)
-     trackStroke.Parent = track
-     local fill = Create("Frame", { Name = "Fill", BackgroundColor3 = opts.Color or theme.Colors.primary, BorderSizePixel = 0,
-     Size = UDim2.new(value, 0, 1, 0), Visible = value > 0, Parent = track, Create.corner(4) })
-     Create("UISizeConstraint", { MinSize = Vector2.new(theme.Sizes.progress, 0), Parent = fill })
-     local unreg
-     if opts.AccentReg then
-     unreg = opts.AccentReg(function()
-     track.BackgroundColor3 = theme.Colors.surface
-     trackStroke.Color = theme.Colors.border
-     if not opts.Color then fill.BackgroundColor3 = theme.Colors.primary end
-     end)
-     end
-     local function durationFor(delta)
-     return theme.Motion.base + math.abs(delta) * (theme.Motion.slow - theme.Motion.base)
-     end
-     local ind = theme.Effect and theme.Effect.indeterminate or IND
-     local sweepW, sweepRest = ind.width or IND.width, ind.rest or IND.rest
-     local sweepPeriod = ind.period or IND.period
-     local indet, sweep = false, nil
-     local function stopSweep()
-     if not indet then return end
-     indet = false
-     if sweep then sweep.Cancel(); sweep = nil end
-     track.ClipsDescendants = false
-     fill.Position = UDim2.new(0, 0, 0, 0)
-     end
-     local function Set(p)
-     local prev = value
-     value = clamp01(p) 
-     local done = value >= 1 and prev < 1
-     Safe.mutate(function()
-     stopSweep() 
-     fill.Visible = value > 0
-     Animate.to(fill, durationFor(value - prev), { Size = UDim2.new(value, 0, 1, 0) },
-     Animate.EASING.smooth, Animate.DIR.Out)
-     if done then
-     fill.BackgroundTransparency = theme.Opacity.flash or FALLBACK.flash
-     Animate.to(fill, "base", { BackgroundTransparency = 0 })
-     end
-     end)
-     end
-     local function SetIndeterminate(b)
-     local on = b and true or false
-     Safe.mutate(function()
-     if not on then
-     stopSweep()
-     fill.Visible = value > 0
-     Animate.to(fill, "base", { Size = UDim2.new(value, 0, 1, 0) },
-     Animate.EASING.smooth, Animate.DIR.Out)
-     return
-     end
-     if indet then return end 
-     indet = true
-     fill.Visible = true
-     fill.BackgroundTransparency = 0 
-     if not Animate.isEnabled() then
-     fill.Position = UDim2.new(0, 0, 0, 0)
-     fill.Size = UDim2.new(sweepRest, 0, 1, 0)
-     return
-     end
-     track.ClipsDescendants = true 
-     fill.Size = UDim2.new(sweepW, 0, 1, 0)
-     fill.Position = UDim2.new(-sweepW, 0, 0, 0)
-     sweep = Animate.loop(fill, sweepPeriod, { Position = UDim2.new(1, 0, 0, 0) }, Animate.EASING.smooth)
-     end)
-     end
-     if opts.Indeterminate then SetIndeterminate(true) end
-     return {
-     Frame = root,
-     Get = function() return value end,
-     Set = Set,
-     SetIndeterminate = SetIndeterminate,
-     Destroy = function() stopSweep(); if unreg then unreg() end; root:Destroy() end,
-     }
-    end
-    return ProgressBar
-end
-
--- Module: components/table
-EmbeddedModules["components/table"] = function()
-    local Table = {}
-    local Create, DefaultTheme, Maid, Safe, Recipes
-    function Table.Init(R) Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Safe = R.Safe; Recipes = R.Recipes end
-    local ROW_H, BODY_Y, CELL_INSET = 24, 26, 4
-    function Table.new(opts)
-     opts = opts or {}
-     local theme = opts.Theme or DefaultTheme
-     local maid = Maid.new()
-     local cols = opts.Columns or {}
-     local root = Create("Frame", { Name = "Table", BackgroundTransparency = 1,
-     Size = UDim2.new(1, 0, 0, (opts.Height or 120) + BODY_Y), LayoutOrder = opts.LayoutOrder or 0, Parent = opts.Parent })
-     local rowHovers = {}
-     local function dropRowHovers()
-     for i = #rowHovers, 1, -1 do rowHovers[i](); rowHovers[i] = nil end
-     end
-     local function makeRow(parent, cells, header, order)
-     local row = Create("Frame", { Name = header and "Header" or "Row",
-     BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = header and 1 or 0,
-     Size = UDim2.new(1, 0, 0, ROW_H), LayoutOrder = order or 0, Parent = parent,
-     Create.corner(header and 0 or theme.Radius.xs),
-     Create.listLayout({ Padding = CELL_INSET, FillDirection = Enum.FillDirection.Horizontal }) })
-     if header then Create.padding({ left = CELL_INSET, right = CELL_INSET }).Parent = row end
-     if not header then
-     local hv = Recipes.hover(row, { theme = theme, kind = "fill" })
-     rowHovers[#rowHovers + 1] = hv.disconnect
-     end
-     for i, text in ipairs(cells) do
-     local cell = Create.text(Create("TextLabel", { Name = "Cell", BackgroundTransparency = 1, Text = tostring(text),
-     TextColor3 = header and theme.Colors.mutedForeground or theme.Colors.foreground,
-     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-     Size = UDim2.new(0, 0, 1, 0), LayoutOrder = i, Parent = row }), theme, "muted")
-     local face = header and theme.FontFace and theme.FontFace(Enum.FontWeight.Medium)
-     if face then cell.FontFace = face end
-     Create("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill, Parent = cell })
-     end
-     return row
-     end
-     makeRow(root, cols, true, 0)
-     local rule = Create("Frame", { Name = "HeaderRule", BackgroundColor3 = theme.Colors.border,
-     BackgroundTransparency = theme.Stroke.divider, BorderSizePixel = 0,
-     Position = UDim2.new(0, 0, 0, BODY_Y - 1), Size = UDim2.new(1, 0, 0, 1), Parent = root })
-     local body = Create("ScrollingFrame", { Name = "Body", BackgroundColor3 = theme.Colors.surface,
-     BackgroundTransparency = 0.5, BorderSizePixel = 0,
-     Position = UDim2.new(0, 0, 0, BODY_Y), Size = UDim2.new(1, 0, 1, -BODY_Y),
-     AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(0, 0, 0, 0), Parent = root,
-     Create.corner(theme.Radius.sm), Create.padding({ all = CELL_INSET }), Create.listLayout({ Padding = 2 }) })
-     Recipes.scrollbar(body, theme)
-     local emptyArea = Create("Frame", { Name = "EmptyArea", BackgroundTransparency = 1, Active = false,
-     Position = UDim2.new(0, 0, 0, BODY_Y), Size = UDim2.new(1, 0, 1, -BODY_Y), ZIndex = 2, Parent = root })
-     local empty = Recipes.empty(emptyArea, { theme = theme, text = "No rows", icon = "inbox", zIndex = 2 })
-     local order = 0
-     local api = { Frame = root, Body = body }
-     function api.AddRow(cells)
-     order = order + 1
-     local o = order
-     local row
-     Safe.mutate(function() row = makeRow(body, cells, false, o); empty.SetVisible(false) end)
-     return row
-     end
-     function api.Clear()
-     order = 0
-     Safe.mutate(function()
-     dropRowHovers()
-     for _, c in ipairs(body:GetChildren()) do if c.Name == "Row" then c:Destroy() end end
-     empty.SetVisible(true)
-     end)
-     end
-     function api.SetData(rows) api.Clear(); for _, r in ipairs(rows or {}) do api.AddRow(r) end end
-     function api.Destroy() maid:DoCleanup(); root:Destroy() end
-     api.SetData(opts.Rows)
-     maid:Give(root)
-     maid:Give(dropRowHovers)
-     if opts.AccentReg then maid:Give(opts.AccentReg(function()
-     body.BackgroundColor3 = theme.Colors.surface
-     Recipes.scrollbar(body, theme) 
-     rule.BackgroundColor3 = theme.Colors.border
-     empty.reskin() 
-     local header = root:FindFirstChild("Header")
-     if header then for _, c in ipairs(header:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.mutedForeground end end end
-     for _, row in ipairs(body:GetChildren()) do
-     if row.Name == "Row" then
-     row.BackgroundColor3 = theme.Colors.surface
-     for _, c in ipairs(row:GetChildren()) do if c.Name == "Cell" then c.TextColor3 = theme.Colors.foreground end end
-     end
-     end
-     end)) end
-     return api
-    end
-    return Table
 end
 
 -- Module: components/resizable
@@ -6897,181 +6431,635 @@ EmbeddedModules["components/accordion"] = function()
     return Accordion
 end
 
--- Module: core/create
-EmbeddedModules["core/create"] = function()
-    local Create = {}
-    local function build(className, props)
-     local inst = Instance.new(className)
-     props = props or {}
-     local parent
-     for k, v in pairs(props) do
-     if type(k) == "number" then
-     v.Parent = inst 
-     elseif k == "Parent" then
-     parent = v 
-     else
-     inst[k] = v
-     end
-     end
-     if parent then inst.Parent = parent end
-     return inst
+-- Module: core/config
+EmbeddedModules["core/config"] = function()
+    local HttpService = game:GetService("HttpService")
+    local Config = {}
+    Config.__index = Config
+    local function hasFS()
+     return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
     end
-    setmetatable(Create, { __call = function(_, className, props) return build(className, props) end })
-    function Create.corner(radius)
-     return Create("UICorner", { CornerRadius = UDim.new(0, radius) })
-    end
-    function Create.padding(t)
-     t = t or {}
-     return Create("UIPadding", {
-     PaddingTop = UDim.new(0, t.top or t.all or 0),
-     PaddingBottom = UDim.new(0, t.bottom or t.all or 0),
-     PaddingLeft = UDim.new(0, t.left or t.all or 0),
-     PaddingRight = UDim.new(0, t.right or t.all or 0),
-     })
-    end
-    function Create.listLayout(opts)
+    function Config.new(opts)
      opts = opts or {}
-     return Create("UIListLayout", {
-     Padding = UDim.new(0, opts.Padding or 0),
-     FillDirection = opts.FillDirection or Enum.FillDirection.Vertical,
-     SortOrder = opts.SortOrder or Enum.SortOrder.LayoutOrder,
-     })
+     local self = setmetatable({
+     folder = opts.FolderName or "EzUI",
+     file = opts.FileName or "Settings",
+     autoSave = opts.AutoSave ~= false,
+     autoLoad = opts.AutoLoad ~= false,
+     profile = "Default",
+     values = {},
+     defaults = {},
+     setters = {},
+     }, Config)
+     if self.autoLoad then self:Load() end
+     return self
     end
-    function Create.stroke(color, thickness, transparency)
-     return Create("UIStroke", { Color = color, Thickness = thickness or 1, Transparency = transparency })
+    function Config:_dir() return self.folder .. "/" .. self.file end
+    function Config:_pathFor(name)
+     if name == "Default" then return self.folder .. "/" .. self.file .. ".json" end
+     return self:_dir() .. "/" .. name .. ".json"
     end
-    local function keypoints(stops, ctor, what)
-     if type(stops) ~= "table" or #stops == 0 then
-     error("Create." .. what .. ": stops = { {t, value}, ... } required", 3)
+    function Config:_path() return self:_pathFor(self.profile) end
+    function Config:ActiveProfile() return self.profile end
+    function Config:SwitchProfile(name)
+     self.profile = name or "Default"
+     self:Load()
+     return self.profile
+    end
+    function Config:ListProfiles()
+     local names = { Default = true }
+     if type(listfiles) == "function" then
+     local ok, files = pcall(listfiles, self:_dir())
+     if ok and type(files) == "table" then
+     for _, f in ipairs(files) do
+     local n = tostring(f):match("([^/\\]+)%.json$")
+     if n then names[n] = true end
+     end
+     end
      end
      local out = {}
-     for i, s in ipairs(stops) do out[i] = ctor(s[1], s[2]) end
+     for n in pairs(names) do out[#out + 1] = n end
      return out
     end
-    function Create.gradient(opts)
+    function Config:DeleteProfile(name)
+     if type(delfile) == "function" and type(isfile) == "function" then
+     local p = self:_pathFor(name)
+     if isfile(p) then pcall(delfile, p) end
+     end
+    end
+    function Config:Register(flag, default, setValue)
+     self.defaults[flag] = default
+     self.setters[flag] = setValue
+     if self.values[flag] == nil then self.values[flag] = default end
+    end
+    function Config:Get(flag) return self.values[flag] end
+    function Config:Set(flag, value)
+     self.values[flag] = value
+     if self.autoSave then self:Save() end
+    end
+    function Config:GetAllKeys()
+     local keys = {}
+     for k in pairs(self.values) do keys[#keys + 1] = k end
+     return keys
+    end
+    function Config:Save()
+     if not hasFS() then return false end
+     local ok, encoded = pcall(function() return HttpService:JSONEncode(self.values) end)
+     if not ok then return false end
+     if type(makefolder) == "function" then
+     pcall(makefolder, self.folder)
+     if self.profile ~= "Default" then pcall(makefolder, self:_dir()) end
+     end
+     return pcall(writefile, self:_path(), encoded)
+    end
+    function Config:Load()
+     if not hasFS() then return false end
+     local path = self:_path()
+     if not isfile(path) and self.profile == "Default" then
+     local nested = self:_dir() .. "/Default.json"
+     if isfile(nested) then path = nested end
+     end
+     if not isfile(path) then return false end
+     local ok, content = pcall(readfile, path)
+     if not ok then return false end
+     local ok2, decoded = pcall(function() return HttpService:JSONDecode(content) end)
+     if not ok2 or type(decoded) ~= "table" then return false end
+     for flag, value in pairs(decoded) do
+     self.values[flag] = value
+     if self.setters[flag] then pcall(self.setters[flag], value) end
+     end
+     return true
+    end
+    function Config:ResetFlag(flag)
+     local d = self.defaults[flag]
+     self.values[flag] = d
+     if self.setters[flag] then pcall(self.setters[flag], d) end
+     if self.autoSave then self:Save() end
+    end
+    function Config:Reset(opts)
      opts = opts or {}
-     return Create("UIGradient", {
-     Rotation = opts.rotation or 0,
-     Color = ColorSequence.new(keypoints(opts.stops, ColorSequenceKeypoint.new, "gradient")),
-     })
+     for flag, d in pairs(self.defaults) do
+     self.values[flag] = d
+     if self.setters[flag] then pcall(self.setters[flag], d) end
+     end
+     if opts.ClearFile and type(delfile) == "function" and hasFS() and isfile(self:_path()) then
+     pcall(delfile, self:_path())
+     else
+     self:Save()
+     end
     end
-    function Create.shade(opts)
-     opts = opts or {}
-     return Create("UIGradient", {
-     Rotation = opts.rotation or 0,
-     Transparency = NumberSequence.new(keypoints(opts.stops, NumberSequenceKeypoint.new, "shade")),
-     })
-    end
-    function Create.text(label, theme, role)
-     local fonts = type(theme) == "table" and theme.Font or nil
-     local spec = fonts and (fonts[role] or fonts.body)
-     if not spec then error("Create.text: theme.Font[" .. tostring(role) .. "] (or .body fallback) required", 2) end
-     label.Font = Enum.Font.BuilderSans
-     label.TextSize = spec.Size
-     if spec.LineHeight ~= nil then label.LineHeight = spec.LineHeight end
-     local face = type(theme.FontFace) == "function" and theme.FontFace(spec.Weight) or nil
-     if face ~= nil then label.FontFace = face end
-     return label
-    end
-    return Create
+    return Config
 end
 
--- Module: core/overlay
-EmbeddedModules["core/overlay"] = function()
-    local Overlay = {}
-    local Create, Mount
-    local root = nil
-    local catcher = nil 
-    local popovers = {} 
-    local DEFAULT_SCALE = 1
-    local uiScale = DEFAULT_SCALE
-    local dialogDepth = 0 
-    Overlay.Z = { catcher = 1000, popover = 1001, modal = 1500, fab = 1700, toast = 1800, tooltip = 2000 }
-    local DEFAULT_GAP = 4
-    local FALLBACK_VIEWPORT = { X = 1920, Y = 1080 }
-    function Overlay.Init(R) Create = R.Create; Mount = R.Mount end
-    local function anon(readable)
-     if Mount and Mount.anonName then return Mount.anonName(readable) end
-     return readable
+-- Module: core/drag
+EmbeddedModules["core/drag"] = function()
+    local UserInputService = game:GetService("UserInputService")
+    local Drag = {}
+    function Drag.bind(target, opts, maid)
+     local mouseDown = false
+     local activeTouch = nil
+     local startPos = nil
+     local function begin(input)
+     if opts.isActive and not opts.isActive() then return end
+     local t = input.UserInputType
+     if t == Enum.UserInputType.MouseButton1 then
+     mouseDown = true; startPos = input.Position
+     elseif t == Enum.UserInputType.Touch then
+     activeTouch = input; startPos = input.Position
+     else
+     return
+     end
+     if opts.onBegin then opts.onBegin(input) end
+     end
+     local function change(input)
+     if not startPos then return end
+     local isMouse = mouseDown and input.UserInputType == Enum.UserInputType.MouseMovement
+     local isTouch = activeTouch ~= nil and input == activeTouch
+     if not (isMouse or isTouch) then return end
+     local p = input.Position
+     if opts.onChange then opts.onChange(p.X - startPos.X, p.Y - startPos.Y, p) end
+     end
+     local function finish(input)
+     local t = input.UserInputType
+     local relevant = (mouseDown and t == Enum.UserInputType.MouseButton1)
+     or (activeTouch ~= nil and input == activeTouch)
+     if not relevant then return end
+     mouseDown = false; activeTouch = nil; startPos = nil
+     if opts.onEnd then opts.onEnd() end
+     end
+     maid:Give(target.InputBegan:Connect(begin))
+     maid:Give(UserInputService.InputChanged:Connect(change))
+     maid:Give(UserInputService.InputEnded:Connect(finish))
+     maid:Give(target.InputEnded:Connect(finish))
     end
-    local function ensureCatcher()
-     if catcher and catcher.Parent ~= nil then return end
-     if not root then return end
-     catcher = Create("ImageButton", {
-     Name = anon("OverlayCatcher"), AutoButtonColor = false, BackgroundTransparency = 1,
-     Active = true, Size = UDim2.new(1, 0, 1, 0), ZIndex = Overlay.Z.catcher, Parent = root,
+    return Drag
+end
+
+-- Module: components/keybind
+EmbeddedModules["components/keybind"] = function()
+    local Keybind = {}
+    local Create, DefaultTheme, Maid, Flag, Safe, Recipes, Animate
+    local UserInputService = game:GetService("UserInputService")
+    function Keybind.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Maid = R.Maid; Flag = R.Flag; Safe = R.Safe; Recipes = R.Recipes
+     Animate = R.Animate
+    end
+    local LISTEN_TEXT = "Press a key"
+    local function pulseTok(theme, k)
+     if k == "period" then return theme.Motion.pulse end
+     return theme.Stroke.pulse[k]
+    end
+    local ESCAPE = (function()
+     local ok, kc = pcall(function() return Enum.KeyCode.Escape end)
+     if ok then return kc end
+     return nil
+    end)()
+    local function keyName(k)
+     if type(k) == "string" then return k end
+     if k ~= nil then
+     local ok, name = pcall(function() return k.Name end)
+     if ok and type(name) == "string" then return name end
+     end
+     return "Unknown"
+    end
+    local function toKeyCode(name)
+     local ok, kc = pcall(function() return Enum.KeyCode[name] end)
+     if ok and kc then return kc end
+     return Enum.KeyCode.Unknown
+    end
+    function Keybind.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local maid = Maid.new()
+     local listening = false
+     local enabled = true 
+     local keyCode = "Unknown"
+     local onPressed
+     local hasDesc = opts.Description ~= nil and opts.Description ~= ""
+     local btn = Create("TextButton", { Name = "Keybind", AutoButtonColor = false, Text = "",
+     BackgroundColor3 = theme.Colors.surface, Size = UDim2.new(1, 0, 0, hasDesc and 50 or 34), LayoutOrder = opts.LayoutOrder or 0,
+     Parent = opts.Parent, Create.corner(theme.Radius.md), Create.padding({ left = theme.Spacing.inputX, right = theme.Spacing.inputX }) })
+     Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1, Text = opts.Text or "Keybind",
+     TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
+     TextYAlignment = hasDesc and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+     Position = UDim2.new(0, 0, 0, hasDesc and 8 or 0), Size = UDim2.new(1, -80, hasDesc and 0 or 1, hasDesc and 18 or 0), Parent = btn }),
+     theme, "label")
+     if hasDesc then
+     Create.text(Create("TextLabel", { Name = "Description", BackgroundTransparency = 1, Text = opts.Description,
+     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+     TextYAlignment = Enum.TextYAlignment.Top,
+     Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, -80, 0, 18), Parent = btn }), theme, "muted")
+     end
+     local keyBox = Create.text(Create("TextLabel", { Name = "Key", BackgroundColor3 = theme.Colors.background,
+     Text = "...", TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Center,
+     AutomaticSize = Enum.AutomaticSize.X, AnchorPoint = Vector2.new(1, 0.5),
+     Size = UDim2.new(0, 0, 0, theme.Sizes.chip), Position = UDim2.new(1, 0, 0.5, 0), Parent = btn,
+     Create.corner(theme.Radius.sm),
+     Create.padding({ left = theme.Spacing.gap, right = theme.Spacing.gap }),
+     Create("UISizeConstraint", { MinSize = Vector2.new(theme.Sizes.touchHit, theme.Sizes.chip) }) }),
+     theme, "muted")
+     local chipStroke = Create.stroke(theme.Colors.border, 1); chipStroke.Parent = keyBox
+     local function chipColor(on) return on and theme.Colors.ring or theme.Colors.border end
+     local ring = Recipes.focus(chipStroke, keyBox, chipColor, { theme = theme })
+     maid:Give(ring.disconnect)
+     local hover = Recipes.hover(btn, { theme = theme, host = btn, corner = theme.Radius.md,
+     inset = { x = theme.Spacing.inputX, y = 0 } })
+     maid:Give(hover.disconnect)
+     maid:Give(Recipes.press(btn, keyBox, { theme = theme }).disconnect)
+     local function chipText() return listening and LISTEN_TEXT or keyCode end
+     local function chipTint() return listening and theme.Colors.mutedForeground or theme.Colors.foreground end
+     local function paintChip() keyBox.Text = chipText(); keyBox.TextColor3 = chipTint() end
+     local pulse
+     local function stopPulse()
+     if pulse then pulse.Cancel(); pulse = nil end
+     chipStroke.Transparency = theme.Stroke.control
+     end
+     local function startPulse()
+     stopPulse()
+     if not Animate.isEnabled() then return end
+     chipStroke.Transparency = pulseTok(theme, "low")
+     pulse = Animate.pulse(chipStroke, pulseTok(theme, "period"),
+     { Transparency = pulseTok(theme, "high") }, Enum.EasingStyle.Sine)
+     end
+     maid:Give(stopPulse)
+     local function setListening(on)
+     listening = on and true or false
+     Safe.mutate(function()
+     paintChip()
+     if listening then startPulse() else stopPulse() end
+     ring.set(listening)
+     end)
+     end
+     local function flashCapture()
+     Safe.mutate(function()
+     Animate.pop(keyBox, "fast")
+     chipStroke.Color = theme.Colors.primary
+     Animate.to(chipStroke, "base", { Color = chipColor(false), Transparency = theme.Stroke.control })
+     end)
+     end
+     local function apply(name)
+     keyCode = keyName(name)
+     Safe.mutate(paintChip)
+     end
+     local commit = Flag.bind(opts, keyName(opts.Default or "Unknown"), apply)
+     local function setKey(k)
+     commit(keyName(k))
+     if opts.OnChanged then opts.OnChanged(toKeyCode(keyCode)) end
+     end
+     local function setEnabled(b)
+     b = b and true or false
+     if enabled == b then return end
+     enabled = b
+     if not b and listening then setListening(false) end
+     Safe.mutate(function()
+     Recipes.disabled({ { keyBox, "BackgroundTransparency", 0 }, { keyBox, "TextTransparency", 0 } }, not b, theme)
+     end)
+     end
+     if opts.Disabled then setEnabled(false) end
+     local api = { Frame = btn }
+     function api.GetKey() return toKeyCode(keyCode) end
+     function api.SetKey(k) setKey(k) end
+     function api.OnPressed(fn) onPressed = fn end
+     function api.SetEnabled(b) setEnabled(b) end
+     function api.Destroy() maid:DoCleanup() end
+     maid:Give(btn.MouseButton1Click:Connect(function()
+     if not enabled then return end
+     setListening(true)
+     end))
+     maid:Give(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+     if listening then
+     if ESCAPE ~= nil and input.KeyCode == ESCAPE then setListening(false); return end
+     flashCapture() 
+     setListening(false) 
+     setKey(input.KeyCode)
+     elseif not gameProcessed and input.KeyCode == toKeyCode(keyCode) then
+     if opts.Callback then opts.Callback() end
+     if onPressed then onPressed() end
+     end
+     end))
+     maid:Give(btn)
+     if opts.AccentReg then maid:Give(opts.AccentReg(function()
+     btn.BackgroundColor3 = theme.Colors.surface
+     local lab = btn:FindFirstChild("Label"); if lab then lab.TextColor3 = theme.Colors.foreground end
+     local de = btn:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
+     keyBox.BackgroundColor3 = theme.Colors.background
+     paintChip() 
+     chipStroke.Color = chipColor(listening)
+     hover.reskin()
+     end)) end
+     return api
+    end
+    return Keybind
+end
+
+-- Module: components/tab
+EmbeddedModules["components/tab"] = function()
+    local Tab = {}
+    local Create, DefaultTheme, Animate, Maid, Icons, Accordion, Host, REG, Safe, Recipes, Device
+    function Tab.Init(R)
+     Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate
+     Maid = R.Maid; Icons = R.Icons; Accordion = R.Accordion; Host = R.Host; REG = R; Safe = R.Safe
+     Recipes = R.Recipes; Device = R.Device
+    end
+    function Tab.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local maid = Maid.new()
+     local order = 0
+     local selected = false
+     local function tintRole() return selected and theme.Icon.structuralActive or theme.Icon.structural end
+     local function tint() return theme.Colors[tintRole()] end
+     local button = Create("TextButton", {
+     Name = "TabButton",
+     Text = "",
+     AutoButtonColor = false,
+     BackgroundColor3 = theme.Colors.surface,
+     BackgroundTransparency = 1,
+     Size = UDim2.new(1, 0, 0, 34),
+     LayoutOrder = opts.LayoutOrder or 0,
+     Parent = opts.SidebarParent,
+     Create.corner(theme.Radius.md),
+     Create.padding({ left = 10, right = 10 }),
      })
-     catcher.MouseButton1Click:Connect(function() Overlay.closeAll() end)
+     local icon = Create("ImageLabel", {
+     Name = "Icon",
+     BackgroundTransparency = 1,
+     Size = UDim2.new(0, 16, 0, 16),
+     Position = UDim2.new(0, 4, 0.5, -8),
+     Parent = button,
+     })
+     if opts.Icon then Icons.apply(icon, opts.Icon, tint()) else icon.Visible = false end
+     local label = Create("TextLabel", {
+     Name = "Label",
+     BackgroundTransparency = 1,
+     Text = opts.Name or "Tab",
+     TextColor3 = tint(),
+     TextXAlignment = Enum.TextXAlignment.Left,
+     TextTruncate = Enum.TextTruncate.AtEnd,
+     Size = UDim2.new(1, opts.Icon and -30 or -6, 1, 0),
+     Position = UDim2.new(0, opts.Icon and 30 or 6, 0, 0),
+     Parent = button,
+     })
+     Create.text(label, theme, "label")
+     local hoverOpts = { theme = theme, kind = "text", label = label, icon = icon,
+     rest = tintRole(), hover = theme.Icon.structuralActive }
+     local hover = Recipes.hover(button, hoverOpts)
+     maid:Give(hover.disconnect)
+     local function paintState(animated)
+     hoverOpts.rest = tintRole()
+     local c = tint()
+     if animated then
+     Animate.to(button, "fast", { BackgroundTransparency = selected and 0 or 1 })
+     Animate.to(label, "hover", { TextColor3 = c })
+     if opts.Icon then Icons.tint(icon, c, "hover") end
+     else
+     button.BackgroundColor3 = theme.Colors.surface
+     label.TextColor3 = c
+     if opts.Icon then Icons.apply(icon, opts.Icon, c) end
+     hover.reskin() 
+     end
+     end
+     local content = Create("Frame", {
+     Name = "TabContent",
+     BackgroundTransparency = 1,
+     Visible = false,
+     Size = UDim2.new(1, 0, 0, 0),
+     AutomaticSize = Enum.AutomaticSize.Y,
+     Parent = opts.ContentParent,
+     Create.listLayout({ Padding = theme.Spacing.gap }),
+     Create.padding({ all = theme.Spacing.pad }),
+     })
+     local contentLayout = content:FindFirstChildOfClass("UIListLayout")
+     local contentPad = theme.Spacing.pad
+     local function panelH()
+     local sf = content.Parent
+     local s = sf and sf.AbsoluteSize
+     return (s and s.Y and s.Y > 0 and s.Y) or 360
+     end
+     local function syncCanvas()
+     Safe.mutate(function()
+     local sf = content.Parent
+     if selected and sf then
+     local acs = contentLayout.AbsoluteContentSize
+     sf.CanvasSize = UDim2.new(0, 0, 0, ((acs and acs.Y) or 0) + contentPad * 2)
+     end
+     end)
+     end
+     maid:Give(contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncCanvas))
+     local api = { Button = button, Content = content, Maid = maid }
+     function api:IsSelected() return selected end
+     function api:Select(dir)
+     selected = true
+     local sign = (dir == -1) and -1 or 1
+     content.Position = UDim2.new(0, 0, 0, sign * panelH())
+     content.Visible = true
+     if content.Parent then content.Parent.CanvasPosition = Vector2.new(0, 0) end
+     syncCanvas()
+     Animate.to(content, "slow", { Position = UDim2.new(0, 0, 0, 0) }, Animate.EASING.smooth)
+     paintState(true)
+     end
+     function api:Deselect(dir)
+     if not selected then content.Visible = false; return end 
+     selected = false
+     local sign = (dir == -1) and -1 or 1
+     Animate.toThen(content, "slow", { Position = UDim2.new(0, 0, 0, -sign * panelH()) }, function()
+     if not selected then content.Visible = false; content.Position = UDim2.new(0, 0, 0, 0) end
+     end, Animate.EASING.smooth)
+     paintState(true)
+     end
+     function api.MountRow(child)
+     order = order + 1
+     child.LayoutOrder = order
+     child.Parent = content
+     return order
+     end
+     Host.attach(api, {
+     R = REG, content = content, theme = theme, config = opts.Config, window = opts.Window,
+     registerSearchable = opts.RegisterSearchable, accentThemer = opts.AccentThemer,
+     registerControl = opts.RegisterControl,
+     nextOrder = function() order = order + 1; return order end,
+     })
+     if opts.AccentThemer then maid:Give(opts.AccentThemer.register(function() paintState(false) end)) end
+     function api:AddAccordion(accOpts)
+     accOpts = accOpts or {}
+     order = order + 1
+     accOpts.Parent = content
+     accOpts.LayoutOrder = order
+     accOpts.Theme = theme
+     accOpts.Config = opts.Config
+     accOpts.Window = opts.Window
+     accOpts.RegisterSearchable = opts.RegisterSearchable
+     accOpts.AccentThemer = opts.AccentThemer
+     accOpts.RegisterControl = opts.RegisterControl
+     return Accordion.new(accOpts)
+     end
+     function api:SetIcon(name) opts.Icon = name; Safe.mutate(function() Icons.apply(icon, name, tint()); icon.Visible = true end) end
+     function api:SetTitle(s) Safe.mutate(function() label.Text = s end) end
+     if Device.SupportsHover() then
+     local function wash(on)
+     if not selected then Animate.to(button, "hover", { BackgroundTransparency = on and theme.Opacity.tabHover or 1 }) end
+     end
+     maid:Give(button.MouseEnter:Connect(function() wash(true) end))
+     maid:Give(button.MouseLeave:Connect(function() wash(false) end))
+     maid:Give(button.MouseButton1Up:Connect(function() if Device.GetInput() == "Touch" then wash(false) end end))
+     end
+     maid:Give(button.MouseButton1Click:Connect(function() if opts.OnActivate then opts.OnActivate(api) end end))
+     maid:Give(button)
+     maid:Give(content)
+     function api.Destroy() maid:DoCleanup() end
+     return api
     end
-    local function removeCatcher()
-     if catcher then catcher:Destroy(); catcher = nil end
-    end
-    function Overlay.peek()
-     if root and root.Parent ~= nil then return root end
+    return Tab
+end
+
+-- Module: core/themer
+EmbeddedModules["core/themer"] = function()
+    local Themer = {}
+    function Themer.Init(_) end
+    Themer.ACCENTS = {
+     { Name = "Adaptive", Primary = Color3.fromRGB(250, 250, 250), Foreground = Color3.fromRGB(24, 24, 27) },
+     { Name = "Indigo", Primary = Color3.fromRGB(99, 102, 241), Foreground = Color3.fromRGB(250, 250, 250) },
+     { Name = "Violet", Primary = Color3.fromRGB(139, 92, 246), Foreground = Color3.fromRGB(250, 250, 250) },
+     { Name = "Emerald", Primary = Color3.fromRGB(16, 185, 129), Foreground = Color3.fromRGB(250, 250, 250) },
+     { Name = "Sky", Primary = Color3.fromRGB(56, 189, 248), Foreground = Color3.fromRGB(24, 24, 27) },
+     { Name = "Rose", Primary = Color3.fromRGB(244, 63, 94), Foreground = Color3.fromRGB(250, 250, 250) },
+    }
+    function Themer.accent(name)
+     for _, a in ipairs(Themer.ACCENTS) do if a.Name == name then return a end end
      return nil
     end
-    function Overlay.get(parentGui)
-     if root and root.Parent ~= nil then return root end
-     root = Create("Frame", {
-     Name = anon("OverlayRoot"),
+    function Themer.names()
+     local out = {}
+     for _, a in ipairs(Themer.ACCENTS) do out[#out + 1] = a.Name end
+     return out
+    end
+    function Themer.new()
+     local fns = {}
+     local self = {}
+     function self.register(fn)
+     fns[fn] = true
+     return function() fns[fn] = nil end
+     end
+     function self.reskin(reason)
+     for fn in pairs(fns) do pcall(fn, reason) end
+     end
+     function self.setAccent(primary, foreground)
+     self.reskin("accent") 
+     end
+     return self
+    end
+    return Themer
+end
+
+-- Module: components/label
+EmbeddedModules["components/label"] = function()
+    local Label = {}
+    local Create, DefaultTheme, Safe
+    local RunService = game:GetService("RunService")
+    local warn = warn or function() end 
+    local spawn = (type(task) == "table" and task.spawn) or function(fn) return fn() end
+    function Label.Init(R) Create = R.Create; DefaultTheme = R.Theme; Safe = R.Safe end
+    local entries = {} 
+    local conn = nil
+    local function stepAll(dt)
+     dt = dt or 0
+     local alive, n = {}, 0
+     for _, e in ipairs(entries) do
+     e.acc = e.acc + dt
+     local keep = true
+     if e.acc >= e.interval then e.acc = 0; keep = e.tick() end 
+     if keep then n = n + 1; alive[n] = e end
+     end
+     entries = alive
+     if n == 0 and conn then conn:Disconnect(); conn = nil end
+    end
+    local function register(entry)
+     entries[#entries + 1] = entry
+     if not conn then conn = RunService.Heartbeat:Connect(stepAll) end
+    end
+    local function unregister(entry)
+     for i = #entries, 1, -1 do if entries[i] == entry then table.remove(entries, i) end end
+     if #entries == 0 and conn then conn:Disconnect(); conn = nil end
+    end
+    function Label.new(opts)
+     opts = opts or {}
+     local theme = opts.Theme or DefaultTheme
+     local variant = opts.Variant or "default"
+     local source = opts.Text or "" 
+     local interval = opts.Interval or 1
+     local color = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
+     local role = (variant == "section") and "overline" or "body"
+     local size = theme.Font[role].Size
+     local frame = Create.text(Create("TextLabel", {
+     Name = "Label",
      BackgroundTransparency = 1,
-     Size = UDim2.new(1, 0, 1, 0),
-     ZIndex = Overlay.Z.catcher,
-     ClipsDescendants = false,
-     Parent = parentGui,
-     })
-     return root
-    end
-    function Overlay.mount(element)
-     assert(root, "Overlay.get(parentGui) must be called before mount")
-     element.Parent = root
-     return element
-    end
-    function Overlay.trackPopover(closeFn) popovers[closeFn] = true; ensureCatcher(); return closeFn end
-    function Overlay.untrackPopover(closeFn)
-     popovers[closeFn] = nil
-     if next(popovers) == nil then removeCatcher() end
-    end
-    function Overlay.closeAll()
-     local fns = popovers; popovers = {}
-     for fn in pairs(fns) do pcall(fn) end
-     removeCatcher()
-    end
-    function Overlay.viewport()
-     if root then
-     local s = root.AbsoluteSize
-     if s and (s.X or 0) > 0 and (s.Y or 0) > 0 then return s end
+     Text = "", 
+     TextColor3 = color,
+     TextXAlignment = Enum.TextXAlignment.Left,
+     TextYAlignment = Enum.TextYAlignment.Top,
+     TextWrapped = variant == "paragraph",
+     Size = UDim2.new(1, 0, 0, size + 6),
+     AutomaticSize = (variant == "paragraph") and Enum.AutomaticSize.Y or Enum.AutomaticSize.None,
+     LayoutOrder = opts.LayoutOrder or 0,
+     Parent = opts.Parent,
+     }), theme, role)
+     local unreg = opts.AccentReg and opts.AccentReg(function()
+     frame.TextColor3 = (variant == "default") and theme.Colors.foreground or theme.Colors.mutedForeground
+     end)
+     local lastText, erroring, entry = nil, false, nil
+     local function applyText(s, direct)
+     s = (variant == "section") and string.upper(tostring(s)) or tostring(s)
+     if s == lastText then return end
+     lastText = s
+     if direct then frame.Text = s else Safe.mutate(function() frame.Text = s end) end
      end
-     return { X = FALLBACK_VIEWPORT.X, Y = FALLBACK_VIEWPORT.Y } 
-    end
-    function Overlay.placePopover(anchorPos, anchorSize, w, h, gap)
-     gap = gap or DEFAULT_GAP
-     local ax, ay = anchorPos and anchorPos.X or 0, anchorPos and anchorPos.Y or 0
-     local ah = anchorSize and anchorSize.Y or 0
-     local vp = Overlay.viewport()
-     local below = ay + ah + gap
-     local above = ay - gap - h
-     local openUp = (below + h > vp.Y) and (above >= 0)
-     local y = openUp and above or below
-     local x = math.max(0, math.min(ax, vp.X - w - gap))
-     return x, y, openUp
-    end
-    function Overlay.setScale(n)
-     if type(n) ~= "number" or n ~= n or n <= 0 then
-     error("Overlay.setScale(n): positive number expected, got " .. tostring(n), 2)
+     local function evaluate()
+     if type(source) ~= "function" then return end
+     local fn = source
+     spawn(function()
+     local ok, res = pcall(fn)
+     if fn ~= source then return end 
+     if ok then
+     erroring = false
+     applyText(res, false)
+     elseif not erroring then
+     erroring = true
+     warn("[EzUI] Label dynamic text error: " .. tostring(res))
      end
-     uiScale = n
-     return n
+     end)
+     end
+     local function startReactive()
+     if entry then return end
+     entry = { acc = 0, interval = interval, tick = function()
+     local ok, parent = pcall(function() return frame.Parent end)
+     if ok and parent == nil then return false end 
+     evaluate() 
+     return true
+     end }
+     register(entry)
+     end
+     local function stopReactive()
+     if entry then unregister(entry); entry = nil end
+     end
+     local function setSource(v, direct)
+     source = v
+     if type(v) == "function" then
+     startReactive()
+     evaluate() 
+     else
+     stopReactive()
+     applyText(v, direct) 
+     end
+     end
+     setSource(source, true) 
+     return {
+     Frame = frame,
+     SetText = function(v) setSource(v, false) end, 
+     Destroy = function() stopReactive(); if unreg then unreg() end; frame:Destroy() end,
+     }
     end
-    function Overlay.scale() return uiScale end
-    function Overlay.pushDialog() dialogDepth = dialogDepth + 1; return dialogDepth end
-    function Overlay.popDialog() dialogDepth = math.max(0, dialogDepth - 1); return dialogDepth end
-    function Overlay.dialogDepth() return dialogDepth end
-    function Overlay.reset()
-     root = nil; catcher = nil; popovers = {}
-     uiScale = DEFAULT_SCALE; dialogDepth = 0
-    end
-    return Overlay
+    return Label
 end
 
 -- Load module helper function
