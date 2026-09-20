@@ -66,10 +66,17 @@ function Toggle.new(opts)
   -- Rim: a white knob on a white ON track (Adaptive light) would otherwise dissolve into it.
   local knobStroke = Create.stroke(theme.Colors.background, 1, theme.Stroke.knob)
   knobStroke.Parent = knob
-  -- Accent glow BEHIND the track, sibling under btn. nil while Effect.shadowId is '' (and on
-  -- phones under controlGlow 'auto'), so every use is guarded.
-  local glow = Effects.glow(btn, theme, theme.Colors.primary, "control", 1, "TrackGlow")
-  Effects.mirror(glow, track, "control", theme)
+  -- Accent glow BEHIND the track, sibling under btn. Lazy: the ImageLabel is built the first time
+  -- the toggle is ON (during construction for Default = true, never for a row nobody switches on),
+  -- because a nine-tab hub of 57 toggles was carrying 57 invisible image layers from its first
+  -- frame. `glow` is the handle and is still nil -- handle and all -- while Effect.shadowId is ''
+  -- and on phones under controlGlow 'auto', so every use below stays guarded.
+  local glow = Effects.lazyGlow(btn, theme, theme.Colors.primary, "control", 1, "TrackGlow",
+    function(layer) Effects.mirror(layer, track, "control", theme) end)
+  -- The builder outlives the row unless the maid stops it: Flag.bind hands `apply` to the Config,
+  -- which calls it again on every profile switch, and a destroyed toggle restored to ON would
+  -- otherwise build its first glow under a destroyed button that nothing will ever clean up.
+  if glow then maid:Give(glow.Release) end
 
   local function knobRest() return UDim2.new(0, value and onX or offX, 0.5, knobY) end
 
@@ -89,7 +96,7 @@ function Toggle.new(opts)
         knob.Position = knobRest(); knob.Size = UDim2.new(0, knobSize, 0, knobSize)
         knob.BackgroundColor3 = knobC; track.BackgroundColor3 = trackC
         trackStroke.Transparency = strokeA
-        if glow then glow.ImageTransparency = glowA end
+        if glow then glow.Set(glowA) end
         return
       end
       -- Geometry springs (Back/Out overshoots ~1px past the stop); the knob COLOUR is a separate
@@ -98,7 +105,7 @@ function Toggle.new(opts)
       Animate.to(knob, "base", { BackgroundColor3 = knobC })
       Animate.to(track, "base", { BackgroundColor3 = trackC })
       Animate.to(trackStroke, "fast", { Transparency = strokeA })
-      if glow then Animate.to(glow, "base", { ImageTransparency = glowA }) end
+      if glow then glow.Fade(glowA) end
     end)
   end
 

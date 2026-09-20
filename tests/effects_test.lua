@@ -249,6 +249,137 @@ h.describe("effects.glow", function()
   end)
 end)
 
+h.describe("effects.lazyGlow", function()
+  -- the owner's geometry: a 40x20 host the layer is mirrored onto when it is finally built
+  local function host(p)
+    local f = frame(); f.Parent = p
+    f.Size = rb.UDim2.new(0, 40, 0, 20); f.Position = rb.UDim2.new(0, 100, 0, 50); f.ZIndex = 2
+    return f
+  end
+  local function lazy(t, p, hostFrame, placed)
+    return Effects.lazyGlow(p, t, t.Colors.primary, "control", 1, "TrackGlow", function(layer)
+      if placed then placed[#placed + 1] = layer end
+      Effects.mirror(layer, hostFrame, "control", t)
+    end)
+  end
+
+  h.it("builds nothing until something shows it, and never builds only to hide", function()
+    desktop()
+    local t, p = themed(), frame()
+    local g = lazy(t, p, host(p))
+    h.expect(g ~= nil).toBeTruthy()
+    h.expect(g.Peek()).toBeNil()
+    h.expect(countClass(p, "ImageLabel")).toBe(0)
+    h.expect(g.Set(1)).toBeNil()                 -- already true of a layer that is not there
+    h.expect(g.Fade(1)).toBeNil()
+    h.expect(countClass(p, "ImageLabel")).toBe(0)
+    h.expect(g.Show() ~= nil).toBeTruthy()
+    h.expect(countClass(p, "ImageLabel")).toBe(1)
+    h.expect(g.Show()).toBe(g.Peek())            -- and only ever one
+    h.expect(countClass(p, "ImageLabel")).toBe(1)
+  end)
+  h.it("the layer it builds is the eager one: sibling of the host, below it, hidden, placed once", function()
+    desktop()
+    local t, p, placed = themed(), frame(), {}
+    local hostFrame = host(p)
+    local g = lazy(t, p, hostFrame, placed)
+    local layer = g.Show()
+    h.expect(layer.ClassName).toBe("ImageLabel")
+    h.expect(layer.Name).toBe("TrackGlow")
+    h.expect(layer.Parent).toBe(p)                          -- a SIBLING of the host, not a child
+    h.expect(hostFrame:FindFirstChild("TrackGlow")).toBeNil()
+    h.expect(layer.ZIndex < hostFrame.ZIndex).toBeTruthy()
+    h.expect(layer.ImageColor3).toBe(t.Colors.primary)      -- the token itself, by identity
+    h.expect(layer.ImageTransparency).toBe(1)               -- born at rest, the owner reveals it
+    local sp = t.Effect.control.spread
+    h.expect(layer.Size.X.Offset).toBe(40 + 2 * sp)         -- place() ran: mirrored on the host
+    h.expect(layer.Size.Y.Offset).toBe(20 + 2 * sp)
+    h.expect(layer.Position.X.Offset).toBe(120)
+    h.expect(#placed).toBe(1)
+    g.Show(); g.Set(FX.dark.glow); g.Fade(1)
+    h.expect(#placed).toBe(1)                               -- placed once, whatever happens later
+  end)
+  h.it("Set writes through, Fade tweens over Motion.base, and both build on the way UP", function()
+    desktop()
+    local t, p = themed(), frame()
+    local g = lazy(t, p, host(p))
+    h.mock.resetTweens()
+    local layer = g.Set(FX.dark.glow)
+    h.expect(layer.ImageTransparency).toBe(FX.dark.glow)
+    h.expect(h.mock.tweenCount()).toBe(0)                   -- instant: no tween at build time
+    h.expect(g.Fade(1).Info.Time).toBe(Theme.Motion.base)
+    h.expect(h.mock.lastTween.Instance).toBe(layer)         -- the layer it already has
+    h.expect(h.mock.lastTween.Goal.ImageTransparency).toBe(1)
+    local g2 = lazy(themed(), frame(), host(frame()))
+    h.expect(g2.Fade(FX.dark.glow, "fast").Info.Time).toBe(Theme.Motion.fast)
+    h.expect(g2.Peek() ~= nil).toBeTruthy()                 -- a fade TO visible builds it first
+  end)
+  h.it("under reduced motion the first reveal lands the alpha with no tween", function()
+    desktop()
+    local t, p = themed(), frame()
+    local g = lazy(t, p, host(p))
+    h.withReducedMotion(R, function()
+      h.mock.resetTweens()
+      g.Fade(FX.dark.glow)
+      h.expect(h.mock.tweenCount()).toBe(0)
+      h.expect(g.Peek().ImageTransparency).toBe(FX.dark.glow)
+    end)
+  end)
+  h.it("is nil -- handle and all -- with no asset, and on Mobile under controlGlow 'auto'", function()
+    desktop()
+    local off = Theme.new({ Effect = { shadowId = "" } })
+    h.expect(Effects.lazyGlow(frame(), off, off.Colors.primary, "control", 1, "G")).toBeNil()
+    h.expect(Effects.lazyGlow(frame(), themed(nil, { controlGlow = "off" }), Theme.Colors.primary, "control", 1, "G")).toBeNil()
+    h.expect(function() Effects.lazyGlow(frame(), themed(), nil, "control", 1, "G") end).toThrow("colorToken")
+    mobile()
+    local ok, err = pcall(function()
+      h.expect(Effects.lazyGlow(frame(), themed(), Theme.Colors.primary, "control", 1, "G")).toBeNil()
+      h.expect(Effects.lazyGlow(frame(), themed(nil, { controlGlow = "on" }), Theme.Colors.primary, "control", 1, "G") ~= nil).toBeTruthy()
+    end)
+    desktop()
+    if not ok then error(err, 0) end
+  end)
+  h.it("Release stops it building forever, so a dead owner can never grow a layer", function()
+    desktop()
+    local t, p = themed(), frame()
+    local g = lazy(t, p, host(p))
+    g.Release()
+    h.expect(g.Show()).toBeNil()
+    h.expect(g.Set(FX.dark.glow)).toBeNil()
+    h.expect(g.Fade(FX.dark.glow)).toBeNil()
+    h.expect(g.Peek()).toBeNil()
+    h.expect(countClass(p, "ImageLabel")).toBe(0)
+    -- a layer already built is KEPT: it dies with its host, and writes to a dead Instance are
+    -- exactly what the eager glow took, so releasing must not change what the owner sees
+    local t2, p2 = themed(), frame()
+    local g2 = lazy(t2, p2, host(p2))
+    local layer = g2.Show()
+    g2.Release()
+    h.expect(g2.Peek()).toBe(layer)
+    h.expect(g2.Set(1)).toBe(layer)
+    h.expect(countClass(p2, "ImageLabel")).toBe(1)
+  end)
+  h.it("reskin repaints a built layer and remembers the tint for one that is not built yet", function()
+    desktop()
+    local t, p = themed(), frame()
+    local accent = rb.Color3.fromRGB(59, 130, 246)
+    local g = lazy(t, p, host(p))
+    Effects.reskin(g, t, "glow", accent)                    -- SetAccent before the first reveal
+    h.expect(g.Peek()).toBeNil()                            -- ... builds nothing
+    h.expect(countClass(p, "ImageLabel")).toBe(0)
+    local layer = g.Show()
+    h.expect(layer.ImageColor3).toBe(accent)                -- born wearing the accent it missed
+    local t2, p2 = themed(), frame()
+    local g2 = lazy(t2, p2, host(p2))
+    local shown = g2.Set(FX.dark.glow)
+    Theme.applyMode(t2, "light")
+    Effects.reskin(g2, t2, "glow", accent)                  -- and a built one is repainted in place
+    h.expect(shown.ImageColor3).toBe(accent)
+    h.expect(shown.ImageTransparency).toBe(FX.light.glow)
+    h.expect(g2.Peek()).toBe(shown)
+  end)
+end)
+
 h.describe("effects.lift", function()
   local function placed()
     local t, p = themed(), frame()

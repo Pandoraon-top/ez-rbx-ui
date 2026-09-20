@@ -274,15 +274,15 @@ h.describe("accordion motion", function()
     local corner = acc.Header:FindFirstChildOfClass("UICorner")
     h.expect(corner ~= nil).toBeTruthy()
     h.expect(corner.CornerRadius.Offset).toBe(theme.Radius.md)
+    h.expect(acc.Header:FindFirstChild("Hover")).toBeNil()         -- lazy: the first hover builds it
+    local base = acc.Container.BackgroundColor3
+    acc.Header.MouseEnter:Fire()
     local wash = acc.Header:FindFirstChild("Hover")
     h.expect(wash ~= nil).toBeTruthy()
     h.expect(wash.BackgroundColor3).toBe(theme.Colors.foreground)
-    h.expect(wash.BackgroundTransparency).toBe(1)
     h.expect(wash.ZIndex).toBe(0)
     h.expect(wash.Position.X.Offset).toBe(-theme.Spacing.inputX)   -- cancels the header UIPadding
     h.expect(wash.Size.X.Offset).toBe(2 * theme.Spacing.inputX)
-    local base = acc.Container.BackgroundColor3
-    acc.Header.MouseEnter:Fire()
     h.expect(wash.BackgroundTransparency).toBe(theme.Opacity.hoverWash)
     h.expect(acc.Container.BackgroundColor3).toBe(base)
     acc.Header.MouseButton1Down:Fire()
@@ -293,6 +293,7 @@ h.describe("accordion motion", function()
   h.it("themer closure re-reads the wash colour by name", function()
     local custom, themer = R.Theme.new(), R.Themer.new()
     local acc = Accordion.new({ Parent = parentWithLayout(), Title = "Adv", Theme = custom, AccentThemer = themer })
+    acc.Header.MouseEnter:Fire()                    -- a wash has to exist before it can be re-read
     local wash = acc.Header:FindFirstChild("Hover")
     wash.BackgroundColor3 = h.roblox.Color3.fromRGB(1, 2, 3)
     R.Theme.applyMode(custom, "light")

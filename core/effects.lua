@@ -9,6 +9,8 @@
 --
 --   Effects.shadow(parent, theme, { name, level, zIndex })  -> ImageLabel | nil (shadowId == '')
 --   Effects.glow(parent, theme, colorToken, level, zIndex, name) -> ImageLabel | nil (mobile/'off')
+--   Effects.lazyGlow(parent, theme, colorToken, level, zIndex, name, place) -> handle | nil
+--     (handle: Peek/Show/Set/Fade/Release -- the owner's maid takes Release)
 --   Effects.place(shadow, x, y, w, h, level, theme)          one-shot geometry (px, host top-left)
 --   Effects.mirror(shadow, host, level, theme)              geometry from host.Position/Size
 --   Effects.follow(shadow, host, level, theme, maid)        Absolute* property signals -> place
@@ -28,6 +30,10 @@ local SKELETON = { period = 1.1, rotation = 15 }
 -- Per-layer bookkeeping (level, kind, tint token, rest size, lifted flag) keyed weakly by the
 -- instance so a destroyed layer never pins its entry.
 local meta = setmetatable({}, { __mode = "k" })
+-- Lazy glow handles -> their state, so Effects.reskin can recognise one by IDENTITY. Never by a
+-- member read: reading an unknown member off a real Instance throws in Roblox, and reskin is
+-- handed both handles and plain layers.
+local lazy = setmetatable({}, { __mode = "k" })
 
 function Effects.Init(R)
   Create = R.Create; Theme = R.Theme; Animate = R.Animate; Safe = R.Safe; Device = R.Device
@@ -109,6 +115,68 @@ function Effects.glow(parent, theme, colorToken, level, zIndex, name)
   local img = sliceLayer(parent, theme, { name = name or "Glow", color = colorToken, alpha = 1, zIndex = zIndex })
   local m = metaOf(img); m.kind = "glow"; m.level = level; m.token = colorToken
   return img
+end
+
+-- A glow is decoration for a state most controls never reach: a toggle nobody switches on, a
+-- slider nobody drags. One ImageLabel per control is still one ImageLabel per control -- 57 of them
+-- for the nine-tab hub of the field report, every one created synchronously while the window
+-- builds -- so the owner hands the construction over here and it happens on the first reveal.
+--
+-- Returns a HANDLE, never the layer, but nil in exactly the cases Effects.glow returns nil (no
+-- shadow asset, or a phone under controlGlow 'auto'), so every `if glow then` guard keeps its
+-- meaning and a window with glows off allocates nothing per control:
+--   handle.Peek()           -> ImageLabel | nil   never builds (for geometry the owner writes)
+--   handle.Show()           -> ImageLabel | nil   build now
+--   handle.Set(alpha)       -> ImageLabel | nil   instant write, builds only to SHOW
+--   handle.Fade(alpha, dur) -> tween | nil        Animate.to over `dur` (default 'base'), same rule
+--   handle.Release()                              no more building, ever (the owner's maid)
+-- Hiding is already true of a layer that does not exist, so it builds nothing -- which is what
+-- keeps a SetAccent or a Default = false paint from materialising every glow in the window.
+-- `place(layer)` runs once, immediately after creation, and owns the geometry: the toggle mirrors
+-- its track, the slider its handle. Both read the CURRENT pose, so a layer born late lands exactly
+-- where an eagerly built one would have been.
+-- Effects.reskin takes the handle: it repaints a layer that exists and remembers the tint for one
+-- that does not, so a glow built after SetAccent is born the new colour.
+function Effects.lazyGlow(parent, theme, colorToken, level, zIndex, name, place)
+  need(theme, "lazyGlow")
+  if colorToken == nil then error("Effects.lazyGlow: colorToken (a theme.Colors value) required", 2) end
+  if not shadowId(theme) or not glowAllowed(theme) then return nil end
+  local st = { token = colorToken }
+  -- Released = the owner is gone. An eager glow died with the host that owned it; a deferred one
+  -- has to be told, because the builder outlives the maid: a Config profile switch fires the
+  -- setter Flag.bind registered, and a control destroyed before that would otherwise CREATE its
+  -- first glow under a destroyed host, with nothing left to release it. A layer already built is
+  -- deliberately kept -- writes to it are the same harmless writes to a dead Instance the eager
+  -- version took.
+  local released = false
+  local function show()
+    if st.layer or released then return st.layer end
+    st.layer = Effects.glow(parent, theme, st.token, level, zIndex, name)
+    if st.layer and place then place(st.layer) end
+    return st.layer
+  end
+  -- A glow rests fully transparent, so a goal of 1 is already met by a layer that is not there.
+  local function toShow(alpha)
+    if not st.layer and (type(alpha) ~= "number" or alpha >= 1) then return nil end
+    return show()
+  end
+  local handle = {
+    Peek = function() return st.layer end,
+    Show = show,
+    Set = function(alpha)
+      local layer = toShow(alpha)
+      if layer then layer.ImageTransparency = alpha end
+      return layer
+    end,
+    Fade = function(alpha, dur)
+      local layer = toShow(alpha)
+      if not layer then return nil end
+      return Animate.to(layer, dur or "base", { ImageTransparency = alpha })
+    end,
+    Release = function() released = true end,
+  }
+  lazy[handle] = st
+  return handle
 end
 
 -- ---- geometry ---------------------------------------------------------------------------------
@@ -245,6 +313,15 @@ end
 function Effects.reskin(layer, theme, kind, colorToken)
   if not layer then return nil end
   need(theme, "reskin")
+  -- A lazy glow handle: repaint the layer if it has been built, and in either case remember the
+  -- tint, so one built later is born with the accent the window is wearing now. `kind` is ignored
+  -- (a handle is always a glow).
+  local st = lazy[layer]
+  if st then
+    if colorToken ~= nil then st.token = colorToken end
+    if st.layer then Effects.reskin(st.layer, theme, "glow", st.token) end
+    return layer
+  end
   local m = meta[layer]
   kind = kind or (m and m.kind)
   if kind == "shadow" then

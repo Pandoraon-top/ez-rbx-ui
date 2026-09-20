@@ -171,13 +171,13 @@ h.describe("keybind", function()
   end)
   h.it("the row answers hover with a wash and press with a chip dip (2.7)", function()
     local k = Keybind.new({ Parent = Create("Frame", {}), Text = "Bind", Default = "P" })
-    local wash = k.Frame:FindFirstChild("Hover")
     local chip = k.Frame:FindFirstChild("Key")
+    h.expect(k.Frame:FindFirstChild("Hover")).toBeNil() -- lazy: the row pays for a wash on hover
+    k.Frame.MouseEnter:Fire()
+    local wash = k.Frame:FindFirstChild("Hover")
     h.expect(wash ~= nil).toBeTruthy()
     h.expect(wash.ZIndex).toBe(0)                       -- above the row fill, below label and chip
     h.expect(wash.Position.X.Offset).toBe(-R.Theme.Spacing.inputX)  -- cancels the row's UIPadding
-    h.expect(wash.BackgroundTransparency).toBe(1)
-    k.Frame.MouseEnter:Fire()
     h.expect(wash.BackgroundTransparency).toBe(R.Theme.Opacity.hoverWash)
     k.Frame.MouseButton1Down:Fire()
     h.expect(wash.BackgroundTransparency).toBe(R.Theme.Opacity.pressWash)
