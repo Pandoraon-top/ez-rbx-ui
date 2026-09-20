@@ -11,15 +11,8 @@ end
 -- Popover box in logical px (the UIScale below turns it into on-screen px): SV square 110 + gap
 -- + the 16px hue slider, inside the host padding.
 local POP_W, POP_H = 180, 152
--- A popover is frosted one step LIGHTER than the window shell: the content behind it must stay
--- readable. theme.Acrylic.frost (0.12) is the window's value, so a theme may define
--- Acrylic.popoverFrost and this is the fallback until that token lands (reported as a deviation).
-local POPOVER_FROST = 0.04
 
-local function frostAlpha(theme)
-  local a = theme.Acrylic and theme.Acrylic.popoverFrost
-  return type(a) == "number" and a or POPOVER_FROST
-end
+local function frostAlpha(theme) return theme.Acrylic.popoverFrost end
 
 -- Popover open/close motion. Animate.popIn/popOut rest a popover's UIScale at 1, which is right
 -- until the window forwards a UI scale (2.22): a scaled popover must rest at Overlay.scale(), so

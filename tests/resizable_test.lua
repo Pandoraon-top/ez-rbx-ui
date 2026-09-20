@@ -180,5 +180,31 @@ h.describe("resizable drag + panes", function()
       h.expect(h.mock.tweenCount()).toBe(0)
     end)
   end)
+  h.it("a control nested in a pane reaches the tab search and Window:LockAll (2.21)", function()
+    -- Host.attach builds the opts for every control, so a control that is ITSELF a host (a
+    -- Resizable mounts its own panes) only gets a live registry if attach forwards it. It used
+    -- not to, and everything inside a pane was invisible to both the search and the lock while
+    -- the pane's own comment claimed the opposite.
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "P", Parent = screen })
+    local tab = w:AddTab({ Name = "T" })
+    local rz = tab:AddResizable({ Panes = { { Default = 0.5 }, { Default = 0.5 } } })
+    local outside = tab:AddButton({ Text = "Outside" })
+    local nested = rz.Panes[2]:AddToggle({ Text = "NestedToggle" })
+
+    w:SearchTabs("NestedToggle")
+    h.expect(nested.Frame.Visible).toBe(true)       -- indexed, so the search can reveal it
+    h.expect(outside.Frame.Visible).toBe(false)     -- ...and hide everything that does not match
+    w:SearchTabs("")
+    h.expect(outside.Frame.Visible).toBe(true)
+
+    w:LockAll()
+    local scrim = nested.Frame:FindFirstChild("LockScrim")
+    h.expect(scrim ~= nil).toBeTruthy()
+    h.expect(scrim.Visible).toBe(true)
+    w:UnlockAll()
+    h.expect(scrim.Visible).toBe(false)
+  end)
 end)
+
 h.run()

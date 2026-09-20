@@ -77,17 +77,37 @@ Filters the sidebar tabs and their controls by the given text string. An empty s
 Window:SearchTabs("farm")
 ```
 
+Matching runs at two levels: individual control rows are hidden unless their text matches, and a
+tab button stays in the sidebar if its own name matches **or** any of its controls still match. A
+group header is hidden once every tab inside it is.
+
+When a query filters *every* tab away, the sidebar rail shows a muted "No matches" block instead
+of going blank. It only appears when the window actually has tabs — a window between creation and
+its first `AddTab` is not "no matches" — and it disappears again as soon as one tab matches or the
+query is cleared.
+
 ---
 
 ## Visibility Methods
 
 ### `Show()`
 
-Makes the window visible.
+Makes the window visible. The shell unfolds from `Motion.exitScale` back to full size over
+`Motion.release`, growing from its centre, while the hairline and the drop shadow fade back in.
+With `AutoHide` on, the floating toggle fades out; its [attention pulse](#attention-pulse) stops
+either way.
 
-### `Hide()`
+### `Hide()` {#hide}
 
-Hides the window without destroying it.
+Hides the window without destroying it, and hands off to the floating toggle button.
+
+The shell folds — shrinking to `Motion.exitScale` while the hairline and shadow fade out — and at
+the same time drifts `Motion.hideDrift` px (`12`) **toward the floating button**, so hiding reads
+as the window turning into it. With no floating button (or one sitting under the window centre)
+the drift is straight down instead. When the fold finishes the window is hidden, its resting
+position is put back, and the button pops in.
+
+The drift is skipped while the title bar is being dragged: that gesture owns the position.
 
 ### `Toggle()`
 
@@ -97,9 +117,26 @@ Toggles visibility: shows if hidden, hides if visible.
 
 Returns `true` if the window is currently visible, `false` otherwise.
 
-### `Minimize()`
+### `Minimize()` {#minimize}
 
-Hides the window and reveals the floating toggle button so the user can reopen it.
+Closes any open popover, then does exactly what `Hide()` does — the same fold and hand-off to the
+floating toggle. This is what the title-bar minimize glyph calls.
+
+### `Close()` {#close}
+
+Closes the window **permanently**. It dissolves in place: the same fold as `Hide`, one beat slower
+(`Motion.base`) and all the way to fully transparent, with no drift. When the fold lands the window
+tears itself down — `OnClose` fires, the config is saved, open overlays and toasts are cleared,
+every connection (title-bar drag, resize, toggle key) is disconnected, and the `ScreenGui` is
+destroyed.
+
+**A closed window cannot be reopened.** The built-in confirm dialog says *"You can reopen it with
+the toggle key or the floating button"*, but that is not what happens: the toggle-key connection
+and the floating button are destroyed along with the rest. After `Close`, `Show`, `Hide`, `Toggle`
+and `AddTab` are no-ops on that object; call `EzUI:CreateWindow` again for a new window. If you
+want a window the player can bring back, use [`Hide()`](#hide) or [`Minimize()`](#minimize).
+
+`Destroy()` is the same call under another name.
 
 ---
 
@@ -121,6 +158,44 @@ Updates the title-bar image. Accepts an `rbxassetid://` id, an `http(s)://` URL,
 
 Sets the window background transparency, `n` in `0..1` (`0` = opaque). The acrylic shell is re-painted (`Acrylic.reskin`), so the sheen band, rim and grain rescale with the new value rather than only the fill changing.
 
+The value also propagates outward, so a frosted shell stays consistent with itself:
+
+- **the content panel** — and the scroll edge fades cut from the same colour — takes **60%** of it.
+  A see-through shell must not contain an opaque slab, but the panel still has to read as a tonal
+  step above the chrome.
+- **the drop shadow** lightens by **half** of it: a see-through shell cannot cast a solid shadow.
+  In light mode a half-frosted window saturates to no shadow at all.
+
+Both are re-derived from whatever you last set, so they survive a `SetMode`.
+
+### `SetUIScale(n)`
+
+Scales the whole UI by the factor `n` (`1` = default size): `1.25` makes everything a quarter
+larger, `0.9` a tenth smaller.
+
+The window scales about its centre, so it grows and shrinks in place instead of dragging its
+top-left corner around, and the drop shadow carries its own scale so it tracks the frame.
+
+The same factor is then forwarded to **overlay-hosted surfaces**, which are not children of the
+window frame and would otherwise be left at their old size:
+
+| Surface | Behaviour |
+|---|---|
+| Toasts | The toast container rescales immediately — open toasts included |
+| Tooltips | Read the scale when they are built, so the next tip to appear is scaled |
+| Select-box and color-picker dropdowns | Read the scale when they open |
+
+Dialogs opened with `Window:Dialog` are parented to the window frame and already inherit its
+scale — they are never scaled twice.
+
+That forwarded value is a single **process-wide** number, so with more than one window the last
+call wins (the window's own scale stays its own). The forward is guarded: a value that is not a
+positive number is not passed on.
+
+```lua
+Window:SetUIScale(1.25)
+```
+
 ### `SetAnimationsEnabled(b)`
 
 Toggles all library motion at runtime (`true` = animated, `false` = instant). The setting is process-wide; with multiple windows the last call wins.
@@ -134,7 +209,7 @@ tab:AddToggle({ Text = "Reduce motion", Description = "Disable UI animations", F
 
 See [Reduced motion](#reduced-motion) for the full resolution order.
 
-### `AdaptToViewport()`
+### `AdaptToViewport()` {#adapttoviewport}
 
 Re-fits the window to the current viewport, preserving the configured `Ratio`. A window the user hasn't moved is re-centered; once the user drags or resizes it, its position is kept (clamped on-screen) instead. Called automatically on creation and whenever the viewport size changes — the window is always responsive.
 
@@ -142,7 +217,7 @@ Re-fits the window to the current viewport, preserving the configured `Ratio`. A
 
 Returns the current color mode: `"dark"` or `"light"`.
 
-### `SetMode(mode)`
+### `SetMode(mode)` {#setmode}
 
 Switches the color palette live. Pass `"dark"` or `"light"`. Controls re-skin immediately without recreating the window.
 
@@ -159,17 +234,69 @@ Window:SetAccent(Color3.fromRGB(99, 102, 241))
 
 Everything accent-coloured re-tints at once — controls, the sidebar indicator, icons using the `Icon.accent` role, and open toasts and dialogs (same `AccentReg` hook as `SetMode`). A named or custom accent survives a later `SetMode`.
 
+### `LockAll()` {#lockall}
+
+Locks every control the window has built so far. A locked control is covered by two full-size
+layers of its own: a **scrim** — a `background`-coloured wash at `Opacity.scrim`, rounded to
+`Radius.md` — and above it an invisible **shield**, a transparent button that swallows every
+click, drag and hover before it reaches the control. The control keeps its value and its
+appearance underneath; it simply cannot be reached.
+
+```lua
+Window:LockAll()     -- everything built so far is scrimmed and unreachable
+```
+
+Two things follow from *where* the lock lives:
+
+- **It is independent of a control's own disabled state.** `SetEnabled(false)` / `SetDisabled(true)`
+  dim the control itself and guard its input handlers; the lock is a pair of layers on top.
+  Both can be on at once, and `UnlockAll()` never re-enables a control that was disabled
+  separately — see [Enabled and disabled](/controls/#enabled-and-disabled).
+- **It is a snapshot, not a mode.** The window locks the controls that exist when you call it.
+  A control added to a tab afterwards starts unlocked, whatever the last `LockAll()` did; build
+  it with `Locked = true`, or call `LockAll()` again.
+
+It reaches every control the window knows about: mounted straight on a tab, inside an
+[Accordion](/controls/accordion), or inside a [Resizable](/controls/resizable) pane. A single
+control can still be locked on its own through `SetLocked(b)`, which every control carries, or
+built with `Locked = true`.
+
+The scrim is chrome-coloured, so it follows [`SetMode`](#setmode) while it is showing.
+
+### `UnlockAll()` {#unlockall}
+
+Hides the scrim and shield on every control `LockAll()` can reach, undoing both it and any
+per-control `SetLocked(true)` on those controls.
+
+```lua
+Window:UnlockAll()
+```
+
 ### `SetFloatingToggleVisible(b)`
 
 Shows (`b = true`) or hides (`b = false`) the floating toggle button.
 
-### `SetFloatingToggle(opts)`
+### `SetFloatingToggle(opts)` {#setfloatingtoggle}
 
 Rebuilds the floating toggle button at runtime with a new options table (the same shape as the [FloatingToggle config](#floatingtoggle-config)). Re-enables the button if it was disabled, and shows it immediately when `AutoHide = false`.
 
 ```lua
 Window:SetFloatingToggle({ Type = "circle", Image = "rbxassetid://123" })
 ```
+
+### `GetFloatingToggleType()`
+
+Returns the floating toggle's current type as a string — `"simple"`, `"circle"` or `"square"`.
+
+```lua
+if Window:GetFloatingToggleType() == "simple" then ... end
+```
+
+It reports the *configured* type, so it answers correctly after a
+[`SetFloatingToggle`](#setfloatingtoggle) that omitted `Type`: the new options are merged over
+the current ones, so changing only the `Image` keeps the type the button already had. A window
+created without a `FloatingToggle` table — or with `FloatingToggle = false`, where no button is
+built at all — reports the default `"simple"`.
 
 ### FloatingToggle config
 
@@ -181,9 +308,10 @@ The `FloatingToggle` config key accepts a table (or `false` to disable the butto
 | `Image` | `string` \| `{ dark, light }` | Icon for the `circle`/`square` button — `rbxassetid://` / `rbxthumb://` or an `http(s)://` URL (falls back to a controller icon). A `{ dark, light }` table swaps per color mode, same as the window `Image` |
 | `Adaptive` | `bool` | Treat `Image` as a monochrome glyph and tint it to the `foreground` token, following dark/light and re-tinting on `SetMode`. Default `false` (full-color white fill). Use a white-on-transparent PNG. Ignored when `Image` is a `{ dark, light }` table |
 | `Position` | `string` \| `UDim2` | Anchor — `"TopLeft"`, `"MidLeft"`, `"BottomLeft"`, `"TopRight"`, `"MidRight"`, `"BottomRight"`, or a raw `UDim2`. For `simple` it sets which edge the tab docks to (and its height); for `circle`/`square` it places the button fully visible at that anchor. Default: `simple` → `MidLeft`, others → `TopLeft` |
-| `Size` | `{ Width, Height }` \| `UDim2` | Button size in pixels |
-| `Draggable` | `bool` | When `true` (default), the player can drag the button; on release it magnet-snaps to the nearest left/right edge |
+| `Size` | `{ Width, Height }` \| `UDim2` | Button size in pixels. Default `50 × 50` for `simple` (`Sizes.fab.simple`), `44 × 44` for `circle`/`square` (`Sizes.fab.size`). A `{ Width }` given without a `Height` falls back to `44` |
+| `Draggable` | `bool` | When `true` (default), the player can drag the button. On release **only `simple` magnets** — it docks to whichever screen edge its centre is nearer, peeking `Sizes.fab.peek` px. A `circle` or `square` button stays exactly where it was dropped |
 | `AutoHide` | `bool` | `true` (default) shows the button only while the window is hidden; `false` keeps it visible at all times (a persistent open/close toggle) |
+| `Pulse` | `bool` | `false` (default). `true` breathes an accent ring around the button to draw the eye to it once — see [Attention pulse](#attention-pulse) |
 
 ```lua
 EzUI:CreateWindow({
@@ -199,9 +327,71 @@ EzUI:CreateWindow({
 
 With `FloatingToggle = false` the button is not created, and players can reopen the window only via the `ToggleKey` — avoid this on touch-only experiences.
 
+#### Docking, hover and drag {#docking-hover-drag}
+
+**The chevron turns; it is never swapped.** A `simple` tab carries one `chevron-right` sprite,
+anchored at its own centre so `Rotation` pivots there. Docked at the left edge it sits at `0` and
+points right, into the screen; magnet it to the right edge and the same sprite rotates to `180`
+and points left. The turn is a `Motion.base` tween and runs alongside the `Motion.snap` slide to
+the edge, so the tab arrives already facing the right way.
+
+**The docked tab leans out under a pointer.** Only `simple` hides part of itself behind the screen
+edge — it rests with `Sizes.fab.peek` px (`15`) hanging off — so only `simple` leans: entering it
+slides the tab `Sizes.fab.hoverPeek` px (`7`) further onto the screen over `Motion.hover`, and
+leaving it slides back. The lean is relative to whatever rest position the magnet last chose, and
+it is latched, so a second `MouseEnter` cannot stack a second lean. Starting a drag, or landing a
+magnet snap, spends it outright.
+
+**An accent glow lights underneath.** Every type gets one: a `primary`-tinted layer at the
+`Effect.control` level, sitting one `ZIndex` below the button, resting fully invisible and tweening
+up to `Opacity.glowHover` over `Motion.fast` while the pointer is on the button. The button itself
+lifts to `Motion.hoverScale` at the same moment, squashes to `0.92` while held, and springs back on
+release. The glow is subject to the usual [depth-layer](/guide/theming#depth-layers) switches —
+`Effect.controlGlow = "auto"` (the default) drops it on phones, and `Effect.shadowId = ""` removes
+it, and the button's shadow, entirely.
+
+**A few pixels of travel separate a drag from a click.** The button follows the pointer from the
+first pixel, but it only stops counting as a click once the gesture has travelled more than
+`Sizes.dragThreshold` px (`6`) on either axis; past that, the release is swallowed and the window
+is not toggled. Below it the press is still a tap. What is left behind differs by type: a `simple`
+tab re-magnets to an edge on every release, so a sub-threshold wobble is erased, while a `circle`
+or `square` button has no magnet and keeps those few pixels of displacement — and still toggles.
+
+#### Attention pulse {#attention-pulse}
+
+`Pulse = true` builds a ring *outside* the button — a `Halo` frame 12 px wider and taller than the
+FAB, so it stands 6 px clear of every edge, carrying an accent `UIStroke` at `Stroke.focusThickness`.
+It is opt-in: without `Pulse` no halo and no stroke are created at all, so nothing changes for an
+existing caller.
+
+The ring rests at `Stroke.pulse.high` and breathes to `Stroke.pulse.low` and back **five times**,
+then stops. The count is deliberately finite — an endless tween on a floating button is a battery
+cost for a hint nobody needs after the first few breaths.
+
+It starts whenever the button pops in — `Hide()`, `Minimize()`, `SetFloatingToggleVisible(true)`,
+`SetFloatingToggle(opts)`, or at creation with `AutoHide = false` or `StartHidden = true` — and
+stops as soon as it has done its job:
+
+- **the pointer enters the button** — the loop is cancelled and the ring settles on its lit alpha
+  (`Stroke.pulse.low`, over `Motion.hover`), where it stays;
+- **the pointer leaves** — it settles back to its rest alpha, it never starts breathing again;
+- **`Show()`** — the window is on screen, so there is nothing left to point at. This happens even
+  with `AutoHide = false`, where the button itself stays put;
+- **`Hide()`'s counterpart, hiding the button** — a button that is gone asks for nothing.
+
+With motion off the ring is still built and tinted, it simply never tweens: it sits at its rest
+alpha. Its colour follows `SetAccent` and `SetMode` like everything else accent-coloured.
+
+```lua
+EzUI:CreateWindow({
+    FloatingToggle = { Type = "circle", Pulse = true, AutoHide = false },
+})
+```
+
 ### `Destroy()`
 
-Closes the window, disconnects all connections, and destroys the UI. Equivalent to `Window:Close()`.
+Closes the window, disconnects all connections, and destroys the UI. Equivalent to
+[`Window:Close()`](#close) — including the part where the window cannot be brought back.
 
 ---
 
@@ -377,7 +567,72 @@ local Window = EzUI:CreateWindow({ Title = "Hub", Animations = true })
 Window:SetAnimationsEnabled(false)
 ```
 
-With motion off every tween applies its goal instantly and loops (spinners, pulses) are no-ops. Hover affordances (wash, tooltip intent, halos) are gated separately by `EzUI.Device.SupportsHover()` so touch-only devices never get a stuck hover state — see [Device detection](/guide/device#capability-probes).
+With motion off every tween applies its goal instantly and loops (spinners, pulses) are no-ops. Hover affordances are gated separately, and not all by the same probe: washes and halos check `EzUI.Device.SupportsHover()`, while a [Tooltip](/controls/tooltip) checks `EzUI.Device.IsTouch()`. Either way a touch-only device never gets a stuck hover state — see [Device detection](/guide/device#capability-probes).
+
+A few things go further than "instant" and are skipped outright when motion is off: the
+[entrance cascade](#entrance) is never started (nothing is parked invisible waiting for a tween
+that will not run), and the floating toggle's [attention ring](#attention-pulse) is built but
+never breathes.
+
+## Motion durations
+
+Separate from the on/off switch, a per-window `Theme = { Motion = { ... } }` override retunes the
+durations themselves: `CreateWindow` hands the merged table to `Animate.useMotion`, so every
+duration name the library tweens with (`"fast"`, `"enter"`, `"release"`, `"spin"`, …) resolves
+against your values. Like the on/off switch this is **process-wide** — with several windows the
+last one created wins. See [Theming — Motion](/guide/theming#motion).
+
+```lua
+EzUI:CreateWindow({ Theme = { Motion = { fast = 0.08, base = 0.15, slow = 0.25 } } })
+```
+
+## Moving, resizing and scaling
+
+The window frame is anchored at its centre (`AnchorPoint (0.5, 0.5)`), and every scale animation —
+the entrance, `Show`, `Hide`, `Close` and `SetUIScale` — pivots there. A scale change therefore
+grows and shrinks the window in place instead of dragging its top-left corner across the screen.
+
+**Dragging the title bar** cannot throw the window off screen. The drag clamps the window's centre
+so that:
+
+- horizontally, at least `Sizes.dragKeep` px (`40`) of the window stays inside the viewport;
+- vertically, the top edge stays between `0` and *viewport height − title-bar height*.
+
+Together those keep a grabbable strip of title bar on screen at all times, whichever direction the
+window was flung. A drag in the middle of the screen is plain start + delta, untouched by the
+clamp.
+
+**Dragging the resize grip** (bottom-right) resizes from that corner only: half of every size
+delta goes into the position, so the opposite corner stays still rather than walking up and to the
+left. The window is floored at 380 × 260 px and capped at the viewport.
+
+**Grabbing either one** lifts the window off the page — the drop shadow spreads by
+`Effect.lift.spreadDelta` and darkens by `Effect.lift.alphaDelta`, and the shell hairline goes
+fully opaque (`Stroke.floating`). Both settle back on release, and closing the window mid-drag
+resets the lift too.
+
+Once the window has been moved or resized by hand, [`AdaptToViewport()`](#adapttoviewport) stops
+re-centering and re-fitting it: a moved window is only clamped back on screen, and a resized one
+keeps its manual size (shrunk only far enough to fit a smaller viewport, never below the minimum).
+
+## Entrance {#entrance}
+
+A freshly created window unfolds exactly the way `Show` does, one beat slower (`Motion.enter`):
+the shell scales up from `Motion.exitScale` and fades in to its configured `Transparency`.
+
+Its contents then arrive behind it, in two beats one `Motion.stagger` apart:
+
+1. the title — and the subtitle, on the same beat — fade in while sliding `Motion.cascade.x` px
+   from the left;
+2. the content panel fades in while rising `Motion.cascade.y` px.
+
+Only those two beats cascade; tab rows are not staggered. The cascade is skipped entirely, with
+nothing ever parked invisible, in two cases: on **touch** devices, where the window is opened and
+closed all day, and with **motion off**.
+
+`StartHidden = true` skips the entrance altogether and pre-sets every layer (scale, background,
+hairline, shadow) at its rest value, so the first `Show()` reveals a correctly-painted window
+rather than one still wearing its folded values.
 
 ## Parenting & stealth
 

@@ -1,6 +1,6 @@
 # Table
 
-A scrollable data table with a fixed header row and a scrollable body. Columns are defined once; rows can be supplied at creation time or added/replaced at runtime.
+A scrollable data table with a fixed header row and a scrollable body. Columns are defined once; rows can be supplied at creation time or added/replaced at runtime. A table with no rows says so rather than showing an empty box.
 
 ## Basic usage
 
@@ -28,8 +28,15 @@ local t = tab:AddTable({
 |---|---|---|
 | `AddRow(cells)` | `Frame` | Appends one row to the body. `cells` is a table of strings matching the column count. Returns the row `Frame`. |
 | `SetData(rows)` | `nil` | Clears all existing rows and renders `rows` from scratch. |
-| `Clear()` | `nil` | Removes all body rows without changing the header. |
+| `Clear()` | `nil` | Removes all body rows without changing the header, and brings the empty block back. |
 | `Destroy()` | `nil` | Removes the table from the UI. |
+
+## The empty state
+
+Whenever the body holds no rows, a muted **No rows** message with an inbox glyph is shown over the
+body area. It appears on a table built without `Rows`, after `Clear()`, and after `SetData({})`, and
+the first `AddRow` hides it again. It is drawn over the body rather than inside it, so it is never
+mistaken for a row and never raises a scrollbar of its own.
 
 ## Examples
 

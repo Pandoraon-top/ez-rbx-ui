@@ -12,14 +12,10 @@ local LISTEN_TEXT = "Press a key"
 
 -- Listening pulse alphas + period. theme.Stroke.pulse = { low, high } and theme.Motion.pulse are
 -- the tokens these belong in (reported as a deviation); until core/theme.lua carries them this
--- FALLBACK holds the values, the way core/animate.lua covers tokens that may not exist yet.
-local FALLBACK = { low = 0.2, high = 0.7, period = 0.4 }
+-- The listening chip breathes between Stroke.pulse.low and .high over Motion.pulse.
 local function pulseTok(theme, k)
-  local v
-  if k == "period" then v = theme.Motion and theme.Motion.pulse
-  else v = theme.Stroke and theme.Stroke.pulse and theme.Stroke.pulse[k] end
-  if type(v) == "number" then return v end
-  return FALLBACK[k]
+  if k == "period" then return theme.Motion.pulse end
+  return theme.Stroke.pulse[k]
 end
 
 -- Escape cancels listening. Resolved ONCE through a pcall (indexing an absent member throws in

@@ -7,9 +7,6 @@ local ProgressBar = {}
 local Create, DefaultTheme, Animate, Safe
 function ProgressBar.Init(R) Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Safe = R.Safe end
 
--- Tokens core/theme.lua does not carry yet (reported as deviations); the theme wins as soon as
--- Stroke.track / Opacity.flash exist. Same escape hatch core/animate.lua uses for FALLBACK.
-local FALLBACK = { trackStroke = 0.5, flash = 0.35 }
 -- Indeterminate sweep: width of the travelling fill (scale), the static width it rests at under
 -- reduced motion, and the period of one pass. The period matches Effect.skeleton.period so both
 -- "we are waiting" idioms breathe at the same rate. theme.Effect.indeterminate wins when present.
@@ -26,7 +23,7 @@ function ProgressBar.new(opts)
   local track = Create("Frame", { Name = "Track", BackgroundColor3 = theme.Colors.surface, BorderSizePixel = 0,
     Size = UDim2.new(1, 0, 1, 0), Parent = root, Create.corner(4) })
   -- Hairline like the slider rail: an empty track still reads as a groove, not a gap.
-  local trackStroke = Create.stroke(theme.Colors.border, 1, theme.Stroke.track or FALLBACK.trackStroke)
+  local trackStroke = Create.stroke(theme.Colors.border, 1, theme.Stroke.track)
   trackStroke.Parent = track
   local fill = Create("Frame", { Name = "Fill", BackgroundColor3 = opts.Color or theme.Colors.primary, BorderSizePixel = 0,
     Size = UDim2.new(value, 0, 1, 0), Visible = value > 0, Parent = track, Create.corner(4) })
@@ -79,7 +76,7 @@ function ProgressBar.new(opts)
       -- A reversing pulse would be prettier but rests wherever the engine stops it; this always
       -- ends opaque, including under reduced motion where the fade applies instantly.
       if done then
-        fill.BackgroundTransparency = theme.Opacity.flash or FALLBACK.flash
+        fill.BackgroundTransparency = theme.Opacity.flash
         Animate.to(fill, "base", { BackgroundTransparency = 0 })
       end
     end)
