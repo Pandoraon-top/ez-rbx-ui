@@ -186,6 +186,14 @@ function Window.new(config)
     Parent = config.Parent,
   })
   Mount.finalize(gui, mountCtx)
+  -- The overlay root, up front. It is created anyway (the FAB, every popover, every toast lives
+  -- in it) -- but it used to appear ~1000 lines below, and core/safe.lua probes it to decide
+  -- whether the CURRENT thread may touch the GUI. With no root to probe, that decision is a
+  -- guess, and everything this window resolves asynchronously before the FAB is built -- the
+  -- title logo above all -- would run its write inline on a thread that may not hold the
+  -- capability. Creating the root here costs one transparent frame and makes the probe an answer
+  -- for the whole life of the window.
+  Overlay.get(gui)
 
   -- AnchorPoint (0.5, 0.5) puts the UIScale pivot in the middle, so every scale animation
   -- (entrance, Show, Hide, Close, SetUIScale) grows from the centre instead of the top-left
@@ -248,7 +256,9 @@ function Window.new(config)
     if mainStroke then Animate.to(mainStroke, "fast", { Transparency = on and theme.Stroke.floating or strokeRest() }) end
   end
   maid:Give(function() if lifted then grabbed(false) end end)
-  local grip -- resize grip glyph; built after the shell, re-tinted by the shell closure below
+  -- resize grip glyph and its rest tint; both built after the shell, read by the shell
+  -- re-skin closure below (which runs long before the grip exists, hence the forward decls)
+  local grip, gripRest
 
   -- A logo source is either a string (one image, optionally ImageAdaptive-tinted) or a
   -- { dark = ..., light = ... } table that swaps per color mode -- for full-color tiles that ship a
@@ -305,15 +315,33 @@ function Window.new(config)
       if titleLoadConn then titleLoadConn:Disconnect(); titleLoadConn = nil end
       if titleSkel then titleSkel.Stop(); titleSkel = nil end   -- Stop is idempotent
     end
+    -- Armed only once an id is actually in the slot: before that there is nothing to decode, and
+    -- IsLoaded reads TRUE for '' -- so watching an empty label would end the wait immediately,
+    -- which is the whole reason the block is gated on the id and not on the flag. Asset.awaitLoaded
+    -- watches the change signal AND polls Heartbeat, because the engine does not reliably raise
+    -- that signal when it sets IsLoaded; trusting it alone is what left the logo under an opaque
+    -- block until the give-up deadline a full minute later. Re-armable: a mode switch swaps the
+    -- tile and starts the wait over.
+    local function watchTitleDecode()
+      if not titleSkel or titleImg.Image == "" then return end
+      if titleLoadConn then titleLoadConn:Disconnect() end
+      -- Unconditional: awaitLoaded calls back either because the sprite decoded or because it
+      -- has waited long enough to stop pretending it will. Re-checking titleLoaded() here would
+      -- keep the block up for exactly the second case -- a sprite that never decodes, held under
+      -- an opaque square until the 60s deadline, which is the bug this whole watch replaces.
+      titleLoadConn = Asset.awaitLoaded(titleImg, function() Safe.mutate(stopTitleSkeleton) end)
+    end
     local function startTitleSkeleton()
       if titleSkel or titleLoaded() then return end
       titleSkel = Effects.skeleton(titleBar, theme, { name = "TitleImageSkeleton", radius = theme.Radius.md,
-        size = UDim2.new(0, imgSize, 0, imgSize), position = UDim2.new(0, 0, 0.5, 0) })
+        size = UDim2.new(0, imgSize, 0, imgSize), position = UDim2.new(0, 0, 0.5, 0),
+        -- BEHIND the label it stands in for (Sibling behaviour, equal ZIndex draws in child order,
+        -- and the block is created second). The label is transparent with no image, so the block
+        -- still shows through -- but the moment a logo lands it draws over the block instead of
+        -- under it, and no failure of the exits below can hide an image that has arrived.
+        zIndex = 0 })
       titleSkel.Frame.AnchorPoint = Vector2.new(0, 0.5)   -- the pivot of the image it stands in for
-      -- IsLoaded flips on an engine thread when the sprite finishes decoding
-      titleLoadConn = titleImg:GetPropertyChangedSignal("IsLoaded"):Connect(function()
-        Safe.mutate(function() if titleLoaded() then stopTitleSkeleton() end end)
-      end)
+      watchTitleDecode()                                  -- no-op until an id is in the slot
       -- Neither exit above is guaranteed: Asset.imageAsync only ever reports SUCCESS, so a
       -- download that dies (404, HttpGet blocked, no writefile, or a URL already cached as failed)
       -- calls nothing back and leaves Image at '' forever, while IsLoaded never moves for an image
@@ -332,7 +360,11 @@ function Window.new(config)
       Asset.imageAsync(srcFor(titleSrc, theme.Mode), function(id)
         Safe.mutate(function()
           if titleImg.Parent then titleImg.Image = id end
-          if titleLoaded() then stopTitleSkeleton() end
+          -- The id landing is the event the block was waiting for. Stop if the sprite is already
+          -- decoded; otherwise start watching for that, which a bare IsLoaded read cannot do --
+          -- in the engine it is false for the frame after the write, so the check below is a miss
+          -- on every real client and used to be the block's only "the logo arrived" exit.
+          if titleLoaded() then stopTitleSkeleton() else watchTitleDecode() end
         end)
       end, function()
         -- a download that will never arrive: end the wait on that signal rather than on the
@@ -1067,7 +1099,7 @@ function Window.new(config)
     local sub = titleBar:FindFirstChild("Subtitle")
     if sub then sub.TextColor3 = theme.Colors.mutedForeground end
     closeIcon.reskin(); minIcon.reskin()   -- glyph tint (current hover state) + hit wash
-    if grip then Icons.apply(grip, "move-diagonal-2", theme.Colors[theme.Icon.structural]) end
+    if grip and gripRest then Icons.apply(grip, "move-diagonal-2", gripRest()) end
     searchBox.BackgroundColor3 = theme.Colors.input
     searchStroke.Color = searchStrokeColor()
     -- keep the ring opaque while the field is still focused; only a blurred field wears the hairline
@@ -1437,21 +1469,37 @@ function Window.new(config)
   -- panel. The transparent hit target is CENTRED on the corner: only its inner quadrant overlaps
   -- the window, so a finger-sized square stops swallowing taps meant for the controls in the
   -- panel's bottom-right corner while still being touchHit wide where the finger lands.
-  grip = Create("ImageButton", {
-    Name = "ResizeGrip", AutoButtonColor = false, BackgroundTransparency = 1,
+  --
+  -- An ImageLABEL, not a button. As a button it was Active by default, so it sank every press
+  -- that landed on the part of the glyph the hit target did not reach -- and did nothing with it,
+  -- because no handler was ever bound to it. The affordance was eating the gesture it advertises.
+  grip = Create("ImageLabel", {
+    Name = "ResizeGrip", BackgroundTransparency = 1,
     AnchorPoint = Vector2.new(1, 1), Size = UDim2.new(0, S.resizeGrip, 0, S.resizeGrip),
     Position = UDim2.new(1, -S.resizeGripInset, 1, -S.resizeGripInset),
     ZIndex = 50, Parent = main,
   })
-  Icons.apply(grip, "move-diagonal-2", theme.Colors[theme.Icon.structural])
-  local gripHitPx = Device.IsTouch() and S.touchHit or 22
+  -- Rest tint: muted behind a pointer, where hover lights it on approach -- but touch has no
+  -- hover to reveal anything, so there the grip rests LIT, the same trade the sidebar divider
+  -- grip makes with GRIP_ALPHA.touch. A 12px affordance nobody can discover is not an affordance.
+  gripRest = function()
+    return theme.Colors[Device.IsTouch() and theme.Icon.structuralActive or theme.Icon.structural]
+  end
+  Icons.apply(grip, "move-diagonal-2", gripRest())
+  -- The hit has to COVER the glyph, or the window cannot be resized by dragging the only thing
+  -- that says it can be. Centred on the corner it reaches gripHitPx/2 INWARD, and the glyph ends
+  -- resizeGripInset + resizeGrip in -- so anything smaller than twice that leaves the inner part
+  -- of the glyph dead (at the shipped 22 it was 11 in against a glyph ending at 16: two thirds of
+  -- it did nothing). Touch keeps its finger-sized floor on top of that.
+  local gripReach = 2 * (S.resizeGripInset + S.resizeGrip)
+  local gripHitPx = math.max(gripReach, Device.IsTouch() and S.touchHit or 0)
   local resizeHit = Create("ImageButton", {
     Name = "ResizeHit", AutoButtonColor = false, BackgroundTransparency = 1,
     AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(0, gripHitPx, 0, gripHitPx), Position = UDim2.new(1, 0, 1, 0),
     ZIndex = 51, Parent = main,
   })
   maid:Give(resizeHit.MouseEnter:Connect(function() Icons.apply(grip, "move-diagonal-2", theme.Colors.foreground) end))
-  maid:Give(resizeHit.MouseLeave:Connect(function() Icons.apply(grip, "move-diagonal-2", theme.Colors.mutedForeground) end))
+  maid:Give(resizeHit.MouseLeave:Connect(function() Icons.apply(grip, "move-diagonal-2", gripRest()) end))
   local resizing = false
   local rSize, rPos
   Drag.bind(resizeHit, {

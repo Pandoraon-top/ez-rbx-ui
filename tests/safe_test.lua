@@ -59,6 +59,49 @@ h.describe("safe", function()
     h.expect(ran).toBe(true)
     R.Safe._setCapabilityCheck(nil)
   end)
+
+  -- FIELD BUG. Before any protected root exists the probe has nothing to test against, so it
+  -- ASSUMES capability -- and Safe.mutate used to act on that guess as if it were an answer,
+  -- running the job inline on whatever thread called it. On a real executor that thread is often
+  -- a task.spawn/task.delay one (an Asset.imageAsync callback for an already-cached logo comes
+  -- back mid-construction, before the window has built its overlay root), the GUI write throws
+  -- "lacking capability", the spawned thread dies with it -- and the write is gone for good. That
+  -- is the title logo that never arrived, as opposed to the one that arrived late.
+  --
+  -- What this test DOES prove: with no root to probe, a job that is refused still runs, on the
+  -- next Heartbeat, and the refusal never escapes Safe.mutate. What it does NOT prove: that a
+  -- real Roblox capability refusal looks like this. The mock has no capability model, so the
+  -- refusal is a thrown error with the engine's own message -- which is exactly the shape the
+  -- engine raises, but it is a stand-in, not the real thing.
+  h.it("a GUESSED capability that turns out wrong defers the job instead of losing it", function()
+    local R = h.loadLib()
+    R.Safe._setCapabilityCheck(nil)          -- real default probe
+    R.Overlay.reset()                        -- ...and nothing for it to probe: the guess path
+    h.expect(R.Overlay.peek()).toBeNil()
+    local tries, ran = 0, false
+    local ok = pcall(function()
+      R.Safe.mutate(function()
+        tries = tries + 1
+        if tries == 1 then                   -- first attempt: the thread did not hold it after all
+          error("The current thread cannot access 'Instance' (lacking capability Plugin)")
+        end
+        ran = true
+      end)
+    end)
+    h.expect(ok).toBe(true)                  -- the refusal did not escape onto the caller's thread
+    h.expect(ran).toBe(false)                -- nothing landed yet...
+    h.mock.stepHeartbeat(0)                  -- ...until a context that really does hold it
+    h.expect(ran).toBe(true)
+    h.expect(tries).toBe(2)
+  end)
+
+  h.it("still returns the value inline on the guess path when the job is not refused", function()
+    local R = h.loadLib()
+    R.Safe._setCapabilityCheck(nil)
+    R.Overlay.reset()
+    local ret = R.Safe.mutate(function() return 7, "seven" end)
+    h.expect(ret).toBe(7)                    -- the guess path must not swallow the return value
+  end)
 end)
 
 h.run()
