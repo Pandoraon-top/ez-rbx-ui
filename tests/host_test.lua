@@ -2,18 +2,39 @@ local h = require("tests.helper")
 local R = h.loadLib()
 
 h.describe("host wiring", function()
+  h.it("the lock overlay is built on first use, not for every control", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local tab = w:AddTab({ Name = "T" })
+    local lbl = tab:AddLabel("x")
+    -- three instances per control (scrim, its corner, shield) that most windows never use: a
+    -- nine-tab hub was paying ~500 of them up front, while the window was building
+    h.expect(lbl.Frame:FindFirstChild("LockScrim")).toBeNil()
+    h.expect(lbl.Frame:FindFirstChild("LockShield")).toBeNil()
+    lbl.SetLocked(false)                       -- unlocking something never locked builds nothing
+    h.expect(lbl.Frame:FindFirstChild("LockScrim")).toBeNil()
+    lbl.SetLocked(true)
+    h.expect(lbl.Frame:FindFirstChild("LockScrim") ~= nil).toBeTruthy()
+    h.expect(lbl.Frame:FindFirstChild("LockShield").Visible).toBe(true)
+  end)
   h.it("SetLocked defers the scrim toggle when capability is absent", function()
     local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
     local w = R.Window.new({ Title = "M", Parent = screen })
     local tab = w:AddTab({ Name = "T" })
     local lbl = tab:AddLabel("x")
+    lbl.SetLocked(true); lbl.SetLocked(false)  -- build the overlay first; it is lazy now
     local scrim = lbl.Frame:FindFirstChild("LockScrim")
     R.Safe._setCapabilityCheck(function() return false end)
-    lbl.SetLocked(true)
-    h.expect(scrim.Visible).toBe(false)        -- deferred: not applied yet (fails before the wrap)
-    h.mock.stepHeartbeat(0)
-    h.expect(scrim.Visible).toBe(true)         -- applied in a capability context
+    -- restore the probe even if an assertion throws: leaving it false makes every later test in
+    -- this file fail for the wrong reason
+    local ok, err = pcall(function()
+      lbl.SetLocked(true)
+      h.expect(scrim.Visible).toBe(false)      -- deferred: not applied yet (fails before the wrap)
+      h.mock.stepHeartbeat(0)
+      h.expect(scrim.Visible).toBe(true)       -- applied in a capability context
+    end)
     R.Safe._setCapabilityCheck(nil)
+    if not ok then error(err, 0) end
   end)
   h.it("tab AddX mounts real controls into content", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(gui)
@@ -106,6 +127,7 @@ h.describe("Host.own", function()
     local w = R.Window.new({ Title = "M", Parent = screen })
     local tab = w:AddTab({ Name = "T" })
     local lbl = tab:AddLabel("x")
+    lbl.SetLocked(true)                        -- the overlay is lazy: nothing exists until locked
     local scrim = lbl.Frame:FindFirstChild("LockScrim")
     h.expect(scrim.BackgroundTransparency).toBe(R.Theme.Opacity.scrim)
     w:SetMode("light")

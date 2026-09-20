@@ -176,11 +176,23 @@ for k, v in pairs(DEFAULT) do Theme[k] = v end
 -- (Font.fromEnum takes ONE argument and would silently drop it); nil where the Font global is
 -- absent so Create.text leaves FontFace alone and the label keeps Font = BuilderSans.
 -- BuilderSans ships no 600, so a SemiBold request resolves to Bold rather than a missing face.
+-- Memoised per weight. Building a window calls this once per text instance -- 224 times for a
+-- nine-tab hub -- across only three distinct weights, and every call builds a fresh Font value
+-- that makes the engine resolve the family again. Handing back one shared value per weight turns
+-- those 224 resolutions into 3 and lets Roblox dedupe the assignment.
+local faceCache = {}
+
 function Theme.FontFace(weight)
   if not (Font and Font.fromName) then return nil end
   if weight == nil then weight = Enum.FontWeight.Regular end
   if weight == Enum.FontWeight.SemiBold then weight = Enum.FontWeight.Bold end
-  return Font.fromName("BuilderSans", weight)
+  -- keyed by the EnumItem itself: distinct weights are distinct keys, and a mock that rebuilds
+  -- its enum table simply misses the cache rather than returning the wrong face
+  local hit = faceCache[weight]
+  if hit ~= nil then return hit end
+  local face = Font.fromName("BuilderSans", weight)
+  faceCache[weight] = face
+  return face
 end
 
 function Theme.new(overrides)

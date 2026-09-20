@@ -162,11 +162,11 @@ h.describe("numberbox", function()
     local nb = NumberBox.new({ Parent = Create("Frame", {}), Text = "N", Default = 5, Min = 0, Max = 100 })
     local plus = nb.Frame:FindFirstChild("Box"):FindFirstChild("Plus")
     local img = plus:FindFirstChildOfClass("ImageLabel")
+    h.expect(plus:FindFirstChild("Hover")).toBeNil()   -- lazy: no wash until the pointer arrives
+    plus.MouseEnter:Fire()
     local wash = plus:FindFirstChild("Hover")
     h.expect(wash ~= nil).toBeTruthy()
     h.expect(wash.ZIndex).toBe(0)                      -- above the button fill, below the glyph
-    h.expect(wash.BackgroundTransparency).toBe(1)
-    plus.MouseEnter:Fire()
     h.expect(wash.BackgroundTransparency).toBe(R.Theme.Opacity.hoverWash)
     plus.MouseButton1Down:Fire()
     h.expect(wash.BackgroundTransparency).toBe(R.Theme.Opacity.pressWash)

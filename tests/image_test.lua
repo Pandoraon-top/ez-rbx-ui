@@ -220,5 +220,38 @@ h.describe("image loading", function()
       h.expect(img.ImageTransparency).toBe(0)
     end)
   end)
+
+  -- FIELD BUG (same root cause as the title logo): the reveal hung off
+  -- GetPropertyChangedSignal("IsLoaded") alone, and the engine sets IsLoaded from its own side
+  -- without reliably raising that signal. When it does not fire, the slot stays at
+  -- ImageTransparency 1 under a live shimmer with the image loaded underneath, until the 60s
+  -- give-up deadline. These two pin the Heartbeat poll that now runs alongside the signal.
+  -- What they prove: the reveal no longer depends on the signal. What they do NOT prove: that the
+  -- engine really withholds it -- the mock never auto-fires property signals either way, which is
+  -- precisely why the suite could not see this class of bug before.
+  h.it("reveals the slot on a Heartbeat poll when the IsLoaded signal never fires (3.1/3.8)", function()
+    withUnloadedImages(function()
+      local i = Image.new({ Parent = Create("Frame", {}), Image = "rbxassetid://321" })
+      local img = i.Frame
+      h.expect(img:FindFirstChild("Skeleton") ~= nil).toBeTruthy()
+      h.expect(img.ImageTransparency).toBe(1)
+      img.IsLoaded = true                              -- decoded, and NOT announced
+      h.mock.stepHeartbeat(0)
+      h.expect(img:FindFirstChild("Skeleton")).toBeNil()
+      h.expect(img.ImageTransparency).toBe(0)
+    end)
+  end)
+
+  h.it("a sprite that never decodes frees the slot on the decode budget, not the 60s deadline", function()
+    withUnloadedImages(function()
+      local i = Image.new({ Parent = Create("Frame", {}), Image = "rbxassetid://322" })
+      local img = i.Frame
+      h.expect(img:FindFirstChild("Skeleton") ~= nil).toBeTruthy()
+      for _ = 1, 4 do h.mock.stepHeartbeat(1) end     -- IsLoaded never moves; no signal ever fires
+      h.expect(img:FindFirstChild("Skeleton")).toBeNil()
+      h.expect(img.ImageTransparency).toBe(0)         -- a blank slot beats a hidden one
+      h.expect(h.mock.timerCount()).toBe(1)           -- the minute-long deadline was never needed
+    end)
+  end)
 end)
 h.run()

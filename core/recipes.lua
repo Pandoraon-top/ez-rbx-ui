@@ -65,29 +65,16 @@ local function pick(state, rest, hover, press)
 end
 
 -- The visual parts one hover kind drives: { {inst, prop, valueOf}, ... } where valueOf(state)
--- resolves the goal for "rest" | "hover" | "press" at paint time. Returns parts plus the wash
--- Frame (wash kind only).
+-- resolves the goal for "rest" | "hover" | "press" at paint time. The 'wash' kind is not built
+-- here: it is the only kind that owns instances, so washBuilder defers it instead.
 local function hoverParts(kind, host, opts, theme)
-  if kind == "wash" then
-    local inset = opts.inset or {}
-    local ix, iy = inset.x or inset[1] or 0, inset.y or inset[2] or 0
-    -- ZIndex 0: above the host fill, below its content (Sibling behaviour); the negative inset
-    -- cancels the row's UIPadding so the wash covers the whole row.
-    local wash = Create("Frame", {
-      Name = "Hover", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1, BorderSizePixel = 0,
-      Size = UDim2.new(1, 2 * ix, 1, 2 * iy), Position = UDim2.new(0, -ix, 0, -iy),
-      ZIndex = 0, Active = false, Parent = host,
-    })
-    if opts.corner then Create.corner(opts.corner).Parent = wash end
-    local hoverA, pressA = opts.hoverAlpha or theme.Opacity.hoverWash, opts.pressAlpha or theme.Opacity.pressWash
-    return { { wash, "BackgroundTransparency", function(s) return pick(s, 1, hoverA, pressA) end } }, wash
-  elseif kind == "fill" then
+  if kind == "fill" then
     -- No new Frame (host has a UIListLayout): the host's own transparency carries the state and
     -- returns to whatever it rested at; BackgroundColor3 is never touched (identity tests).
     local restA = host.BackgroundTransparency or 1
     local hoverA = opts.hoverAlpha or theme.Opacity.rowHover
     local pressA = opts.pressAlpha or hoverA
-    return { { host, "BackgroundTransparency", function(s) return pick(s, restA, hoverA, pressA) end } }, nil
+    return { { host, "BackgroundTransparency", function(s) return pick(s, restA, hoverA, pressA) end } }
   elseif kind == "text" then
     local function tint(s)
       if s == "rest" then return colorOf(theme, opts.rest, "mutedForeground") end
@@ -96,9 +83,34 @@ local function hoverParts(kind, host, opts, theme)
     local parts = {}
     if opts.label then parts[#parts + 1] = { opts.label, "TextColor3", tint } end
     if opts.icon then parts[#parts + 1] = { opts.icon, "ImageColor3", tint } end
-    return parts, nil
+    return parts
   end
   error("Recipes.hover: kind must be 'wash' | 'text' | 'fill', got " .. tostring(kind), 3)
+end
+
+-- The wash is the one hover part that owns instances (a Frame plus its UICorner) and it is
+-- invisible at rest, so a control that is never pointed at -- every control on a touch device,
+-- most controls in a large hub -- used to pay for two it would never show. Bind time now only
+-- measures it: the geometry, the corner and the alphas are captured exactly as before, and the
+-- returned builder makes the Frame on the first paint that could reveal it. The colour is read
+-- inside the builder rather than here, so a SetMode/SetAccent between bind and the first hover
+-- washes with the CURRENT palette instead of the one that happened to be live at construction.
+local function washBuilder(host, opts, theme)
+  local inset = opts.inset or {}
+  local ix, iy = inset.x or inset[1] or 0, inset.y or inset[2] or 0
+  local corner = opts.corner
+  local hoverA, pressA = opts.hoverAlpha or theme.Opacity.hoverWash, opts.pressAlpha or theme.Opacity.pressWash
+  return function()
+    -- ZIndex 0: above the host fill, below its content (Sibling behaviour); the negative inset
+    -- cancels the row's UIPadding so the wash covers the whole row.
+    local wash = Create("Frame", {
+      Name = "Hover", BackgroundColor3 = theme.Colors.foreground, BackgroundTransparency = 1, BorderSizePixel = 0,
+      Size = UDim2.new(1, 2 * ix, 1, 2 * iy), Position = UDim2.new(0, -ix, 0, -iy),
+      ZIndex = 0, Active = false, Parent = host,
+    })
+    if corner then Create.corner(corner).Parent = wash end
+    return wash, { wash, "BackgroundTransparency", function(s) return pick(s, 1, hoverA, pressA) end }
+  end
 end
 
 -- Shared core: `sources` are the instances whose Enter/Leave/Down/Up drive one visual state
@@ -108,10 +120,26 @@ local function bindHover(sources, opts)
   local theme = themeOf(opts)
   if not Device.SupportsHover() then return NOOP_HANDLE end
   local kind = opts.kind or "wash"
-  local parts, wash = hoverParts(kind, opts.host or sources[1], opts, theme)
+  local host = opts.host or sources[1]
+  local parts, buildWash = {}, nil
+  if kind == "wash" then buildWash = washBuilder(host, opts, theme)
+  else parts = hoverParts(kind, host, opts, theme) end
+
+  local handle, wash
+  -- A "rest" paint has nothing to say to a wash that does not exist yet (a fresh one rests fully
+  -- transparent), so the first paint that is NOT rest -- a hover, or a press that never saw an
+  -- Enter -- is the moment the Frame has to be real. Every later paint reuses it.
+  local function ensureWash()
+    if wash or not buildWash then return end
+    local part
+    wash, part = buildWash()
+    parts[#parts + 1] = part
+    handle.Frame = wash
+  end
 
   local state, hovering, pressed = "rest", false, false
   local function paint(next, instant)
+    if next ~= "rest" then ensureWash() end
     state = next
     local dur = (next == "press") and "press" or "hover"
     for _, p in ipairs(parts) do
@@ -127,28 +155,34 @@ local function bindHover(sources, opts)
     if hovering and pointerHover() then paint("hover") else hovering = false; paint("rest") end
   end
 
+  -- The handle is built before the first connection so ensureWash can publish .Frame onto it.
   local conns = {}
-  for _, src in ipairs(sources) do
-    conns[#conns + 1] = src.MouseEnter:Connect(enter)
-    conns[#conns + 1] = src.MouseLeave:Connect(leave)
-    onPress(conns, src, down, up)
-  end
-  return {
-    Frame = wash,
+  local dropConns = disconnectAll(conns)
+  handle = {
+    -- .Frame stays nil for fill/text, and for wash until the first hover builds one.
     -- re-read tokens by name after SetMode/SetAccent; the wash colour is the only owned colour,
     -- text parts repaint their current state instantly (no tween inside a themer closure)
     reskin = function()
       if wash then wash.BackgroundColor3 = theme.Colors.foreground end
       if kind == "text" then paint(state, true) end
     end,
-    disconnect = disconnectAll(conns),
+    -- releases whatever exists: the connections, and the pending builder, so a handle that has
+    -- been let go can never add a Frame to its host afterwards
+    disconnect = function() buildWash = nil; dropConns() end,
   }
+  for _, src in ipairs(sources) do
+    conns[#conns + 1] = src.MouseEnter:Connect(enter)
+    conns[#conns + 1] = src.MouseLeave:Connect(leave)
+    onPress(conns, src, down, up)
+  end
+  return handle
 end
 
 -- Recipes.hover(hit, { theme, host, corner, inset = {x,y}, kind = 'wash'|'text'|'fill', label, icon,
 --   rest, hover, hoverAlpha, pressAlpha }) -> { Frame, reskin, disconnect }
--- wash: child Frame 'Hover' in host (never 'Active'); fill: host transparency only; text: label /
--- icon tint. Skipped entirely (no Frame, no handlers) when the device has no pointer.
+-- wash: child Frame 'Hover' in host (never 'Active'), built on the FIRST hover rather than at bind
+-- time, so .Frame is nil until a pointer has actually arrived; fill: host transparency only; text:
+-- label / icon tint. Skipped entirely (no Frame, no handlers) when the device has no pointer.
 function Recipes.hover(hit, opts) return bindHover({ hit }, opts) end
 
 -- ---- press ------------------------------------------------------------------------------------

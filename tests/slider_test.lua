@@ -100,28 +100,49 @@ h.describe("slider", function()
     desktop()
     local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 10,
       Theme = Theme.new({ Effect = { shadowId = "" } }) })
-    h.expect(s.Frame:FindFirstChild("Track"):FindFirstChild("Halo")).toBeNil()
+    local track = s.Frame:FindFirstChild("Track")
+    h.expect(track:FindFirstChild("Halo")).toBeNil()
+    s.Frame:FindFirstChild("Hit").InputBegan:Fire(at(1))   -- and a drag conjures none either
+    h.expect(track:FindFirstChild("Halo")).toBeNil()
+  end)
+  h.it("builds the halo on the first drag, never for a slider only ever read (2.10)", function()
+    desktop()
+    local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 0, Theme = themed() })
+    local track = s.Frame:FindFirstChild("Track")
+    h.expect(track:FindFirstChild("Halo")).toBeNil()
+    s.SetValue(60)                                         -- moving the value shows nothing
+    h.expect(track:FindFirstChild("Halo")).toBeNil()
+    local hit = s.Frame:FindFirstChild("Hit")
+    hit.MouseEnter:Fire()                                  -- hover only grows the handle
+    h.expect(track:FindFirstChild("Halo")).toBeNil()
+    hit.InputBegan:Fire(at(1))
+    h.expect(track:FindFirstChild("Halo") ~= nil).toBeTruthy()
   end)
   h.it("the halo is a Track child at ZIndex 0 that follows the handle's X scale (2.10)", function()
     desktop()
     local th = themed()
     local s = Slider.new({ Parent = Create("Frame", {}), Text = "x", Min = 0, Max = 100, Default = 0, Theme = th })
     local track = s.Frame:FindFirstChild("Track")
+    local hit = s.Frame:FindFirstChild("Hit")
+    hit.InputBegan:Fire(at(0))                             -- the first drag is what builds it
     local halo, handle = track:FindFirstChild("Halo"), track:FindFirstChild("Handle")
     h.expect(halo ~= nil).toBeTruthy()
     h.expect(halo.ZIndex).toBe(0)
     h.expect(halo.ImageColor3).toBe(th.Colors.primary)
     h.expect(halo.Size.X.Offset).toBe(12 + 2 * th.Effect.control.spread)
+    h.expect(halo.ImageTransparency).toBe(Theme.fx(th).glow)
+    -- born ON the handle: same coordinate space, no AbsolutePosition conversion anywhere
+    h.expect(halo.Position.X.Scale).toBe(handle.Position.X.Scale)
+    h.expect(halo.Position.X.Scale).toBe(0)
+    uis().InputEnded:Fire(at(0))
     h.expect(halo.ImageTransparency).toBe(1)
-    s.SetValue(100)
-    -- same coordinate space as the handle: no AbsolutePosition conversion anywhere
+    s.SetValue(100)                                        -- and it keeps following afterwards
     h.expect(halo.Position.X.Scale).toBe(handle.Position.X.Scale)
     h.expect(halo.Position.X.Scale).toBe(1)
-    local hit = s.Frame:FindFirstChild("Hit")
-    hit.InputBegan:Fire(at(1))
+    hit.InputBegan:Fire(at(1))                             -- the same layer lights again
+    h.expect(track:FindFirstChild("Halo")).toBe(halo)
     h.expect(halo.ImageTransparency).toBe(Theme.fx(th).glow)
     uis().InputEnded:Fire(at(1))
-    h.expect(halo.ImageTransparency).toBe(1)
   end)
 
   -- ---- 2.10 eased SetValue vs live drag ------------------------------------

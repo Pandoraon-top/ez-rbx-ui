@@ -79,16 +79,30 @@ function Host.attach(api, ctx)
       end
       if control and control.Frame then
         local C = ctx.R.Create
-        local scrim = C("Frame", { Name = "LockScrim", BackgroundColor3 = ctx.theme.Colors.background,
-          BackgroundTransparency = ctx.theme.Opacity.scrim, BorderSizePixel = 0, Visible = false, ZIndex = 50,
-          Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame, C.corner(ctx.theme.Radius.md) })
-        local shield = C("ImageButton", { Name = "LockShield", AutoButtonColor = false, BackgroundTransparency = 1,
-          Active = true, Visible = false, ZIndex = 51, Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame })
-        control.SetLocked = function(b) local v = b and true or false; ctx.R.Safe.mutate(function() scrim.Visible = v; shield.Visible = v end) end
-        -- the scrim is chrome-coloured, so it must follow SetMode; owned by the control so a
-        -- destroyed control takes its closure with it
-        if ctx.accentThemer then
-          Host.own(control, ctx.accentThemer.register(function() scrim.BackgroundColor3 = ctx.theme.Colors.background end))
+        -- The lock overlay is built on FIRST use, not up front. It costs three instances per
+        -- control (scrim, its corner, shield) and most windows never lock anything: a nine-tab
+        -- hub with ~330 controls was paying ~500 instances for a feature it never called, all
+        -- created synchronously while the window builds, which is exactly what makes execute hang.
+        local scrim, shield
+        local function ensureLock()
+          if scrim then return end
+          scrim = C("Frame", { Name = "LockScrim", BackgroundColor3 = ctx.theme.Colors.background,
+            BackgroundTransparency = ctx.theme.Opacity.scrim, BorderSizePixel = 0, Visible = false, ZIndex = 50,
+            Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame, C.corner(ctx.theme.Radius.md) })
+          shield = C("ImageButton", { Name = "LockShield", AutoButtonColor = false, BackgroundTransparency = 1,
+            Active = true, Visible = false, ZIndex = 51, Size = UDim2.new(1, 0, 1, 0), Parent = control.Frame })
+          -- the scrim is chrome-coloured, so it must follow SetMode; registered only now, so an
+          -- unlocked control also costs no themer closure. Owned by the control, so destroying it
+          -- takes the closure with it.
+          if ctx.accentThemer then
+            Host.own(control, ctx.accentThemer.register(function() scrim.BackgroundColor3 = ctx.theme.Colors.background end))
+          end
+        end
+        control.SetLocked = function(b)
+          local v = b and true or false
+          if not scrim and not v then return end   -- unlocking something never locked: nothing to build
+          ensureLock()
+          ctx.R.Safe.mutate(function() scrim.Visible = v; shield.Visible = v end)
         end
         if opts.Locked then control.SetLocked(true) end
         if ctx.registerControl then ctx.registerControl(control) end

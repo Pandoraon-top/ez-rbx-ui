@@ -50,6 +50,7 @@ function Image.new(opts)
   -- gaveUp: the deadline expired; there is nothing left to wait for either way.
   local landed, armed, dead, owned, gaveUp = false, false, false, false, false
   local skel, loadConn = nil, nil
+  local watchDecode   -- forward: settle() is defined first and the resolve callback calls it
 
   local function waiting()
     if gaveUp then return false end
@@ -66,6 +67,25 @@ function Image.new(opts)
     if skel then skel.Stop(); skel = nil end
     Animate.to(img, "base", { ImageTransparency = 0 })
   end
+  -- The decode half of the wait, watched only while there is an id in the slot to decode.
+  -- Asset.awaitLoaded watches the IsLoaded change signal AND polls Heartbeat, because the engine
+  -- sets IsLoaded from its own side without reliably raising that signal -- a slot that trusts the
+  -- signal alone stays pinned at ImageTransparency 1 under a shimmer until the give-up deadline,
+  -- which is a minute of a loaded image being deliberately hidden. Re-armable: a URL lands after
+  -- the block was already up, and that is when the decode wait actually begins.
+  watchDecode = function()
+    if not armed or img.Image == "" then return end
+    if loadConn then loadConn:Disconnect() end
+    loadConn = Asset.awaitLoaded(img, function(loaded)
+      Safe.mutate(function()
+        if dead then return end
+        -- The budget ran out rather than the sprite arriving: the wait is over all the same, and
+        -- a slot pinned at ImageTransparency 1 under a shimmer is worse than the blank it hides.
+        if not loaded then gaveUp = true end
+        settle()
+      end)
+    end)
+  end
 
   if resolvable then
     -- URLs download off the construction thread, so a tab never blocks on game:HttpGet; the write
@@ -78,6 +98,7 @@ function Image.new(opts)
         if dead or owned then return end
         img.Image = id
         settle()
+        watchDecode()   -- still waiting? then it is on the decode now, not on the download
       end)
     end, function()
       -- The loader now tells us a download will never arrive, so the wait ends on the real signal
@@ -100,9 +121,9 @@ function Image.new(opts)
     skel = Effects.skeleton(img, theme, { radius = theme.Radius.sm })
     -- Property signals never auto-fire headless (a test sets IsLoaded then Fires this itself), and
     -- the engine delivers them on a thread that may lack the capability -> Safe.mutate.
-    loadConn = img:GetPropertyChangedSignal("IsLoaded"):Connect(function()
-      Safe.mutate(function() if not dead then settle() end end)
-    end)
+    -- No-op while the slot is still empty: there is nothing to decode yet, and IsLoaded reads TRUE
+    -- for '', so watching an empty label would call the wait off the moment it started.
+    watchDecode()
     -- The terminal exit neither of the two above can promise (see the header). Runs on a timer
     -- thread with no GUI capability -> Safe.mutate, and is disarmed by the `armed` flag rather
     -- than task.cancel, which throws on an already finished thread (textbox.lua says the same).

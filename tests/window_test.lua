@@ -1561,11 +1561,11 @@ h.describe("window", function()
     local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
     local w = R.Window.new({ Title = "M", Parent = screen })
     local search = w.Main:FindFirstChild("Body"):FindFirstChild("Search")
+    h.expect(search:FindFirstChild("Hover")).toBeNil()   -- lazy: the field builds it on hover
+    search.MouseEnter:Fire()
     local wash = search:FindFirstChild("Hover")
     h.expect(wash ~= nil).toBeTruthy()
     h.expect(wash.Position.X.Offset).toBe(-8); h.expect(wash.Size.X.Offset).toBe(16)
-    h.expect(wash.BackgroundTransparency).toBe(1)
-    search.MouseEnter:Fire()
     h.expect(wash.BackgroundTransparency).toBe(R.Theme.Opacity.hoverWash)
     search.MouseLeave:Fire()
     h.expect(wash.BackgroundTransparency).toBe(1)
@@ -1963,6 +1963,119 @@ h.describe("window", function()
     end)
     h.mock.imagesLoaded = nil
     if not ok then error(err, 0) end
+  end)
+
+  -- ---- field bug: the logo that showed up "after a few minutes" -------------------------------
+  -- Reported against a real executor: the title slot was reserved but stood empty and dark, and
+  -- the logo only appeared a long while later. The slot was not empty -- it held the 3.1 skeleton,
+  -- an OPAQUE surface-coloured block drawn over the ImageLabel -- and the id had already landed
+  -- underneath it. The block's only exits were an IsLoaded change signal (which the engine does
+  -- not reliably raise when it sets IsLoaded from its own side) and, failing that, the 60s give-up
+  -- deadline. So the wait was not for the logo; it was for the deadline.
+  h.it("the title block goes when the sprite decodes, WITHOUT an IsLoaded signal (Heartbeat poll)", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui")
+    h.roblox.writefile = function() end
+    h.roblox.isfile = function() return false end
+    h.roblox.getcustomasset = function(p) return "rbxasset://" .. p end
+    h.mock.imagesLoaded = false            -- born mid-decode, as on a real client after the write
+    local ok, err = pcall(h.withQueuedTimers, function()
+      local w = R.Window.new({ Title = "M", Parent = screen, Image = "https://example.com/poll-logo.png" })
+      local bar = w.Main:FindFirstChild("TitleBar")
+      local img = bar:FindFirstChild("TitleImage")
+      local sk = bar:FindFirstChild("TitleImageSkeleton")
+      h.expect(tostring(img.Image):sub(1, 11)).toBe("rbxasset://")   -- the logo IS in the slot...
+      h.expect(sk ~= nil).toBeTruthy()                               -- ...and the block is over it
+      -- Belt: even while it stands, the block sits BEHIND the label, so a lingering one can never
+      -- hide a logo that arrived (Sibling behaviour, and the block is the later child).
+      h.expect(sk.ZIndex).toBe(0)
+      -- Braces: the engine decodes and sets IsLoaded but raises no change signal. Nothing here
+      -- fires one; only Heartbeat runs. Before the fix the block stood until mock.advance(60).
+      img.IsLoaded = true
+      h.mock.stepHeartbeat(0)
+      h.expect(bar:FindFirstChild("TitleImageSkeleton")).toBe(nil)
+      h.expect(h.mock.timerCount()).toBe(1)   -- the 60s deadline is still parked, never needed
+    end)
+    h.mock.imagesLoaded = nil
+    h.roblox.writefile = nil; h.roblox.isfile = nil; h.roblox.getcustomasset = nil
+    if not ok then error(err, 0) end
+  end)
+
+  h.it("a sprite that never decodes frees the title slot in seconds, not in a minute", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui")
+    h.mock.imagesLoaded = false
+    local ok, err = pcall(h.withQueuedTimers, function()
+      local w = R.Window.new({ Title = "M", Parent = screen, Image = "rbxassetid://7" })
+      local bar = w.Main:FindFirstChild("TitleBar")
+      h.expect(bar:FindFirstChild("TitleImageSkeleton") ~= nil).toBeTruthy()
+      -- IsLoaded never moves and no signal ever fires: the decode budget is what ends it, and it
+      -- is a blink. (Heartbeat dt is the mock's clock here; on a client jammed building instances
+      -- neither this nor task.delay advances, which is a caveat this test cannot express.)
+      for _ = 1, 4 do h.mock.stepHeartbeat(1) end
+      h.expect(bar:FindFirstChild("TitleImageSkeleton")).toBe(nil)
+    end)
+    h.mock.imagesLoaded = nil
+    if not ok then error(err, 0) end
+  end)
+
+  -- The other half of the same report: on an executor that had already cached the logo file,
+  -- Asset.imageAsync's task.spawn never yields, so the callback fires DURING Window.new -- and it
+  -- used to fire before the window had an overlay root. core/safe.lua probes that root to decide
+  -- whether the calling thread may touch the GUI; with no root the answer is a guess, the write
+  -- runs inline on a capability-less thread, and the logo is lost rather than late.
+  -- What this proves: the root exists by the time the logo resolves. What it does not prove: what
+  -- a real executor's capability check does -- the mock has none, and its task.spawn runs inline.
+  h.it("the overlay root exists before the title logo resolves (Safe has something to probe)", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui")
+    local rootAtResolve, asked = "unset", false
+    h.roblox.writefile = function() end
+    h.roblox.isfile = function() return true end            -- already downloaded: no HttpGet, no yield
+    h.roblox.getcustomasset = function(p)
+      asked = true; rootAtResolve = R.Overlay.peek()
+      return "rbxasset://" .. p
+    end
+    local ok, err = pcall(function()
+      R.Window.new({ Title = "M", Parent = screen, Image = "https://example.com/cached-logo.png" })
+    end)
+    h.roblox.writefile = nil; h.roblox.isfile = nil; h.roblox.getcustomasset = nil
+    if not ok then error(err, 0) end
+    h.expect(asked).toBe(true)                              -- the cached path really did run inline
+    h.expect(rootAtResolve ~= nil).toBeTruthy()
+  end)
+
+  -- ---- field bug: the resize corner that could not be grabbed --------------------------------
+  h.it("the resize hit target covers the whole grip glyph, and the glyph sinks nothing", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local grip = w.Main:FindFirstChild("ResizeGrip")
+    local hit = w.Main:FindFirstChild("ResizeHit")
+    -- A GuiButton is Active by default and sinks the press. The grip carried no handler at all,
+    -- so every press that landed on it and missed the hit target was swallowed and discarded.
+    h.expect(grip.ClassName).toBe("ImageLabel")
+    -- The hit is centred on the corner, so it reaches half its size INWARD; the glyph ends
+    -- inset + size inward. Anything less and the inner part of the visible grip is dead to input
+    -- (shipped: 22/2 = 11 in, against a glyph ending 16 in -- two thirds of it did nothing).
+    local reach = hit.Size.X.Offset / 2
+    h.expect(reach >= R.Theme.Sizes.resizeGripInset + R.Theme.Sizes.resizeGrip).toBeTruthy()
+    h.expect(hit.Size.Y.Offset / 2 >= R.Theme.Sizes.resizeGripInset + R.Theme.Sizes.resizeGrip).toBeTruthy()
+  end)
+
+  h.it("the grip rests lit on touch, where there is no hover to reveal it", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    -- by value, not identity: Theme.new copies the palette per window, so the grip's tint is an
+    -- equal Color3 and not the module's own object
+    local function isToken(c, name)
+      local t = R.Theme.Colors[name]
+      return c ~= nil and c.R == t.R and c.G == t.G and c.B == t.B
+    end
+    local uis = h.roblox.game:GetService("UserInputService"); uis.TouchEnabled = true; uis.MouseEnabled = false
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local grip = w.Main:FindFirstChild("ResizeGrip")
+    h.expect(isToken(grip.ImageColor3, R.Theme.Icon.structuralActive)).toBe(true)
+    h.expect(w.Main:FindFirstChild("ResizeHit").Size.X.Offset >= 44).toBeTruthy()  -- still finger-sized
+    uis.TouchEnabled = false; uis.MouseEnabled = true
+    local w2 = R.Window.new({ Title = "M2", Parent = h.roblox.Instance.new("ScreenGui") })
+    -- muted behind a pointer, where hover lights it on approach
+    h.expect(isToken(w2.Main:FindFirstChild("ResizeGrip").ImageColor3, R.Theme.Icon.structural)).toBe(true)
   end)
 end)
 

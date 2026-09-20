@@ -68,9 +68,16 @@ function Slider.new(opts)
   local handleScale = Create("UIScale", { Scale = 1, Parent = handle })
   -- Halo: a glow parented to the TRACK at ZIndex 0 (Track has no ClipsDescendants), so it shares
   -- the handle's coordinate space and follows it with a plain Position write -- no Absolute* math.
-  -- nil while Effect.shadowId is '' and on phones under controlGlow 'auto'.
-  local halo = Effects.glow(track, theme, theme.Colors.primary, "control", 0, "Halo")
-  Effects.mirror(halo, handle, "control", theme)
+  -- Lazy: only a drag ever shows it, so the ImageLabel is built on the first one and a slider that
+  -- is only ever read costs nothing. `halo` is the handle, still nil while Effect.shadowId is ''
+  -- and on phones under controlGlow 'auto'. It is mirrored onto the handle at creation, so one
+  -- built mid-drag is born on the value point rather than at zero.
+  local halo = Effects.lazyGlow(track, theme, theme.Colors.primary, "control", 0, "Halo",
+    function(layer) Effects.mirror(layer, handle, "control", theme) end)
+  -- Same release the toggle takes: once the row is destroyed no later call may build a layer
+  -- under it. (`apply` already only ever Peek()s, so the drag handlers are the sole builder --
+  -- and the maid drops those -- but the invariant is the maid's to hold, not an accident.)
+  if halo then maid:Give(halo.Release) end
   -- Finger-sized grab strip over the 6px rail: transparent, ZIndex above the track so pointer
   -- input lands here rather than on the rail. Deliberately NOT 'Active' -- the rail it replaces
   -- never sank input either, and an Active frame inside the content ScrollingFrame would swallow
@@ -90,18 +97,22 @@ function Slider.new(opts)
     local direct = dragging or not built
     Safe.mutate(function()
       if valueLabel then valueLabel.Text = tostring(value) end
+      -- The halo only has to follow a value it is actually showing; one built later is placed on
+      -- the handle where it stands, so a move it never saw costs it nothing. Resolved HERE, not
+      -- before the mutate: a deferred write must see whatever exists when it finally runs.
+      local lit = halo and halo.Peek()
       if direct then
         -- an active drag writes straight through so the rail never lags the finger
         fill.Size = UDim2.new(scale, 0, 1, 0)
         handle.Position = valuePos(scale)
-        if halo then halo.Position = valuePos(scale) end
+        if lit then lit.Position = valuePos(scale) end
         return
       end
       -- programmatic SetValue (config restore, api call) flows instead of jumping
       local E, D = Animate.EASING.smooth, Animate.DIR.Out
       Animate.to(fill, "base", { Size = UDim2.new(scale, 0, 1, 0) }, E, D)
       Animate.to(handle, "base", { Position = valuePos(scale) }, E, D)
-      if halo then Animate.to(halo, "base", { Position = valuePos(scale) }, E, D) end
+      if lit then Animate.to(lit, "base", { Position = valuePos(scale) }, E, D) end
     end)
   end
   local commit = Flag.bind(opts, snap(opts.Default or minV), apply)
@@ -118,7 +129,8 @@ function Slider.new(opts)
   local function handleGrow()
     local s = dragging and theme.Motion.handleGrow or (hovering and theme.Motion.handleHover or 1)
     Animate.springTo(handleScale, "release", { Scale = s })
-    if halo then Animate.to(halo, "base", { ImageTransparency = dragging and theme.fx(theme).glow or 1 }) end
+    -- the first drag builds the halo and fades it in; hover and release never build one
+    if halo then halo.Fade(dragging and theme.fx(theme).glow or 1) end
   end
 
   local enabled = true

@@ -130,12 +130,45 @@ h.describe("toggle", function()
     local t = Toggle.new({ Parent = Create("Frame", {}), Text = "x", Default = true,
       Theme = Theme.new({ Effect = { shadowId = "" } }) })
     h.expect(t.Frame:FindFirstChild("TrackGlow")).toBeNil()
+    t.Set(true); t.Set(false)                               -- and no reveal conjures one either
+    h.expect(t.Frame:FindFirstChild("TrackGlow")).toBeNil()
+  end)
+  h.it("builds the glow on the first ON, never for a row that stays off (2.9)", function()
+    desktop()
+    local th = themed()
+    local t = Toggle.new({ Parent = Create("Frame", {}), Text = "x", Default = false, Theme = th })
+    -- one invisible ImageLabel per toggle is what a nine-tab hub of 57 of them was paying up front
+    h.expect(t.Frame:FindFirstChild("TrackGlow")).toBeNil()
+    t.Set(false)                                            -- turning OFF what is already off: nothing
+    h.expect(t.Frame:FindFirstChild("TrackGlow")).toBeNil()
+    t.Set(true)
+    h.expect(t.Frame:FindFirstChild("TrackGlow") ~= nil).toBeTruthy()
+    -- ON at build time still glows from the first frame
+    local on = Toggle.new({ Parent = Create("Frame", {}), Text = "y", Default = true, Theme = th })
+    local glow = on.Frame:FindFirstChild("TrackGlow")
+    h.expect(glow ~= nil).toBeTruthy()
+    h.expect(glow.ImageTransparency).toBe(Theme.fx(th).glow)
+  end)
+  h.it("a destroyed row builds no glow when its Config setter fires again (2.9)", function()
+    desktop()
+    -- Flag.bind hands `apply` to the Config, which keeps it: a profile switch calls every setter,
+    -- including a destroyed control's. The eager glow died with the button; the lazy one must not
+    -- BUILD its first layer under a button nothing is left to clean up.
+    local cfg = Config.new({ AutoLoad = false, AutoSave = false })
+    local t = Toggle.new({ Parent = Create("Frame", {}), Text = "x", Theme = themed(),
+      Config = cfg, Flag = "esp", Default = false })
+    local btn = t.Frame
+    h.expect(btn:FindFirstChild("TrackGlow")).toBeNil()
+    t.Destroy()
+    cfg.setters["esp"](true)                       -- what Config:Load does for every flag
+    h.expect(btn:FindFirstChild("TrackGlow")).toBeNil()
   end)
   h.it("parents the glow BESIDE the track (never inside it), below it, and fades it with the value (2.9)", function()
     desktop()
     local th = themed()
     local t = Toggle.new({ Parent = Create("Frame", {}), Text = "x", Default = false, Theme = th })
     local track = t.Frame:FindFirstChild("Track")
+    t.Set(true)                                             -- the first ON is what builds the layer
     local glow = t.Frame:FindFirstChild("TrackGlow")
     h.expect(glow ~= nil).toBeTruthy()
     h.expect(track:FindFirstChild("TrackGlow")).toBeNil()   -- a child would wash over the knob
@@ -146,23 +179,24 @@ h.describe("toggle", function()
     h.expect(glow.Size.X.Offset).toBe(44 + 2 * sp)
     h.expect(glow.Size.Y.Offset).toBe(24 + 2 * sp)
     h.expect(glow.Position.X.Offset).toBe(-22)              -- centred on the track (AnchorPoint .5)
-    h.expect(glow.ImageTransparency).toBe(1)
-    t.Set(true)
     h.expect(glow.ImageTransparency).toBe(Theme.fx(th).glow)
     t.Set(false)
     h.expect(glow.ImageTransparency).toBe(1)
+    t.Set(true)                                             -- and the same layer lights again
+    h.expect(t.Frame:FindFirstChild("TrackGlow")).toBe(glow)
+    h.expect(glow.ImageTransparency).toBe(Theme.fx(th).glow)
   end)
 
   -- ---- 2.7 hover wash -------------------------------------------------------
   h.it("answers hover with a wash and press with a deeper one (2.7)", function()
     desktop()
     local t = Toggle.new({ Parent = Create("Frame", {}), Text = "x" })
+    h.expect(t.Frame:FindFirstChild("Hover")).toBeNil()      -- lazy: no wash before a pointer
+    t.Frame.MouseEnter:Fire()
     local wash = t.Frame:FindFirstChild("Hover")
     h.expect(wash ~= nil).toBeTruthy()
     h.expect(wash.ZIndex).toBe(0)                            -- above the row fill, below its content
-    h.expect(wash.BackgroundTransparency).toBe(1)
     h.expect(wash.Size.X.Offset).toBe(2 * R.Theme.Spacing.inputX)  -- cancels the row padding
-    t.Frame.MouseEnter:Fire()
     h.expect(wash.BackgroundTransparency).toBe(R.Theme.Opacity.hoverWash)
     t.Frame.MouseButton1Down:Fire()
     h.expect(wash.BackgroundTransparency).toBe(R.Theme.Opacity.pressWash)
@@ -200,8 +234,8 @@ h.describe("toggle", function()
     local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
     local w = R.Window.new({ Title = "M", Parent = screen })
     local tg = w:AddTab({ Name = "T" }):AddToggle({ Text = "x" })
-    local shield = tg.Frame:FindFirstChild("LockShield")
     tg.SetLocked(true); tg.SetEnabled(false)
+    local shield = tg.Frame:FindFirstChild("LockShield")   -- built by the first lock, not up front
     h.expect(shield.Visible).toBe(true)
     h.expect(tg.Frame:FindFirstChild("Track").BackgroundTransparency).toBe(R.Theme.Opacity.disabled)
     tg.SetLocked(false)                                      -- dropping one keeps the other
