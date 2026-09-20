@@ -200,8 +200,8 @@ h.describe("toggle", function()
     local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
     local w = R.Window.new({ Title = "M", Parent = screen })
     local tg = w:AddTab({ Name = "T" }):AddToggle({ Text = "x" })
-    local shield = tg.Frame:FindFirstChild("LockShield")
     tg.SetLocked(true); tg.SetEnabled(false)
+    local shield = tg.Frame:FindFirstChild("LockShield")   -- built by the first lock, not up front
     h.expect(shield.Visible).toBe(true)
     h.expect(tg.Frame:FindFirstChild("Track").BackgroundTransparency).toBe(R.Theme.Opacity.disabled)
     tg.SetLocked(false)                                      -- dropping one keeps the other
