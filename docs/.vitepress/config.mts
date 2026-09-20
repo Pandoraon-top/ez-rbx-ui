@@ -68,7 +68,8 @@ export default defineConfig({
             { text: 'Table', link: '/controls/table' },
             { text: 'Card', link: '/controls/card' },
             { text: 'Resizable', link: '/controls/resizable' },
-            { text: 'Accordion', link: '/controls/accordion' }
+            { text: 'Accordion', link: '/controls/accordion' },
+            { text: 'Tooltip', link: '/controls/tooltip' }
           ]
         }
       ],

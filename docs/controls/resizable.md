@@ -1,6 +1,6 @@
 # Resizable
 
-A split-pane container with a draggable grip that lets users resize two or more panes at runtime. Each pane is itself a full control host — you can call any `Add*` method on it, just like a tab or accordion.
+A split-pane container with a draggable grip that lets users resize two or more panes at runtime. Each pane is itself a full control host — you can call any `Add*` method on it, just like a tab or accordion. A pane is not quite a tab, though: see [What a pane does and does not forward](#pane-context).
 
 ## Basic usage
 
@@ -31,6 +31,40 @@ rz.Panes[2]:AddToggle({ Text = "Option" })
 |---|---|---|
 | `Panes` | `host[]` | Array of pane host objects, one per pane definition. Each pane supports the full `Add*` control API (e.g. `rz.Panes[1]:AddLabel(…)`, `rz.Panes[2]:AddToggle(…)`). |
 | `Destroy()` | `nil` | Removes the entire resizable container and disconnects all drag listeners. |
+
+## What a pane does and does not forward {#pane-context}
+
+A pane builds its controls through the same host mixin a tab uses, so most of the context comes
+through — but two window-level registries do not reach it.
+
+**Forwarded:**
+
+- A `Flag` on a control in a pane persists through the window's
+  [config](/guide/config-and-flags) like any other.
+- Every control in a pane carries the host-injected `SetLocked(b)`, and `Locked = true` at build
+  time works.
+- The theme, the accent/mode re-skin hook and `Tooltip` all apply as usual.
+
+- The tab's search indexes it: [`Window:SearchTabs(q)`](/api/window#searchtabs-query) hides and
+  reveals a control inside a pane like any other, and its text keeps the tab in the filtered
+  sidebar.
+- `Window:LockAll()` reaches it, so a pane control is covered by the window-wide lock rather than
+  staying live underneath it.
+
+```lua
+local rz = tab:AddResizable({ Panes = { {}, {} }, Height = 140 })
+local t = rz.Panes[1]:AddToggle({ Text = "Auto farm", Flag = "autofarm" })
+
+window:SearchTabs("Auto")   -- reveals it, hides everything that does not match
+window:LockAll()            -- covers it too; t.SetLocked(true) still locks just this one
+```
+
+## Touch
+
+On a touch device the grip's hit area widens to the theme's `Sizes.touchHit` (44 px by default) so
+the seam can be grabbed with a thumb. Only the hit area changes — the gap between the panes, the
+seam line and the grip pill stay exactly where they are, so a phone layout does not shift relative
+to a desktop one.
 
 ## Examples
 

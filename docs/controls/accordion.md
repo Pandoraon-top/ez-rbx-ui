@@ -33,6 +33,35 @@ The accordion handle exposes all the same `AddX` methods as a tab (e.g. `AddTogg
 | `SetIcon(name)` | `nil` | Swaps the leading icon. Only applies when an `Icon` was set at creation. |
 | `Destroy()` | `nil` | Removes the accordion and all its children from the UI. |
 
+## Opening and closing
+
+Expanding and collapsing are mirror images of each other, not a grow and a snap:
+
+- **Expanding** places the content one `Spacing.gap` below its resting position and slides it up
+  while the card's height opens to fit. The divider under the header fades in from nothing rather
+  than arriving with the first pixel of height.
+- **Collapsing** runs the same move backwards on the exit curve: the divider fades out *before* it
+  is hidden, the content slides back down that same gap, and the height closes to the 34 px header.
+  The content and the divider are only hidden once the height has finished closing, so nothing
+  vanishes mid-slide.
+
+The caret turns 90 degrees on a calm curve over `Motion.base`, with no overshoot — a Back curve on a
+16 px glyph reads as a jitter rather than a flourish — and its tint lifts from the muted structural
+colour to the foreground one while the panel is open. The acknowledgement of the click lives on its
+scale instead: every toggle, whether from a click or from `Expand()` / `Collapse()`, dips the caret
+to `Motion.popFrom` and springs it back to full size.
+
+The header answers a pointer on its own: a wash inside the header fades in on hover and deepens
+while it is held, and the card behind it keeps its own colour throughout. Devices with no pointer
+skip the wash entirely.
+
+Once an expanded card has finished opening, its height is handed back to the engine, so controls
+added to an open accordion afterwards keep fitting with no re-measure. An accordion with nothing in
+it skips the height animation altogether and simply grows when its first row is mounted.
+
+`Expanded = true` starts the accordion open with no animation at all, and with animation disabled
+(reduced motion) every open and close lands in place.
+
 ## Examples
 
 ```lua

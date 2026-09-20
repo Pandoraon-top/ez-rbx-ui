@@ -129,6 +129,8 @@ Additional motion tokens (the "unfold in, fold out" grammar):
 | `hideDrift` / `popSlide` | `12` / `6` | Pixel drift on window hide / popover slide-in |
 | `dialogRise` / `dialogDrop` | `12` / `8` | Dialog entrance rise / exit drop, in px |
 | `bumpPx` | `2` | Step-feedback nudge, in px |
+| `pulse` | `0.4` | One leg of an attention pulse (a full breath out and back takes twice this), in seconds |
+| `copyRevert` | `1.2` | How long a text box's copy button shows the success check before reverting to the copy glyph, in seconds |
 | `shake` | `{ amp = 3, steps = 4, step = 0.04 }` | Invalid-input shake: amplitude (px), step count, step duration |
 | `cascade` | `{ x = 6, y = 8 }` | Entrance cascade offsets, in px |
 
@@ -142,11 +144,11 @@ The groups below hold every number a component used to hard-code (durations, alp
 
 ### Effect
 
-Drop-shadow and glow geometry. `shadowId` is `""` by default, which keeps shadows **off** until you point it at a 9-slice shadow asset.
+Drop-shadow and glow geometry. `shadowId` points at the one 9-slice sprite every depth layer in the library is drawn from — see [Depth layers](#depth-layers) below.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `shadowId` | `""` | 9-slice shadow image; `""` disables every shadow |
+| `shadowId` | `"rbxassetid://91077512535886"` | 9-slice shadow/glow sprite; `""` disables every shadow and glow |
 | `slice` | `{ x0 = 49, y0 = 49, x1 = 450, y1 = 450 }` | `SliceCenter` of the shadow asset |
 | `window` | `{ spread = 28, offsetY = 6 }` | Window shadow spread and vertical offset, in px |
 | `dialog` | `{ spread = 32, offsetY = 10 }` | Dialog shadow |
@@ -157,6 +159,32 @@ Drop-shadow and glow geometry. `shadowId` is `""` by default, which keeps shadow
 | `lift` | `{ spreadDelta = 8, alphaDelta = -0.12 }` | Extra spread / opacity while a window is dragged or resized |
 | `controlGlow` | `"auto"` | Accent glow on controls; `"auto"` = off on phones |
 | `skeleton` | `{ period = 1.1, rotation = 15 }` | Skeleton shimmer sweep period (s) and band angle (deg) |
+
+#### Depth layers {#depth-layers}
+
+There is only one sprite. `Effect.shadowId` is an uploaded 9-slice image — the source PNG ships in the repo at `assets/shadow-9slice.png` — and **every** shadow and glow in the library is that same sprite, tinted and stretched:
+
+- **Shadows** are the sprite tinted black at the mode's `shadow` alpha, under the window, the floating toggle, a dialog card, a select-box or color-picker popover, a tooltip, and the toast stack (one layer under the front toast, not one per toast).
+- **Glows** are the same sprite tinted with a `Colors` token — the toggle track, the slider handle halo and the floating toggle all use `primary`. A glow rests hidden (`ImageTransparency = 1`) and is tweened up when its control lights: to the mode's `glow` alpha for a toggle switched on and for a slider handle being dragged, and to `Opacity.glowHover` for the floating toggle under a pointer.
+
+Each layer is a *sibling* of the surface it belongs to (never a child — a child would render above its parent's fill), centred on it, grown by `2 × spread` and dropped by `offsetY`. Which pair it uses is the layer's level: `Effect.window`, `.dialog`, `.popover`, `.toast`, `.tooltip` or `.control`. `Effect.lift` is the extra spread and darkening applied while a window is being dragged or resized.
+
+```lua
+-- softer, tighter window shadow; no glow on any control
+Theme = { Effect = { window = { spread = 16, offsetY = 3 }, controlGlow = "off" } }
+```
+
+**Turning it all off.** Set `shadowId` to an empty string and the whole depth system switches off in one move — `Effects.shadow` and `Effects.glow` return `nil`, and each call site skips its layer rather than drawing a flat rectangle:
+
+```lua
+EzUI:CreateWindow({ Theme = { Effect = { shadowId = "" } } })
+```
+
+`controlGlow` is the narrower switch: `"off"` drops the accent glows everywhere while the shadows stay, and the default `"auto"` drops them on phones only (small screens, and no pointer to reveal them).
+
+**`Effect.slice` must match the sprite.** `SliceCenter` names the rectangle of the image that `ScaleType.Slice` is allowed to stretch; the margin outside it is the soft falloff, drawn at its native pixel size in each corner. The shipped sprite is 499 × 499 with a 49 px falloff border, which is exactly what the default `{ x0 = 49, y0 = 49, x1 = 450, y1 = 450 }` describes. If you upload your own sprite, set `slice` to *its* border — a mismatched rectangle stretches or clips the falloff and the shadow reads as a hard edge. `assets/README.md` has the geometry and the upload steps.
+
+**Strength is per-mode, and lives elsewhere.** `Effect` holds only geometry. How dark a shadow is and how strong a glow is come from `MODE_EFFECTS.<mode>.shadow` / `.glow` (`0.5` / `0.72` in dark, `0.8` / `0.8` in light), which is *not* part of the per-window `Theme` merge — see [Per-mode tokens](#per-mode-tokens). `SetMode` re-reads both, so live layers re-darken with the palette.
 
 ### Stroke
 
@@ -171,6 +199,11 @@ Drop-shadow and glow geometry. `shadowId` is `""` by default, which keeps shadow
 | `focusThickness` | `2` | Focus-ring thickness, in px |
 | `panel` | `{ dark = 0.6, light = 0 }` | Content-panel hairline |
 | `search` | `{ dark = 0.8, light = 0.5 }` | Sidebar search-box hairline |
+| `track` | `0.5` | Progress-bar track hairline, so an empty track still reads as a groove |
+| `knob` | `0.7` | Rim around the toggle knob — without it a white knob dissolves into a white ON track |
+| `pulse` | `{ low = 0.2, high = 0.7 }` | The two stroke alphas an attention ring breathes between — `low` is the solid end, `high` the faint one |
+
+`Stroke.pulse` is shared on purpose: a keybind chip waiting for a key and the floating toggle's opt-in attention halo breathe between the same pair (from opposite ends — the chip rests solid, the halo rests faint), so the library asks for attention in one voice. `Motion.pulse` is the period.
 
 ### Opacity
 
@@ -180,14 +213,15 @@ Transparency levels for interaction states and scrims.
 |---|---|---|
 | `hoverWash` / `pressWash` | `0.94` / `0.9` | Hover and press wash on rows and clickable surfaces |
 | `hoverFill` / `pressFill` | `0.12` / `0.2` | Filled (primary) button hover / press |
-| `ghostHover` / `ghostPress` | `0.4` / `0.25` | Ghost and outline button hover / press |
+| `ghostHover` / `ghostPress` | `0.4` / `0.25` | Ghost button hover / press (the `outline` variant uses `hoverFill` / `pressFill`) |
 | `tabHover` / `tabPress` | `0.92` / `0.88` | Sidebar tab hover / press |
 | `optionHover` | `0.6` | Select-box option hover |
 | `rowHover` | `0.94` | Table row hover |
 | `disabled` | `0.5` | Disabled controls |
-| `scrim` | `0.45` | Overlay scrim behind popovers |
+| `scrim` | `0.45` | The wash over a control locked by `SetLocked(b)` or the window's `LockAll()` |
 | `dialogScrim` | `{ dark = 0.5, light = 0.6 }` | Dialog backdrop (per-mode) |
-| `glowHover` | `0.7` | Accent glow at hover |
+| `glowHover` | `0.7` | Floating-toggle glow while the pointer is over it |
+| `flash` | `0.35` | Lift a progress fill starts from when it reaches 100%, fading back to opaque |
 
 ### Acrylic
 
@@ -201,6 +235,53 @@ The frosted window shell.
 | `highlightBand` | `0.45` | Height of the top sheen band, as a fraction of the window |
 | `frost` | `0.12` | Default window `Transparency` when the config key is omitted |
 | `glintFade` | `0.25` | Fade band at each end of the top glint line |
+| `popoverFrost` | `0.04` | Frost behind a select-box or color-picker popover |
+
+A popover is deliberately frosted one step *lighter* than the window shell — `0.04` against `frost`'s `0.12`, so it is the more opaque of the two. A dropdown list sits over the window's own content, and it has to stay readable there.
+
+#### Edge lighting {#edge-lighting}
+
+A frosted surface is lit from above, and two thin things say so. Not every surface takes them: the
+window shell, the select-box dropdown and the color-picker popover get both.
+
+- **A rim on the border.** The surface's `UIStroke` carries one gradient whose transparency runs
+  from `edgeTop` at the top of the surface to `edgeBottom` at the bottom. It *multiplies* the
+  stroke's own alpha (`Stroke.window` on the shell, `Stroke.floating` on a popover), so the
+  hairline is at its brightest along the top edge and fades out toward the bottom rather than
+  ringing the surface evenly. The stroke's colour is never touched — it stays `Colors.border`.
+- **A glint just inside the top edge.** A one-pixel white line along the top of the fill, inset at
+  each end by the surface's own corner radius so it stops before the rounded corners, drawn at
+  `glint` and fading to nothing over `Acrylic.glintFade` (`0.25`) of its length at each end.
+
+A dialog card takes the rim without the glint. It is opaque rather than frosted, so it has no
+frost layers to hang a glint line on, but its border is still lit along the top like every other
+surface.
+
+The three values are per-mode and live in `MODE_EFFECTS`, not in the token tables above — see
+[Per-mode tokens](#per-mode-tokens):
+
+| | `dark` | `light` |
+|---|---|---|
+| `edgeTop` | `0.0` — the brightest end | `0.2` |
+| `edgeBottom` | `0.65` | `0.7` |
+| `glint` | `0.86` | `1` — fully transparent, so the line is hidden outright |
+
+So the two modes read differently on purpose. Dark mode gets a bright top rim and a visible glint;
+light mode dims the whole rim and drops the glint altogether — at `glint = 1` the line is not just
+invisible, it is hidden outright, since a white hairline on a near-white surface has nothing to
+add. Both are re-painted on `SetMode` and `SetAccent`, so a live window picks up the new mode's
+values.
+
+```lua
+-- a flatter shell in dark mode: an even rim and no glint at all
+local fx = EzUI.Theme.MODE_EFFECTS.dark
+fx.edgeTop, fx.edgeBottom, fx.glint = 0.5, 0.5, 1
+
+local Window = EzUI:CreateWindow({ Title = "My Hub" })
+```
+
+Set these before creating the window. They are read when a surface is painted, so a change made
+afterwards only shows up on the next repaint — a `SetMode`, `SetAccent` or `SetTransparency` call.
 
 ### Scrollbar
 
@@ -208,6 +289,20 @@ The frosted window shell.
 |---|---|---|
 | `imageId` | `""` | Flat scrollbar image; `""` keeps the engine default |
 | `alpha` | `0.35` | Scrollbar transparency |
+
+**One rail, everywhere.** Every scrolling surface in the library is painted from this group plus
+`Sizes.scrollbar` — the tab sidebar, the tab content panel, a [Table](/controls/table) body and a
+[SelectBox](/controls/selectbox) dropdown list all take the same thickness (`4` px), the same
+`Colors.border` tint and the same `alpha`. A table scrolling inside the content panel it sits in
+therefore reads as one surface with two rails on it, not as two surfaces with two different rails.
+
+That also means there is one place to change it. Retune `Sizes.scrollbar` or `Scrollbar.alpha` and
+all four move together; point `imageId` at a flat image and all four take it (left at `""`, they
+keep the engine's own bar images). The tint is the `border` token, so every rail is re-painted
+on `SetMode` and `SetAccent` along with the rest of the chrome.
+
+This is the scrollbar only. Control row heights were **not** unified with it: each control still
+sizes itself to the content it holds, and there is no row-height token.
 
 ### Sizes
 
@@ -219,12 +314,13 @@ Pixel geometry that used to be hard-coded per component.
 | `iconButton` | `26` | Icon-button hit size with a pointer |
 | `touchHit` | `44` | Icon-button hit size on touch |
 | `scrollbar` | `4` | Scrollbar thickness |
-| `progress` | `8` | Progress-bar track height |
+| `progress` | `8` | Minimum width of a progress-bar fill, so a tiny value still renders as a nub |
 | `sliderHit` | `24` | Slider hit-strip height |
 | `chip` | `22` | Keybind chip / tag height |
 | `knob` | `20` | Toggle knob diameter |
 | `tagMeasureFudge` | `1.08` | Width multiplier for measured Medium-weight tag text |
 | `dragKeep` | `40` | Pixels of the window that must stay on-screen when dragged |
+| `dragThreshold` | `6` | Travel, in px, before a press on the floating toggle counts as a drag instead of a click |
 | `titleBar` / `titleBarTall` | `40` / `56` | Title-bar height without / with a subtitle or image |
 | `resizeGrip` / `resizeGripInset` | `12` / `4` | Resize-grip glyph size and inset |
 | `splitGap` | `12` | Resizable split gap |
@@ -284,6 +380,10 @@ Two kinds of values flip with the colour mode:
 | `inset` | `rgb(196,196,206)` | `rgb(236,236,240)` |
 | `shadow` | `0.5` | `0.8` |
 | `glow` | `0.72` | `0.8` |
+
+`edgeTop`, `edgeBottom` and `glint` are the three values behind
+[edge lighting](#edge-lighting); `shadow` and `glow` are the strengths every
+[depth layer](#depth-layers) is drawn at.
 
 ### Helpers
 
