@@ -1254,43 +1254,68 @@ h.describe("window", function()
     h.expect(w.Main.BackgroundTransparency).toBe(R.Theme.Acrylic.frost)
     R.Animate.useMotion(nil)
   end)
-  h.it("the entrance is that same unfold, one beat slower (Back/Out over Motion.enter)", function()
+  -- The one rule the window motion must never break again: nothing animates Main's UIScale. A
+  -- UIScale tween re-measures every visible descendant (sizes, layouts, wrapped text) on every
+  -- frame and fires every AbsoluteSize handler in the tree each frame -- on a full hub that was the
+  -- frame-rate collapse users reported on execute and on every open. Translation only.
+  h.it("opening, hiding and closing never tween the window's UIScale", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    h.mock.resetTweens()
+    local w = shadowWin(R, screen, { FloatingToggle = true })
+    local sc = w.Main:FindFirstChildOfClass("UIScale")
+    local sh = w.Gui:FindFirstChild("WindowShadow")
+    w:Hide(); w:Show(); w:Close()
+    h.expect(#h.mock.tweensFor(sc)).toBe(0)
+    h.expect(#h.mock.tweensFor(sh:FindFirstChildOfClass("UIScale"))).toBe(0)
+    h.expect(sc.Scale).toBe(1)
+    R.Animate.useMotion(nil)
+  end)
+  h.it("the entrance rises into place over Motion.enter while the cover clears", function()
     local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
     h.mock.resetTweens()
     local w = R.Window.new({ Title = "M", Parent = screen, Transparency = 0.2 })
-    local sc = w.Main:FindFirstChildOfClass("UIScale")
-    local tws = h.mock.tweensFor(sc)
-    h.expect(#tws).toBe(1)
-    h.expect(tws[1].Info.Time).toBe(R.Theme.Motion.enter)
-    h.expect(tws[1].Info.EasingStyle.Name).toBe("Back")
-    h.expect(tws[1].Info.EasingDirection.Name).toBe("Out")
-    h.expect(sc.Scale).toBe(1)
-    h.expect(w.Main.BackgroundTransparency).toBe(0.2)
+    local rise
+    for _, tw in ipairs(h.mock.tweensFor(w.Main)) do if tw.Goal.Position then rise = tw end end
+    h.expect(rise ~= nil).toBeTruthy()
+    h.expect(rise.Info.Time).toBe(R.Theme.Motion.enter)
+    h.expect(rise.Info.EasingStyle.Name).toBe("Quint")        -- a clean deceleration, no overshoot
+    h.expect(rise.Info.EasingDirection.Name).toBe("Out")
+    local cover = w.Main:FindFirstChild("RevealCover")
+    local clear = h.mock.tweensFor(cover)[1]
+    h.expect(clear.Goal.BackgroundTransparency).toBe(1)
+    h.expect(cover.Visible).toBe(false)                       -- hidden again once the window is up
+    h.expect(w.Main.BackgroundTransparency).toBe(0.2)         -- the glass is at rest from frame one
     h.expect(w.Main:FindFirstChildOfClass("UIStroke").Transparency).toBe(R.Theme.Stroke.window)
   end)
-  h.it("Show unfolds over Motion.release; Close folds Back/In over Motion.base to transparent", function()
+  h.it("Show rises over Motion.release; Close sinks over Motion.base under the cover", function()
     local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
     local w = R.Window.new({ Title = "M", Parent = screen })
-    local sc = w.Main:FindFirstChildOfClass("UIScale")
+    local rest = w.Main.Position
     w:Hide()
     h.mock.resetTweens()
     w:Show()
-    local up = h.mock.tweensFor(sc)[1]
+    local up
+    for _, tw in ipairs(h.mock.tweensFor(w.Main)) do if tw.Goal.Position then up = tw end end
     h.expect(up.Info.Time).toBe(R.Theme.Motion.release)
-    h.expect(up.Info.EasingStyle.Name).toBe("Back")
-    h.expect(up.Info.EasingDirection.Name).toBe("Out")
-    h.expect(up.Goal.Scale).toBe(1)
+    h.expect(up.Info.EasingStyle.Name).toBe("Quint")
+    h.expect(up.Goal.Position.Y.Offset).toBe(rest.Y.Offset)   -- lands back where it rested
+    h.expect(w.Main.Position.Y.Offset).toBe(rest.Y.Offset)
     local gui = w.Gui
+    local cover = w.Main:FindFirstChild("RevealCover")
     h.mock.resetTweens()
     w:Close()
-    local down = h.mock.tweensFor(sc)[1]
-    h.expect(down.Info.Time).toBe(R.Theme.Motion.base)          -- not the 0.12 hiccup
-    h.expect(down.Info.EasingStyle.Name).toBe("Back")
+    local down
+    for _, tw in ipairs(h.mock.tweensFor(w.Main)) do if tw.Goal.Position then down = tw end end
+    h.expect(down.Info.Time).toBe(R.Theme.Motion.base)        -- not the 0.12 hiccup
     h.expect(down.Info.EasingDirection.Name).toBe("In")
-    h.expect(down.Goal.Scale).toBeCloseTo(R.Theme.Motion.exitScale)
-    h.expect(w.Main.BackgroundTransparency).toBe(1)             -- dissolves instead of blinking out
+    h.expect(down.Goal.Position.Y.Offset).toBe(rest.Y.Offset + R.Theme.Motion.hideDrift)
+    h.expect(h.mock.tweensFor(cover)[1].Goal.BackgroundTransparency).toBe(0)  -- contents dissolve
     h.expect(gui._destroyed).toBeTruthy()
   end)
+  -- Not tested here: a Show landing while a Hide's drift is still in flight. The mock completes
+  -- every tween synchronously, so a fold can never be caught part-way, and a test that pretended
+  -- to would pass whatever the code did. window.lua records the resting position (restingPos) for
+  -- exactly that case; it needs a real client to exercise.
   h.it("a stale fold cannot hide a window that was shown again (generation guard)", function()
     local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
     local w = R.Window.new({ Title = "M", Parent = screen })
