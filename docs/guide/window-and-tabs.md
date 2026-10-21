@@ -312,11 +312,11 @@ as it was.
 down: `OnClose` runs, the config is saved, toasts and overlays are cleared, every connection is
 disconnected and the `ScreenGui` is destroyed.
 
-A closed window cannot be reopened. The built-in confirm dialog says *"You can reopen it with the
-toggle key or the floating button"* — that is not true of closing: the toggle-key connection and
-the floating button are destroyed with everything else. To get a window back, call
-`EzUI:CreateWindow` again. If you want the player to be able to bring the window back, wire your UI
-to `Minimize()` and leave `Close()` for shutting the script down.
+A closed window cannot be reopened: the toggle-key connection and the floating button are
+destroyed with everything else, and the built-in confirm dialog tells the player so (and points
+them at the minimize button). To get a window back, call `EzUI:CreateWindow` again. If you want
+the player to be able to bring the window back, wire your UI to `Minimize()` and leave `Close()`
+for shutting the script down.
 
 ```lua
 EzUI:CreateWindow({

@@ -101,9 +101,9 @@ return function(window)
     "the floating toggle on the left edge and hands off to it as it lands: the window literally " ..
     "turns into the button. RightControl runs the same fold and unfold. The x is a different " ..
     "gesture — it asks to confirm first (that dialog is its own motion demo) and then dissolves " ..
-    "the window in place rather than drifting. Read that confirm dialog with suspicion: it " ..
-    "offers to reopen the window with the toggle key or the floating button, and it cannot — " ..
-    "Close destroys the GUI and every handler with it. Use minimize while you are still touring.")
+    "the window in place rather than drifting. As the dialog says, that is for good: Close " ..
+    "destroys the GUI, the floating toggle and RightControl with it. Use minimize while you " ..
+    "are still touring.")
 
   tab:AddSection("The floating toggle")
   tab:AddParagraph(

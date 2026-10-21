@@ -1558,7 +1558,10 @@ function Window.new(config)
 
   onClosePressed = function()
     if config.ConfirmClose == false then api:Close(); return end
-    api:Dialog({ Title = "Close window?", Message = "You can reopen it with the toggle key or the floating button.",
+    -- Close is permanent (the toggle key and the floating button go with it), so say so, and point
+    -- at the one button that keeps the window around.
+    api:Dialog({ Title = "Close window?",
+      Message = "This closes it for good; run the script again to get it back. To just hide it, minimize it with the – button next to the X.",
       Buttons = {
         { Text = "Cancel", Variant = "secondary" },
         { Text = "Close", Variant = "destructive", Callback = function() api:Close() end },
