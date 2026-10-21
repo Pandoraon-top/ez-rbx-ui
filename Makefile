@@ -77,6 +77,10 @@ showcase: build
 	@# loadfile check could not catch either, which is what scripts/smoke_bundle.lua is for.
 	@lua-bundler -e $(INPUT_FILE) -o $(DIST_DIR)/ez-rbx-ui.lua
 	@lua-bundler -e $(SHOWCASE_INPUT) -o $(SHOWCASE_DIST)
+	@# Comments and indentation out, verified: slim.py writes nothing unless PUC luac compiles the
+	@# result to byte-identical bytecode, line numbers included.
+	@python3 scripts/slim.py $(DIST_DIR)/ez-rbx-ui.lua
+	@python3 scripts/slim.py $(SHOWCASE_DIST)
 	@lua -e "assert(loadfile('$(DIST_DIR)/ez-rbx-ui.lua')); assert(loadfile('$(SHOWCASE_DIST)')); print('dist bundles ok')"
 	@echo "Raw URL: https://raw.githubusercontent.com/Pandoraon-top/ez-rbx-ui/feat/visual-polish/$(SHOWCASE_DIST)"
 
