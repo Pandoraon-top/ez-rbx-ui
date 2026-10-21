@@ -193,7 +193,7 @@ function Window.new(config)
   -- title logo above all -- would run its write inline on a thread that may not hold the
   -- capability. Creating the root here costs one transparent frame and makes the probe an answer
   -- for the whole life of the window.
-  Overlay.get(gui)
+  Overlay.get(gui, mountCtx)
 
   -- AnchorPoint (0.5, 0.5) puts the UIScale pivot in the middle, so every scale animation
   -- (entrance, Show, Hide, Close, SetUIScale) grows from the centre instead of the top-left
@@ -221,9 +221,11 @@ function Window.new(config)
   local mainStroke = main:FindFirstChildOfClass("UIStroke")
   local winScale = Create("UIScale", { Scale = 1, Parent = main })
   local userScale = 1
-  -- Drop shadow: a SIBLING of Main under the ScreenGui with a LOWER ZIndex (Main is 1, the
-  -- overlay root 1000) -- under ZIndexBehavior.Sibling a child would render above its parent's
-  -- fill. It carries its own UIScale so it can follow the window scale about the same centre.
+  -- Drop shadow: a SIBLING of Main under the ScreenGui with a LOWER ZIndex (Main is 1) -- under
+  -- ZIndexBehavior.Sibling a child would render above its parent's fill. The overlay is not in
+  -- this ScreenGui any more (see Overlay.get): it draws above the window by DisplayOrder, and
+  -- Overlay.Z only orders things inside the overlay. The shadow carries its own UIScale so it
+  -- follows SetUIScale about the same centre.
   -- nil until theme.Effect.shadowId is verified in Studio, so every use below tolerates nil.
   local shadow = Effects.shadow(gui, theme, { name = "WindowShadow", level = "window", zIndex = 0 })
   local shadowScale = shadow and Create("UIScale", { Scale = 1, Parent = shadow })
@@ -723,9 +725,9 @@ function Window.new(config)
     if sbLayout then maid:Give(sbLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(reanchorIndicator)) end
   end
 
-  Overlay.get(gui)
+  Overlay.get(gui, mountCtx)
 
-  local api = { Gui = gui, Main = main, ContentScroll = contentScroll, Overlay = Overlay.get(gui), Config = cfg, Maid = maid }
+  local api = { Gui = gui, Main = main, ContentScroll = contentScroll, Overlay = Overlay.get(gui, mountCtx), Config = cfg, Maid = maid }
 
   local tabEntries = {}
   local groups = {}
@@ -1194,7 +1196,7 @@ function Window.new(config)
     local F = S.fab
     fab = Create("ImageButton", { Name = "FloatingToggle", AutoButtonColor = false, BackgroundTransparency = 0,
       Visible = false, Size = UDim2.new(0, F.size, 0, F.size), Position = UDim2.new(0, F.margin, 1, -(F.size + F.margin)),
-      ZIndex = Overlay.Z.fab, Parent = Overlay.get(gui) })
+      ZIndex = Overlay.Z.fab, Parent = Overlay.get(gui, mountCtx) })
     fab:SetAttribute("FabType", kind)
     fabScale = Create("UIScale", { Scale = 1, Parent = fab })
     local fabRadius   -- the corner this FAB was built with; the attention ring follows it
@@ -1247,7 +1249,7 @@ function Window.new(config)
     -- parented to the FAB would wash out its whole face and the glyph with it. Both are nil
     -- until Effect.shadowId is verified in Studio (the glow also on phones), and every Effects
     -- helper tolerates nil, so the geometry below needs no guard of its own.
-    local overlayRoot = Overlay.get(gui)
+    local overlayRoot = Overlay.get(gui, mountCtx)
     local fabShadow = Effects.shadow(overlayRoot, theme, { name = "FabShadow", level = "popover", zIndex = Overlay.Z.fab - 2 })
     local fabGlow = Effects.glow(overlayRoot, theme, theme.Colors.primary, "control", Overlay.Z.fab - 1, "FabGlow")
     if fabShadow then fabMaid:Give(fabShadow) end
@@ -1339,7 +1341,7 @@ function Window.new(config)
     -- they stay wherever the user drops them (no snap), so this is a no-op for them.
     fabSnap = function()
       if kind ~= "simple" then return end
-      local vp = Overlay.get(gui).AbsoluteSize
+      local vp = Overlay.get(gui, mountCtx).AbsoluteSize
       if not vp or vp.X <= 0 then return end
       local w2 = (fabFullSize and fabFullSize.X.Offset) or F.simple
       local cx = fab.Position.X.Scale * vp.X + fab.Position.X.Offset + w2 / 2
@@ -1673,7 +1675,7 @@ function Window.new(config)
       if Notif then Notif.clearAll() end
       maid:DoCleanup()       -- disconnects EVERY connection (drag, resize, toggle-key, close, ...)
       gui:Destroy()
-      Overlay.reset()
+      Overlay.release(gui)   -- a no-op when another window owns the overlay layer
     end })
   end
   function api.Destroy() api:Close() end

@@ -2,6 +2,8 @@
 local Overlay = {}
 local Create, Mount
 local root = nil
+local layer = nil   -- the overlay's own ScreenGui when it has one (see Overlay.get); nil otherwise
+local owner = nil   -- the window gui that created `layer`: only its teardown may destroy it
 local catcher = nil -- full-screen click-catcher behind open popovers (closes them on outside click)
 local popovers = {} -- set of close functions for open popovers (dropdowns, color pickers)
 
@@ -55,17 +57,56 @@ function Overlay.peek()
   return nil
 end
 
-function Overlay.get(parentGui)
+-- Roblox caches each ScreenGui's appearance and recomputes ALL of it on the frame after ANY
+-- descendant is added, removed or changes a property (devforum "Static UI Performance
+-- Improvements"; the ScreenGui reference says the same). Everything in the overlay is the moving
+-- part of the UI -- toasts counting down, tooltips fading, dropdowns opening, the FAB's pulse --
+-- and while it shared the window's ScreenGui every one of those frames re-rendered the whole hub
+-- behind it. Roblox's own advice is to put mostly-static and mostly-dynamic UI in separate Guis,
+-- so a MOUNTED window gets a sibling ScreenGui drawn one DisplayOrder above it, and the window's
+-- cache survives while the overlay animates. A detached gui (no parent to put a sibling in) keeps
+-- the root inside it, as before.
+--   ctx  the window's mount context: its protect function (syn.protect_gui & co) covers the
+--        layer too, so the overlay is no easier to find than the window
+local function ownLayer(parentGui, ctx)
+  local ok, host, order = pcall(function() return parentGui.Parent, parentGui.DisplayOrder end)
+  if not ok or host == nil then return nil end
+  order = tonumber(order) or 0
+  local gui = Create("ScreenGui", {
+    Name = anon("OverlayLayer"),
+    ResetOnSpawn = false,
+    ZIndexBehavior = Enum.ZIndexBehavior and Enum.ZIndexBehavior.Sibling or nil,
+    DisplayOrder = order + 1,
+  })
+  -- same insets as the window, so popover maths in window coordinates lands on the same pixels
+  pcall(function() gui.IgnoreGuiInset = parentGui.IgnoreGuiInset end)
+  -- tagged like the window's gui: a re-execute's Mount.finalize sweeps a stale layer up with it
+  pcall(function() gui:SetAttribute("__ezui", true) end)
+  gui.Parent = host
+  if ctx and ctx.protect and not ctx.studio then pcall(ctx.protect, gui) end
+  -- The layer is no longer inside the window, so the window's own Destroy cannot reach it. A hub
+  -- that tears its window down directly (w.Gui:Destroy() rather than Window:Close()) would leave
+  -- the FAB and any toast on screen; follow the window out instead. Destroying fires on the
+  -- destroying thread, so the capability is the caller's.
+  pcall(function()
+    parentGui.Destroying:Connect(function() if layer == gui then Overlay.reset() end end)
+  end)
+  return gui
+end
+
+function Overlay.get(parentGui, ctx)
   -- Roblox-safe liveness check: reading a non-existent member (e.g. a mock-only
   -- "_destroyed" flag) THROWS on real Instances. A destroyed Instance has Parent=nil.
   if root and root.Parent ~= nil then return root end
+  layer = ownLayer(parentGui, ctx)
+  owner = layer and parentGui or nil
   root = Create("Frame", {
     Name = anon("OverlayRoot"),
     BackgroundTransparency = 1,
     Size = UDim2.new(1, 0, 1, 0),
     ZIndex = Overlay.Z.catcher,
     ClipsDescendants = false,
-    Parent = parentGui,
+    Parent = layer or parentGui,
   })
   return root
 end
@@ -132,8 +173,19 @@ function Overlay.pushDialog() dialogDepth = dialogDepth + 1; return dialogDepth 
 function Overlay.popDialog() dialogDepth = math.max(0, dialogDepth - 1); return dialogDepth end
 function Overlay.dialogDepth() return dialogDepth end
 
+-- A window's teardown. The overlay is shared by every window in the process, but its layer
+-- belongs to the window that created it: another window closing must not take the FAB and toasts
+-- of one still on screen (before the layer existed, the root sat inside its creator's gui, where
+-- no other window's Close could reach it). A window that does not own the layer leaves the
+-- overlay exactly as it is.
+function Overlay.release(windowGui)
+  if layer and owner ~= windowGui then return end
+  Overlay.reset()
+end
+
 function Overlay.reset()
-  root = nil; catcher = nil; popovers = {}
+  if layer then pcall(function() layer:Destroy() end) end
+  layer = nil; owner = nil; root = nil; catcher = nil; popovers = {}
   uiScale = DEFAULT_SCALE; dialogDepth = 0
 end
 

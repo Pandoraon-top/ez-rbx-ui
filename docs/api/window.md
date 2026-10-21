@@ -645,6 +645,6 @@ stealth at runtime (random `ScreenGui` name, `cloneref`, dedupe of prior EzUI ro
 | `Parent` | `Instance` | auto | Manual override; bypasses the whole chain. |
 | `Stealth` | `bool` | `true` at runtime | Controls naming only. `false` → readable name `"EzUI"`. Dedupe / `protect` / service `cloneref` are always feature-detected-on. |
 | `GuiName` | `string` | random / `"EzUI"` | Force a specific `ScreenGui` name. |
-| `DisplayOrder` | `number` | `1000000` | `ScreenGui` render order (higher renders above game UI). |
+| `DisplayOrder` | `number` | `1000000` | `ScreenGui` render order (higher renders above game UI). Toasts, dropdowns, tooltips and the floating button live in a second `ScreenGui` at `DisplayOrder + 1`, so their animations never make Roblox re-render the window. |
 
 In Roblox Studio the name stays the readable `"EzUI"` for easy debugging.
