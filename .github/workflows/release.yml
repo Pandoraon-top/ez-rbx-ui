@@ -26,7 +26,8 @@ jobs:
 
       - name: Install Lua + lua-bundler
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
+          # lua5.4 for luac5.4: scripts/slim.py proves its output compiles to identical bytecode
+          sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1 lua5.4
           sudo ln -sf /usr/bin/lua5.1 /usr/local/bin/lua
           curl -fsSL https://alfin-efendy.github.io/lua-bundler/install.sh | sudo bash
           lua-bundler --version
@@ -39,6 +40,10 @@ jobs:
           # die the same way ("attempt to index global '_0x...'"), and level 1 only strips comments:
           # function names and error strings survive it, so it protects nothing worth the risk.
           lua-bundler --entry ./main.lua --output ./release/ez-rbx-ui.lua
+          # Comments and indentation out (about 40% of the bytes every client compiles on execute).
+          # Not obfuscation: slim.py refuses to write unless luac5.4 compiles the result to
+          # byte-identical bytecode, line numbers included.
+          python3 scripts/slim.py ./release/ez-rbx-ui.lua
 
       - name: Build readable example + stress bundles
         run: make examples

@@ -57,12 +57,19 @@ if [ "$WHAT" = "all" ] || [ "$WHAT" = "bundle" ]; then
   if "$LUA" scripts/verify_bundle.lua >/dev/null 2>&1; then ok "verify_bundle (strict mock: controls, re-skin, graceful close)"
   else bad "verify_bundle failed:"; "$LUA" scripts/verify_bundle.lua 2>&1 | head -3 | sed 's/^/      /'; fi
 
-  if "$BUNDLER" -e ./main.lua -o ./dist/ez-rbx-ui.lua >/dev/null 2>&1 &&
-     "$LUA" scripts/smoke_bundle.lua ./dist/ez-rbx-ui.lua >/dev/null 2>&1; then ok "dist/ez-rbx-ui.lua builds a window"
+  # dist/ is what clients compile on every execute: slim.py drops comments and indentation and
+  # refuses to write unless PUC luac compiles the result to byte-identical bytecode, line info
+  # included. The smoke then runs the slimmed file, the one that actually ships.
+  if "$BUNDLER" -e ./main.lua -o ./dist/ez-rbx-ui.lua >/dev/null 2>&1; then
+    if slimmed="$(python3 scripts/slim.py ./dist/ez-rbx-ui.lua 2>&1)"; then ok "${slimmed#slim: }"
+    else bad "slim refused dist/ez-rbx-ui.lua:"; echo "$slimmed" | sed 's/^/      /'; fi
+  else bad "bundler failed on dist/ez-rbx-ui.lua"; fi
+  if "$LUA" scripts/smoke_bundle.lua ./dist/ez-rbx-ui.lua >/dev/null 2>&1; then ok "dist/ez-rbx-ui.lua builds a window"
   else bad "dist bundle does not run:"; "$LUA" scripts/smoke_bundle.lua ./dist/ez-rbx-ui.lua 2>&1 | head -3 | sed 's/^/      /'; fi
 
-  if "$BUNDLER" -e ./example/showcase.lua -o ./dist/showcase.lua >/dev/null 2>&1; then ok "dist/showcase.lua built"
-  else bad "showcase bundle failed"; fi
+  if "$BUNDLER" -e ./example/showcase.lua -o ./dist/showcase.lua >/dev/null 2>&1 &&
+     python3 scripts/slim.py ./dist/showcase.lua >/dev/null 2>&1; then ok "dist/showcase.lua built and slimmed"
+  else bad "showcase bundle failed:"; python3 scripts/slim.py ./dist/showcase.lua 2>&1 | head -3 | sed 's/^/      /'; fi
 fi
 
 if [ "$WHAT" = "all" ]; then
