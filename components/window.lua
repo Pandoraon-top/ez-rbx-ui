@@ -851,34 +851,53 @@ function Window.new(config)
   end
 
   -- Show, Hide, the entrance and Close are one gesture at different speeds, so ONE local drives
-  -- every layer together: the window scale, its background, the shell hairline and the drop
-  -- shadow (which carries its own UIScale, pivoting about the same centre).
-  --   on    true = unfold (grow to rest), false = fold (shrink to Motion.exitScale)
+  -- every layer together: the window's position, the cover that fades its contents, the shell
+  -- hairline and the drop shadow.
+  --   on    true = arrive (cover clears), false = leave (cover closes over the contents)
   --   dur   a Motion token name
-  --   opts  style/dir (default Back/Out unfolding, Quart/In folding), bg (a BackgroundTransparency
-  --         goal), drift (a Position goal tweened in parallel, shadow included), onDone
+  --   opts  style/dir (default Quint/Out arriving, Quart/In leaving), bg (a BackgroundTransparency
+  --         goal), to (Main's Position goal, shadow included; defaults to where it is), onDone
   local hideGen = 0  -- bumped by every Show/Hide/Close: a stale fold must not hide a live window
+  -- The window moves by TRANSLATION ONLY. It used to unfold through Main's UIScale, and a UIScale
+  -- tween makes the engine re-measure every visible descendant -- sizes, AutomaticSize, list
+  -- layouts, wrapped text -- on every frame of the tween, and fires every AbsoluteSize handler in
+  -- the tree each frame too. On a full hub that was the frame-rate collapse users saw on execute
+  -- and on every open. Moving Main only translates the subtree, which re-lays nothing out, and the
+  -- fade comes from ONE cover frame instead of from every element. winScale now only ever holds the
+  -- user's own SetUIScale value, written once, never animated.
+  local function offsetY(pos, dy) return UDim2.new(pos.X.Scale, pos.X.Offset, pos.Y.Scale, pos.Y.Offset + dy) end
+  local restingPos   -- where a Hide in flight will put the window back; nil when nothing is folding
+  local function shadowAt(pos) return offsetY(pos, theme.Effect.window.offsetY) end
+
+  -- A sheet in the window's own colour laid over everything it contains. Fading it is how the
+  -- window appears to fade in or out, for the price of a single transparency tween. Not Active, so
+  -- it never sinks input, and hidden at rest so it costs nothing while the window is in use.
+  local cover = Create("Frame", { Name = "RevealCover", BackgroundColor3 = theme.Colors.background,
+    BackgroundTransparency = 1, BorderSizePixel = 0, Active = false, Visible = false, ZIndex = 1000,
+    Size = UDim2.new(1, 0, 1, 0), Parent = main, Create.corner(theme.Radius.window) })
+
   local function materialise(on, dur, opts)
     opts = opts or {}
-    local style = opts.style or (on and Animate.EASING.pop or Animate.EASING.exit)
+    -- Quint/Quart, never Back: an overshoot is a second motion on top of the first, which is what
+    -- reads as jitter on a window, and on a transparency it leaves the 0..1 range
+    local style = opts.style or (on and Animate.EASING.enter or Animate.EASING.exit)
     local dir = opts.dir or (on and Animate.DIR.Out or Animate.DIR.In)
-    local goal = on and userScale or userScale * theme.Motion.exitScale
     -- the hairline and the shadow lead the fold out and trail the unfold back in
     local fade = on and "base" or "fast"
     if mainStroke then Animate.to(mainStroke, fade, { Transparency = on and strokeRest() or 1 }) end
     if shadow then Animate.to(shadow, fade, { ImageTransparency = on and shadowAlpha(lifted) or 1 }) end
-    -- Quart, never the scale's Back: an overshoot on a transparency leaves the 0..1 range
     if opts.bg ~= nil then Animate.to(main, dur, { BackgroundTransparency = opts.bg }, Animate.EASING.exit, dir) end
-    if opts.drift then
-      Animate.to(main, dur, { Position = opts.drift }, style, dir)
-      if shadow then -- mirror geometry = the same Position one offsetY lower
-        local g, off = opts.drift, theme.Effect.window.offsetY
-        Animate.to(shadow, dur, { Position = UDim2.new(g.X.Scale, g.X.Offset, g.Y.Scale, g.Y.Offset + off) }, style, dir)
-      end
-    end
-    if shadowScale then Animate.to(shadowScale, dur, { Scale = goal }, style, dir) end
+    -- the contents dissolve in or out under the cover; it hides itself again once the window is up
+    cover.BackgroundColor3 = theme.Colors.background
+    cover.Visible = true
+    cover.BackgroundTransparency = on and 0 or 1
+    Animate.toThen(cover, dur, { BackgroundTransparency = on and 1 or 0 }, function()
+      if on then cover.Visible = false end
+    end, style, dir)
+    local goal = opts.to or main.Position
+    if shadow then Animate.to(shadow, dur, { Position = shadowAt(goal) }, style, dir) end
     -- last: under the synchronous test mock every tween above has landed before onDone runs
-    Animate.toThen(winScale, dur, { Scale = goal }, opts.onDone, style, dir)
+    Animate.toThen(main, dur, { Position = goal }, opts.onDone, style, dir)
   end
 
   function api:Show()
@@ -889,10 +908,13 @@ function Window.new(config)
     Safe.mutate(function()
       if gen ~= hideGen then return end  -- superseded while we waited for a capability context
       main.Visible = true
-      winScale.Scale = userScale * theme.Motion.exitScale
-      if shadowScale then shadowScale.Scale = winScale.Scale end
+      -- A Show that interrupts a Hide finds Main part-way along its drift; the resting position
+      -- the Hide recorded is where the window belongs, not wherever the drift had reached.
+      local rest = restingPos or main.Position
+      restingPos = nil
+      main.Position = offsetY(rest, theme.Motion.hideDrift)
       syncShadow()
-      materialise(true, "release", { bg = transp })
+      materialise(true, "release", { to = rest })
       -- 3.2: the window is on screen, so the FAB has nothing left to ask for -- even when AutoHide
       -- is off and the button stays put. INSIDE the mutate: stopping the ring writes a UIStroke
       -- under the protected overlay root, which throws on a caller thread without the GUI
@@ -909,18 +931,18 @@ function Window.new(config)
     Safe.mutate(function()
       if gen ~= hideGen then return end
       local restPos = main.Position
+      restingPos = restPos
       -- never drift while the title bar is being dragged: that gesture owns Position
       local drift = (not dragging) and driftGoal(restPos) or nil
       materialise(false, "exit", {
-        drift = drift,
+        to = drift or restPos,
         onDone = function()
           -- the drift is transient: put the window back, but only if nothing else moved it in
           -- the meantime (a drag started mid-fold would already own Position)
           if drift and main.Position == drift then main.Position = restPos; syncShadow() end
           if gen ~= hideGen then return end  -- a Show raced the fold: it owns Visible now
+          restingPos = nil
           main.Visible = false
-          winScale.Scale = userScale
-          if shadowScale then shadowScale.Scale = userScale end
           if showFab then showFab() end  -- the pop-in belongs to the fold's completion
         end,
       })
@@ -1619,13 +1641,16 @@ function Window.new(config)
     if shadowScale then shadowScale.Scale = userScale end
     paintShadow()
   else
-    -- entrance: the same unfold as Show, one beat slower ('enter')
-    winScale.Scale = userScale * theme.Motion.exitScale
-    main.BackgroundTransparency = 1
+    -- entrance: the same rise as Show, one beat slower ('enter'). The glass is at rest from the
+    -- first frame -- the cover supplies the fade -- so nothing reads as content floating on a
+    -- clear window while the background catches up.
+    local rest = main.Position
+    main.BackgroundTransparency = transp
+    main.Position = offsetY(rest, theme.Motion.hideDrift)
     if mainStroke then mainStroke.Transparency = 1 end
     if shadow then shadow.ImageTransparency = 1 end
-    if shadowScale then shadowScale.Scale = winScale.Scale end
-    materialise(true, "enter", { bg = transp })
+    syncShadow()
+    materialise(true, "enter", { to = rest })
     entranceCascade()   -- 3.6: the contents arrive after the shell, not with it
   end
 
@@ -1637,9 +1662,10 @@ function Window.new(config)
     closed = true
     visible = false
     hideGen = hideGen + 1
-    -- the same fold as Hide, but a beat slower ('base', not the hiccup-fast 0.12) and all the way
-    -- to transparent -- the window dissolves instead of blinking out
-    materialise(false, "base", { style = Animate.EASING.pop, dir = Animate.DIR.In, bg = 1, onDone = function()
+    -- the same fold as Hide, a beat slower ('base', not the hiccup-fast 0.12): the cover dissolves
+    -- the contents while the window sinks, instead of the GUI blinking out
+    local rest = restingPos or main.Position
+    materialise(false, "base", { to = offsetY(rest, theme.Motion.hideDrift), onDone = function()
       if config.OnClose then pcall(config.OnClose) end
       if closeCallback then pcall(closeCallback) end
       if cfg then pcall(function() cfg:Save() end) end
