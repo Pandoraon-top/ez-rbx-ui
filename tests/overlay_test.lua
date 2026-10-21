@@ -12,6 +12,92 @@ local function rootWithViewport(w, ht)
 end
 
 h.describe("overlay", function()
+  -- Roblox caches each ScreenGui's appearance and recomputes ALL of it the frame after ANY
+  -- descendant changes (Static UI Performance Improvements, devforum 222557, and the ScreenGui
+  -- reference). Toasts count down, tooltips fade, dropdowns open: if they share the window's
+  -- ScreenGui, every one of those frames re-renders the whole hub. Their own ScreenGui keeps the
+  -- window's cache intact while they move.
+  h.it("a mounted window gui gets the overlay in a sibling ScreenGui drawn just above it", function()
+    Overlay.reset()
+    local host = h.roblox.Instance.new("Folder")
+    local gui = h.roblox.Instance.new("ScreenGui")
+    gui.DisplayOrder = 50; gui.Parent = host
+    local root = Overlay.get(gui)
+    local layer = root.Parent
+    h.expect(layer ~= gui).toBeTruthy()
+    h.expect(layer.ClassName).toBe("ScreenGui")
+    h.expect(layer.Parent).toBe(host)
+    h.expect(layer.DisplayOrder).toBe(51)
+    h.expect(layer.ResetOnSpawn).toBe(false)
+    h.expect(#gui:GetChildren()).toBe(0)             -- nothing dynamic left in the window's gui
+    Overlay.reset()
+  end)
+  h.it("reset destroys the overlay's own ScreenGui with it", function()
+    Overlay.reset()
+    local host = h.roblox.Instance.new("Folder")
+    local gui = h.roblox.Instance.new("ScreenGui"); gui.Parent = host
+    local layer = Overlay.get(gui).Parent
+    Overlay.reset()
+    h.expect(layer.Parent).toBe(nil)
+    h.expect(Overlay.peek()).toBe(nil)
+  end)
+  h.it("destroying the window's gui directly takes the overlay layer with it", function()
+    Overlay.reset()
+    local host = h.roblox.Instance.new("Folder")
+    local gui = h.roblox.Instance.new("ScreenGui"); gui.Parent = host
+    local layer = Overlay.get(gui).Parent
+    gui:Destroy()                                    -- a hub's own cleanup, not Window:Close()
+    h.expect(layer.Parent).toBe(nil)                 -- no orphaned FAB or toast left on screen
+    h.expect(Overlay.peek()).toBe(nil)
+  end)
+  -- The layer belongs to the window that created it. Before the split, the root lived inside
+  -- that window's gui, so closing ANOTHER window could not destroy it; the layer must keep that.
+  h.it("releasing from a window that does not own the layer leaves it alone", function()
+    Overlay.reset()
+    local host = h.roblox.Instance.new("Folder")
+    local a = h.roblox.Instance.new("ScreenGui"); a.Parent = host
+    local b = h.roblox.Instance.new("ScreenGui"); b.Parent = host
+    local layer = Overlay.get(a).Parent
+    Overlay.get(b)                                   -- B shares A's overlay
+    Overlay.release(b)                               -- B closes
+    h.expect(layer.Parent).toBe(host)                -- A's FAB and toasts survive
+    h.expect(Overlay.peek() ~= nil).toBeTruthy()
+    Overlay.release(a)                               -- the owner closes: now it goes
+    h.expect(layer.Parent).toBe(nil)
+  end)
+  h.it("the layer is tagged for the re-execute sweep, follows the window's inset and is protected", function()
+    Overlay.reset()
+    local host = h.roblox.Instance.new("Folder")
+    local gui = h.roblox.Instance.new("ScreenGui"); gui.IgnoreGuiInset = true; gui.Parent = host
+    local protected = nil
+    local layer = Overlay.get(gui, { protect = function(g) protected = g end }).Parent
+    h.expect(layer:GetAttribute("__ezui")).toBe(true)  -- Mount.finalize sweeps a stale one
+    h.expect(layer.IgnoreGuiInset).toBe(true)
+    h.expect(protected).toBe(layer)
+    Overlay.reset()
+    local studio = nil
+    Overlay.get(gui, { studio = true, protect = function(g) studio = g end })
+    h.expect(studio).toBe(nil)                       -- Studio has no protect functions
+    Overlay.reset()
+  end)
+  h.it("a re-execute's Mount.finalize sweeps the previous overlay layer", function()
+    local R = h.loadLib()
+    local host = h.roblox.Instance.new("Folder")
+    local old = h.roblox.Instance.new("ScreenGui"); old.Parent = host
+    R.Mount.finalize(old, {})
+    local oldLayer = R.Overlay.get(old).Parent
+    local fresh = h.roblox.Instance.new("ScreenGui"); fresh.Parent = host
+    R.Mount.finalize(fresh, {})                      -- what a second execute does first
+    h.expect(oldLayer.Parent).toBe(nil)
+    h.expect(old.Parent).toBe(nil)
+    R.Overlay.reset()
+  end)
+  h.it("a detached gui keeps the root inside it (nowhere to put a sibling)", function()
+    Overlay.reset()
+    local gui = h.roblox.Instance.new("ScreenGui")
+    h.expect(Overlay.get(gui).Parent).toBe(gui)
+    Overlay.reset()
+  end)
   h.it("creates one root and reuses it", function()
     local gui = h.roblox.Instance.new("ScreenGui")
     local r1 = Overlay.get(gui)
