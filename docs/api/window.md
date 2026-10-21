@@ -130,11 +130,11 @@ tears itself down — `OnClose` fires, the config is saved, open overlays and to
 every connection (title-bar drag, resize, toggle key) is disconnected, and the `ScreenGui` is
 destroyed.
 
-**A closed window cannot be reopened.** The built-in confirm dialog says *"You can reopen it with
-the toggle key or the floating button"*, but that is not what happens: the toggle-key connection
-and the floating button are destroyed along with the rest. After `Close`, `Show`, `Hide`, `Toggle`
-and `AddTab` are no-ops on that object; call `EzUI:CreateWindow` again for a new window. If you
-want a window the player can bring back, use [`Hide()`](#hide) or [`Minimize()`](#minimize).
+**A closed window cannot be reopened.** The toggle-key connection and the floating button are
+destroyed along with the rest, and the built-in confirm dialog says so: it closes the window for
+good and points the player at the minimize button instead. After `Close`, `Show`, `Hide`,
+`Toggle` and `AddTab` are no-ops on that object; call `EzUI:CreateWindow` again for a new window.
+If you want a window the player can bring back, use [`Hide()`](#hide) or [`Minimize()`](#minimize).
 
 `Destroy()` is the same call under another name.
 
