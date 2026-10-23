@@ -185,7 +185,8 @@ function M.installInto(env, mock, strict)
     UserInputType = enumNs({ "MouseButton1", "MouseMovement", "Touch", "Keyboard", "MouseWheel", "Gamepad1" }),
     ZIndexBehavior = enumNs({ "Sibling", "Global" }),
     ScaleType = enumNs({ "Stretch", "Fit", "Crop", "Tile", "Slice" }),
-    UIFlexMode = enumNs({ "None", "Grow", "Shrink", "Fill" }),
+    UIFlexMode = enumNs({ "None", "Grow", "Shrink", "Fill", "Custom" }),
+    ItemLineAlignment = enumNs({ "Automatic", "Start", "Center", "End", "Stretch" }),
     UIFlexAlignment = enumNs({ "None", "Fill", "Center", "Start", "End" }),
   }
   -- Same arity as Roblox (name, weight, style) so an arity bug in the library (e.g. a

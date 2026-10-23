@@ -126,7 +126,7 @@ Call these on a `tab` or an `accordion` (same API):
 | `AddColorPicker(opts)` | `Text, Default (Color3), Flag` → `GetColor()/SetColor(c)` |
 | `AddImage(opts)` | `Image` (rbxassetid) or `Lucide` (icon name), `Height` |
 | `AddProgressBar(opts)` | `Default (0..1)` → `Get()/Set(p)` |
-| `AddTable(opts)` | `Columns, Rows` → `SetData(rows)/AddRow(row)/Clear()` |
+| `AddTable(opts)` | `Columns, Rows, OnEdit` (columns may be `{ Text, Editable, Placeholder, Width }`) → `SetData(rows)/AddRow(row)/SetCell/GetCell/SetEnabled/Clear()` |
 | `AddAccordion(opts)` | `Title, Icon, Expanded` → a collapsible host with the same `AddX` methods, plus `Toggle()/Expand()/Collapse()/IsExpanded()/SetTitle(s)/SetIcon(name)` |
 
 Any control with a `Flag` (and a window `Config`) auto-saves and restores its value, and is restored on `ResetConfiguration`.
