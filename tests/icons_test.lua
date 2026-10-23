@@ -20,6 +20,16 @@ h.describe("icons", function()
     h.expect(Icons.data["chevron-right"] ~= nil).toBeTruthy()
     h.expect(Icons.data["home"] ~= nil).toBeTruthy()
   end)
+  h.it("curated set includes the animal icons (no upload: they are on the lucide-roblox sheets)", function()
+    for _, name in ipairs({ "paw-print", "rabbit", "dog", "cat", "squirrel", "turtle",
+                            "bird", "fish", "rat", "snail", "worm", "bone" }) do
+      local e = Icons.data[name]
+      -- the name rides along so a failure says which icon is missing or came from the 256px block
+      h.expect(name .. " " .. tostring(e and e.w) .. "x" .. tostring(e and e.h)).toBe(name .. " 48x48")
+    end
+    local paw = Icons.data["paw-print"]  -- one exact rect: a wrong sheet or offset fails here
+    h.expect(paw.id).toBe(16898613699); h.expect(paw.x).toBe(771); h.expect(paw.y).toBe(257)
+  end)
   h.it("house alias resolves to home", function()
     h.expect(Icons.data["house"]).toBeNil()       -- not a raw data key
     h.expect(Icons.get("house") ~= nil).toBeTruthy() -- but get() aliases it

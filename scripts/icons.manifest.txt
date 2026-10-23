@@ -268,3 +268,15 @@ wind
 wrench
 zoom-in
 zoom-out
+paw-print
+rabbit
+dog
+cat
+squirrel
+turtle
+bird
+fish
+rat
+snail
+worm
+bone
