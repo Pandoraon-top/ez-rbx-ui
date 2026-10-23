@@ -20,7 +20,7 @@ Icon names follow Lucide's convention: lowercase, hyphen-separated (e.g. `"setti
 
 ## Bundled Subset
 
-A curated subset of approximately 250 icons ships in the bundle to keep file size manageable. The subset covers common UI needs: navigation, actions, status indicators, and media.
+A curated subset of approximately 280 icons ships in the bundle to keep file size manageable. The subset covers common UI needs: navigation, actions, status indicators, media, and animals (`paw-print`, `dog`, `cat`, `rabbit`, `bird`, `fish`, ...).
 
 Some representative names: `"home"`, `"settings"`, `"settings-2"`, `"play"`, `"pause"`, `"search"`, `"user"`, `"users"`, `"check"`, `"plus"`, `"trash-2"`, `"eye"`, `"lock"`, `"zap"`, `"shield"`, `"star"`, `"heart"`, `"info"`, `"circle-check"`, `"triangle-alert"`, `"refresh-cw"`, `"gamepad-2"`.
 

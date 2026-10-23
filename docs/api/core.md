@@ -175,7 +175,7 @@ See [Theming](/guide/theming) for the full override guide and palette reference.
 
 ## `EzUI.Icons` {#icons}
 
-The icon module. Icon names follow the Lucide naming convention: lowercase and hyphen-separated (e.g. `"home"`, `"settings-2"`, `"circle-check"`). A curated subset of approximately 250 icons ships in the bundle.
+The icon module. Icon names follow the Lucide naming convention: lowercase and hyphen-separated (e.g. `"home"`, `"settings-2"`, `"circle-check"`). A curated subset of approximately 280 icons ships in the bundle.
 
 Pass an icon name as a string wherever an `Icon` option is accepted:
 
