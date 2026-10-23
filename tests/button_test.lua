@@ -200,6 +200,77 @@ h.describe("button", function()
     b.SetLoading(false)
     h.expect(label.Visible).toBe(true)
   end)
+  -- A full-width button used to pin the icon at centre-44 and centre the label across the whole
+  -- surface, so any label wider than that gap slid under the icon. Both widths now lay the icon
+  -- and the label out as ONE centred group, and the full-width label shrinks (truncating with an
+  -- ellipsis) only when the group would not fit.
+  h.it("full width: icon and label are one centred group, a long label truncates instead of overlapping", function()
+    local b = Button.new({ Parent = Create("Frame", {}), Icon = "play",
+      Text = "Teleport to the selected island and start farming automatically" })
+    h.expect(b.Frame.Size.X.Scale).toBe(1)                        -- still full width
+    local surface = surfaceOf(b)
+    local list = surface:FindFirstChildOfClass("UIListLayout")
+    h.expect(list ~= nil).toBeTruthy()
+    h.expect(list.FillDirection.Name).toBe("Horizontal")
+    h.expect(list.HorizontalAlignment.Name).toBe("Center")
+    local icon, label = surface:FindFirstChild("Icon"), surface:FindFirstChild("Label")
+    h.expect(icon.LayoutOrder < label.LayoutOrder).toBeTruthy()    -- icon leads, beside the text
+    h.expect(label.AutomaticSize.Name).toBe("X")                  -- as wide as its text, no wider
+    h.expect(label.TextTruncate.Name).toBe("AtEnd")
+    local flex = label:FindFirstChildOfClass("UIFlexItem")
+    h.expect(flex ~= nil and flex.FlexMode.Name).toBe("Shrink")    -- gives way only on overflow
+  end)
+  h.it("full width: no icon pinned by hand, no label offset, and only full width shrinks its label", function()
+    local b = Button.new({ Parent = Create("Frame", {}), Text = "Go", Icon = "play" })
+    local surface = surfaceOf(b)
+    -- the literal geometry from the bug report is gone: the list layout places both
+    local function unplaced(inst) return inst.Position == nil or inst.Position.X.Offset == 0 end
+    h.expect(unplaced(surface:FindFirstChild("Icon"))).toBeTruthy()
+    h.expect(unplaced(surface:FindFirstChild("Label"))).toBeTruthy()
+    local plain = Button.new({ Parent = Create("Frame", {}), Text = "Teleport to the selected island" })
+    local label = surfaceOf(plain):FindFirstChild("Label")                       -- no icon: same rules
+    h.expect(label.TextTruncate.Name).toBe("AtEnd")
+    h.expect(label:FindFirstChildOfClass("UIFlexItem") ~= nil).toBeTruthy()
+    local auto = Button.new({ Parent = Create("Frame", {}), Text = "Go", AutoWidth = true })
+    h.expect(surfaceOf(auto):FindFirstChild("Label"):FindFirstChildOfClass("UIFlexItem")).toBeNil()
+  end)
+  -- The spinner shares the label's slot in the centred group. Shown while the label is still
+  -- fading, the group would hold [label][spinner] for a beat and then jump; it takes the slot only
+  -- once the label has gone. The mock plays tweens synchronously, so the fade is held open here.
+  h.it("loading: the spinner takes the label's slot only after the label has faded out", function()
+    for _, auto in ipairs({ false, true }) do
+      local b = Button.new({ Parent = Create("Frame", {}), Text = "Go", Icon = "play", AutoWidth = auto })
+      local surface = surfaceOf(b)
+      local label = surface:FindFirstChild("Label")
+      local realToThen, pending = R.Animate.toThen, nil
+      R.Animate.toThen = function(_, _, _, done) pending = done; return { Cancel = function() end } end
+      b.SetLoading(true)
+      R.Animate.toThen = realToThen
+      local spinner = surface:FindFirstChild("Spinner")
+      h.expect(label.Visible ~= false).toBeTruthy()     -- mid-fade: the label still holds the slot
+      h.expect(spinner == nil or spinner.Visible == false).toBeTruthy()
+      pending()
+      spinner = surface:FindFirstChild("Spinner")
+      h.expect(label.Visible).toBe(false)
+      h.expect(spinner.Visible).toBe(true)
+      b.SetLoading(false)
+      h.expect(label.Visible ~= false).toBeTruthy()
+      h.expect(spinner.Visible).toBe(false)
+    end
+  end)
+  h.it("loading: a fade that lands after SetLoading(false) leaves the button idle", function()
+    local b = Button.new({ Parent = Create("Frame", {}), Text = "Go" })
+    local realToThen, pending = R.Animate.toThen, nil
+    R.Animate.toThen = function(_, _, _, done) pending = done; return { Cancel = function() end } end
+    b.SetLoading(true)
+    R.Animate.toThen = realToThen
+    b.SetLoading(false)
+    pending()                                            -- the superseded fade completes late
+    local surface = surfaceOf(b)
+    h.expect(surface:FindFirstChild("Label").Visible ~= false).toBeTruthy()
+    local spinner = surface:FindFirstChild("Spinner")
+    h.expect(spinner == nil or spinner.Visible == false).toBeTruthy()
+  end)
   h.it("Destroy cancels a running spin loop (2.19)", function()
     h.mock.resetTweens()
     local b = Button.new({ Parent = Create("Frame", {}), Text = "Go", Loading = true })

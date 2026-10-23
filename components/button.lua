@@ -63,39 +63,27 @@ function Button.new(opts)
   local bgHover = transparent and theme.Opacity.ghostHover or theme.Opacity.hoverFill
   local bgPressed = transparent and theme.Opacity.ghostPress or theme.Opacity.pressFill
 
+  -- [icon?][label] as ONE centred group in both widths. The full-width button used to pin the
+  -- icon at centre-44 and centre the label across the whole surface, so a label wider than that
+  -- gap slid under the icon. In a full-width button the label also shrinks, truncating with an
+  -- ellipsis, but only when the group would overflow the surface; content-width buttons grow
+  -- with their label instead, so they never need to.
   local hasIcon = opts.Icon ~= nil
   local label, iconImg
-  if auto then
-    -- content-width: pad the surface and lay [icon?][label] out horizontally, centred.
-    Create.padding({ left = 14, right = 14 }).Parent = surface
-    Create("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal,
-      HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center,
-      SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, theme.Spacing.icon), Parent = surface })
-    if hasIcon then
-      iconImg = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
-        Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = 1, Parent = surface })
-      Icons.apply(iconImg, opts.Icon, fg)
-    end
-    label = Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1,
-      Text = opts.Text or "Button", TextColor3 = fg,
-      AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 1, 0),
-      LayoutOrder = 2, Parent = surface }), theme, "label")
-  else
-    if hasIcon then
-      iconImg = Create("ImageLabel", {
-        Name = "Icon", BackgroundTransparency = 1,
-        Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), Position = UDim2.new(0.5, -44, 0.5, -theme.Sizes.icon / 2),
-        Parent = surface,
-      })
-      Icons.apply(iconImg, opts.Icon, fg)
-    end
-    label = Create.text(Create("TextLabel", {
-      Name = "Label", BackgroundTransparency = 1,
-      Text = opts.Text or "Button", TextColor3 = fg, Size = UDim2.new(1, 0, 1, 0),
-      Position = UDim2.new(0, hasIcon and 12 or 0, 0, 0),
-      Parent = surface,
-    }), theme, "label")
+  Create.padding({ left = 14, right = 14 }).Parent = surface
+  Create("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal,
+    HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center,
+    SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, theme.Spacing.icon), Parent = surface })
+  if hasIcon then
+    iconImg = Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1,
+      Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = 1, Parent = surface })
+    Icons.apply(iconImg, opts.Icon, fg)
   end
+  label = Create.text(Create("TextLabel", { Name = "Label", BackgroundTransparency = 1,
+    Text = opts.Text or "Button", TextColor3 = fg,
+    AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 1, 0),
+    TextTruncate = Enum.TextTruncate.AtEnd, LayoutOrder = 2, Parent = surface }), theme, "label")
+  if not auto then Create("UIFlexItem", { FlexMode = Enum.UIFlexMode.Shrink, Parent = label }) end
 
   -- ---- state ----------------------------------------------------------------
   local enabled, loading, pressed = true, false, false
@@ -166,13 +154,10 @@ function Button.new(opts)
   local function stopSpin() if spin then spin.Cancel(); spin = nil end end
   local function mkSpinner()
     if spinner then return spinner end
-    -- AutoWidth lays the Surface out horizontally, so the spinner takes the label's LayoutOrder
-    -- and the label hides while loading; otherwise it just sits where the leading icon would.
-    local props = { Name = "Spinner", BackgroundTransparency = 1, Visible = false,
-      Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = 2, Parent = surface }
-    -- fixed-width buttons have no layout, so the glyph is centred by hand
-    if not auto then props.Position = UDim2.new(0.5, -theme.Sizes.icon / 2, 0.5, -theme.Sizes.icon / 2) end
-    spinner = Create("ImageLabel", props)
+    -- The Surface is laid out horizontally, so the spinner takes the label's LayoutOrder and the
+    -- label hides while loading: the group re-centres on [icon?][spinner].
+    spinner = Create("ImageLabel", { Name = "Spinner", BackgroundTransparency = 1, Visible = false,
+      Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon), LayoutOrder = 2, Parent = surface })
     Icons.apply(spinner, "loader", fg)
     return spinner
   end
@@ -182,15 +167,21 @@ function Button.new(opts)
     Safe.mutate(function()
       local s = mkSpinner()
       stopSpin()
-      s.Visible = loading
       if loading then
         scale.Scale = 1
         paintSurface(bgNormal)
+        -- the spinner takes the label's slot only once the label has faded out; shown any sooner,
+        -- the centred group holds [label][spinner] for a beat and then jumps. A fade that lands
+        -- after SetLoading(false) (a superseded tween still fires Completed) changes nothing.
         Animate.toThen(label, "fast", { TextTransparency = 1 }, function()
-          if auto and loading then label.Visible = false end
+          if not loading then return end
+          label.Visible = false
+          s.Visible = true
+          stopSpin()
+          spin = Animate.spin(s)
         end)
-        spin = Animate.spin(s)
       else
+        s.Visible = false
         label.Visible = true
         Animate.to(label, "fast", { TextTransparency = 0 })
       end
