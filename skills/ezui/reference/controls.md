@@ -301,15 +301,26 @@ tab:AddImage({ Image = "rbxassetid://12345678", Height = 80 })
 ```
 
 ## AddTable
-`host:AddTable(opts)` — a scrollable data table with a fixed header row and scrollable body.
+`host:AddTable(opts)` — a scrollable data table with a fixed header row and scrollable body. Columns can be weighted and made editable.
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| Columns | table | `{}` | array of column header label strings |
-| Rows | table | `{}` | initial row data; each row is `{ string, ... }` matching column count |
+| Columns | table | `{}` | header strings, or `{ Text, Editable?, Placeholder?, Width? }` per column. `Width` is a positive flex weight (default 1); a bad Width errors at build |
+| Rows | table | `{}` | each row is `{ string, ... }` (keyed by its 1-based position) or `{ Key = k, Cells = { ... } }` |
 | Height | number | `120` | height (px) of the scrollable body; total height = Height + 26 (header) |
+| OnEdit | function | nil | `(rowKey, col, text, oldText)` on an editable cell's commit (FocusLost/Enter), only when the text changed. Return `false` = revert to oldText, a string/number = show that instead, nil = keep the typed text. A throw reverts and warns |
+| Disabled | boolean | `false` | editable cells read-only and dimmed |
 
-**Returns:** `{ AddRow(cells) -> Frame, SetData(rows), Clear(), Destroy() }`
+**Returns:** `{ AddRow(cells, key?) -> Frame, SetData(rows), SetCell(key, col, text) -> bool, GetCell(key, col) -> string?, SetEnabled(b), SetDisabled(b), Clear(), Destroy() }`
+
+- `AddRow` also takes one keyed row: `AddRow({ Key = k, Cells = { ... } })`.
+- `SetCell` never calls `OnEdit`.
+- `GetCell` returns the committed text.
+- `SetData` rebuilds every row and drops an edit in progress, so update values with `SetCell`.
+- `SetEnabled(false)` drops an edit in progress without calling `OnEdit`.
+- `AddRow` returns `nil` when called from a thread without GUI access; the row lands on the next frame, and `GetCell`/`SetCell` work at once.
+- About 7 instances per editable cell, so prefer `SetCell` over `SetData` for large or polled tables.
+- An editable cell looks like `AddTextBox` (field fill, border, hover wash, focus ring). A tap edits it, and a drag still scrolls the body on touch.
 
 ```lua
 local t = tab:AddTable({
@@ -317,6 +328,18 @@ local t = tab:AddTable({
   Rows = { { "Alpha", "12", "3" }, { "Bravo", "8", "5" } },
 })
 t.AddRow({ "Charlie", "15", "1" })
+
+-- editable: keyed rows + OnEdit (normalise "1,5" -> "1.5", reject bad input)
+local waits = tab:AddTable({
+  Columns = { { Text = "Pet", Width = 2 }, { Text = "Wait (s)", Editable = true, Placeholder = "0" } },
+  Rows = { { Key = "{uuid-1}", Cells = { "Peacock", "0.6" } } },
+  OnEdit = function(key, col, text)
+    local n = tonumber((text:gsub(",", ".")))
+    if not n or n < 0 then return false end
+    return tostring(n)
+  end,
+})
+waits.SetCell("{uuid-1}", 2, "1")
 ```
 
 ## AddProgressBar
