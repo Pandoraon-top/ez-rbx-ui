@@ -57,6 +57,16 @@ h.describe("button", function()
     h.expect(labelText()).toBe("new")        -- applied in a capability context
     R.Safe._setCapabilityCheck(nil)
   end)
+  h.it("SetText with the text already shown writes nothing", function()
+    local b = Button.new({ Parent = Create("Frame", {}), Text = "Go" })
+    R.Safe._setCapabilityCheck(function() return true end)  -- no probe write in the count
+    h.mock.writes = 0
+    b.SetText("Go")
+    h.expect(h.mock.writes).toBe(0)
+    R.Safe._setCapabilityCheck(nil)
+    b.SetText("Stop")
+    h.expect(b.Frame:FindFirstChild("Surface"):FindFirstChild("Label").Text).toBe("Stop")
+  end)
   h.it("AutoWidth sizes the button to its content with a min width", function()
     local b = Button.new({ Parent = Create("Frame", {}), Text = "Cancel", AutoWidth = true })
     h.expect(b.Frame.AutomaticSize.Name).toBe("X")

@@ -204,7 +204,8 @@ function Button.new(opts)
 
   return {
     Frame = btn,
-    SetText = function(s) Safe.mutate(function() label.Text = s end) end,
+    -- the same text again writes nothing (a hub refreshing a status button every tick)
+    SetText = function(s) Safe.mutate(function() if label.Text ~= s then label.Text = s end end) end,
     -- Blocks USER input only (the Callback is guarded); SetText and a themer reskin still apply.
     SetEnabled = setEnabled,
     SetLoading = setLoading,
