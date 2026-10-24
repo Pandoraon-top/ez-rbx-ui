@@ -83,9 +83,13 @@ function Toggle.new(opts)
   -- `built` makes the first apply (Flag.bind's initial paint) a plain write: the rest pose costs
   -- no tween at build time, every later change animates.
   local built = false
+  -- What the switch actually shows: set at the end of a paint that ran, so a paint queued and then
+  -- lost (Safe's Heartbeat drain swallows a failing job) never reads as done to Flag's skip.
+  local painted
   local function apply(v)
     value = v and true or false
     local instant = not built
+    local want = value
     Safe.mutate(function()
       local trackC = value and theme.Colors.primary or theme.Colors.switchTrackOff
       local knobC = value and theme.Colors.primaryForeground or theme.Colors.foreground
@@ -97,6 +101,7 @@ function Toggle.new(opts)
         knob.BackgroundColor3 = knobC; track.BackgroundColor3 = trackC
         trackStroke.Transparency = strokeA
         if glow then glow.Set(glowA) end
+        painted = want
         return
       end
       -- Geometry springs (Back/Out overshoots ~1px past the stop); the knob COLOUR is a separate
@@ -106,10 +111,11 @@ function Toggle.new(opts)
       Animate.to(track, "base", { BackgroundColor3 = trackC })
       Animate.to(trackStroke, "fast", { Transparency = strokeA })
       if glow then glow.Fade(glowA) end
+      painted = want
     end)
   end
 
-  local commit = Flag.bind(opts, opts.Default == true, apply)
+  local commit = Flag.bind(opts, opts.Default == true, apply, function() return painted end)
   built = true
 
   -- ---- state ----------------------------------------------------------------

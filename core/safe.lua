@@ -8,6 +8,9 @@ local Overlay
 local RunService = game:GetService("RunService")
 
 local unpack = table.unpack or unpack   -- Luau keeps both; 5.1/LuaJIT only the global
+-- results with their count, so a trailing nil survives the unpack
+local function packed(...) return { n = select("#", ...), ... } end
+local traceback = (debug and debug.traceback) or function(e) return e end
 
 local queue = {}          -- FIFO of deferred jobs
 local flushConn = nil
@@ -42,13 +45,34 @@ local function defaultHasCapability()
   return true, probed
 end
 
+-- A thread that probed capable is remembered until the next Heartbeat, so the many mutations of
+-- one frame cost one probe write instead of one each. This is a PERFORMANCE cache, not a proof: a
+-- thread can lose the capability without the entry noticing (task.defer resuming it later in the
+-- frame, a pooled thread handed to other code, an identity change, a Heartbeat handler that runs
+-- before the reset). So Safe.mutate never trusts it blindly: a job run on a remembered yes runs
+-- under pcall, and a failure is told apart by probing again (see Safe.mutate). Only a CERTAIN yes
+-- is remembered. Weak keys: a finished thread is not held.
+local MAIN = {}   -- Lua 5.1 / LuaJIT report the main thread as nil
+local capable = setmetatable({}, { __mode = "k" })
+local forgetConn = nil
+local function forget() capable = setmetatable({}, { __mode = "k" }); forgetConn = nil end
+local function threadKey() return coroutine.running() or MAIN end
+
 local custom = nil
 -- A test-installed check speaks for itself: whatever it says is taken as certain.
 local function hasCapability()
   if custom then return custom() and true or false, true end
-  return defaultHasCapability()
+  local ok, certain = defaultHasCapability()
+  if ok and certain then
+    capable[threadKey()] = true
+    if not forgetConn then forgetConn = RunService.Heartbeat:Once(forget) end
+  end
+  return ok, certain
 end
-function Safe._setCapabilityCheck(fn) custom = fn end
+function Safe._setCapabilityCheck(fn)
+  custom = fn
+  capable = setmetatable({}, { __mode = "k" })   -- nothing remembered from before the switch
+end
 
 local function flush()
   flushConn = nil
@@ -72,12 +96,28 @@ end
 -- a background thread where nobody catches it and the write is simply lost. The retry re-runs
 -- `fn`; every caller here is a property write or an idempotent teardown, so running the prefix of
 -- one twice is a no-op, and losing it entirely is not.
+--
+-- A thread remembered as capable this frame skips the probe write, but its job runs under pcall:
+-- on a failure the thread is forgotten and probed again. Still capable means the job itself is
+-- broken -- that error is raised, as it would have been. Not capable means the capability was
+-- lost since the probe -- the job goes to the Heartbeat like any other.
 function Safe.mutate(fn)
+  local key = threadKey()
+  if not custom and capable[key] then
+    -- xpcall keeps the job's own stack in a re-raised error
+    local res = packed(xpcall(fn, traceback))
+    if res[1] then return unpack(res, 2, res.n) end
+    capable[key] = nil
+    local again, sure = defaultHasCapability()
+    if again and sure then error(res[2], 0) end
+    enqueue(fn)
+    return
+  end
   local ok, certain = hasCapability()
   if ok and certain then return fn() end
   if ok then
-    local res = { pcall(fn) }
-    if res[1] then return unpack(res, 2, #res) end
+    local res = packed(pcall(fn))
+    if res[1] then return unpack(res, 2, res.n) end
   end
   enqueue(fn)
 end
