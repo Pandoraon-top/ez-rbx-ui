@@ -70,11 +70,13 @@ end
 local function hoverParts(kind, host, opts, theme)
   if kind == "fill" then
     -- No new Frame (host has a UIListLayout): the host's own transparency carries the state and
-    -- returns to whatever it rested at; BackgroundColor3 is never touched (identity tests).
+    -- returns to whatever it rested at; BackgroundColor3 is never touched (identity tests). The
+    -- rest can move later (setRest: a row whose selection changes) without a new recipe.
     local restA = host.BackgroundTransparency or 1
     local hoverA = opts.hoverAlpha or theme.Opacity.rowHover
     local pressA = opts.pressAlpha or hoverA
-    return { { host, "BackgroundTransparency", function(s) return pick(s, restA, hoverA, pressA) end } }
+    return { { host, "BackgroundTransparency", function(s) return pick(s, restA, hoverA, pressA) end } },
+      function(a) restA = a end
   elseif kind == "text" then
     local function tint(s)
       if s == "rest" then return colorOf(theme, opts.rest, "mutedForeground") end
@@ -121,9 +123,9 @@ local function bindHover(sources, opts)
   if not Device.SupportsHover() then return NOOP_HANDLE end
   local kind = opts.kind or "wash"
   local host = opts.host or sources[1]
-  local parts, buildWash = {}, nil
+  local parts, buildWash, setRestA = {}, nil, nil
   if kind == "wash" then buildWash = washBuilder(host, opts, theme)
-  else parts = hoverParts(kind, host, opts, theme) end
+  else parts, setRestA = hoverParts(kind, host, opts, theme) end
 
   local handle, wash
   -- A "rest" paint has nothing to say to a wash that does not exist yet (a fresh one rests fully
@@ -169,7 +171,12 @@ local function bindHover(sources, opts)
     -- releases whatever exists: the connections, and the pending builder, so a handle that has
     -- been let go can never add a Frame to its host afterwards
     disconnect = function() buildWash = nil; dropConns() end,
+    -- the state the pointer left it in, painted at once (a row that was hidden under the pointer)
+    settle = function() hovering = false; pressed = false; paint("rest", true) end,
   }
+  -- fill only: a new rest alpha, painted for the current state through a tween, so a hover tween
+  -- still in flight is replaced instead of landing on the old value
+  if setRestA then handle.setRest = function(a) setRestA(a); paint(state) end end
   for _, src in ipairs(sources) do
     conns[#conns + 1] = src.MouseEnter:Connect(enter)
     conns[#conns + 1] = src.MouseLeave:Connect(leave)

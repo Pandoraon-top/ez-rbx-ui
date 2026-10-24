@@ -2116,4 +2116,282 @@ h.describe("window", function()
   end)
 end)
 
+-- FixedSize / StartSize (a size in px on every screen) and geometry that reads the size the window
+-- SHOWS: SetUIScale shrinks the window on screen, and the drag clamp, the screen-change clamp and the
+-- resize corner used to work from the unscaled size (hubs string-patched all of them).
+h.describe("window: FixedSize, StartSize and UI-scale-aware geometry", function()
+  local VPX, VPY = 1280, 720
+  local MB1 = h.roblox.Enum.UserInputType.MouseButton1
+  local MOVE = h.roblox.Enum.UserInputType.MouseMovement
+  local function centreOf(main)
+    local p = main.Position
+    return p.X.Scale * VPX + p.X.Offset, p.Y.Scale * VPY + p.Y.Offset
+  end
+  local function setViewport(x, y)
+    h.roblox.workspace.CurrentCamera.ViewportSize = h.roblox.Vector2.new(x, y)
+  end
+  local function make(cfg)
+    setViewport(VPX, VPY)
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    cfg = cfg or {}
+    cfg.Title = cfg.Title or "M"; cfg.Parent = screen
+    return R.Window.new(cfg), R
+  end
+  local function dragBarTo(w, x, y, from)
+    local bar = w.Main:FindFirstChild("TitleBar")
+    local uis = h.roblox.game:GetService("UserInputService")
+    if from then bar.InputBegan:Fire({ UserInputType = MB1, Position = from }) end
+    uis.InputChanged:Fire({ UserInputType = MOVE, Position = h.roblox.Vector2.new(x, y) })
+  end
+  local function endDrag(w, x, y)
+    w.Main:FindFirstChild("TitleBar").InputEnded:Fire({ UserInputType = MB1, Position = h.roblox.Vector2.new(x, y) })
+  end
+  local function resizeBy(w, dx, dy)
+    local uis = h.roblox.game:GetService("UserInputService")
+    local hit = w.Main:FindFirstChild("ResizeHit")
+    local touch = { UserInputType = h.roblox.Enum.UserInputType.Touch, Position = h.roblox.Vector2.new(700, 500) }
+    hit.InputBegan:Fire(touch)
+    touch.Position = h.roblox.Vector2.new(700 + dx, 500 + dy)
+    uis.InputChanged:Fire(touch)
+    uis.InputEnded:Fire(touch)
+  end
+
+  h.it("FixedSize keeps its size on every screen and has no resize corner", function()
+    local w = make({ FixedSize = { Width = 620, Height = 400 } })
+    h.expect(w.Main.Size.X.Offset).toBe(620)
+    h.expect(w.Main.Size.Y.Offset).toBe(400)
+    h.expect(w.Main:FindFirstChild("ResizeGrip").Visible).toBe(false)
+    h.expect(w.Main:FindFirstChild("ResizeHit").Visible).toBe(false)
+    h.expect(w.Main:FindFirstChild("ResizeHit").Active).toBe(false)
+    setViewport(800, 480)
+    w:AdaptToViewport()
+    h.expect(w.Main.Size.X.Offset).toBe(620)
+    h.expect(w.Main.Size.Y.Offset).toBe(400)
+    setViewport(VPX, VPY)
+  end)
+
+  h.it("StartSize opens at its size, keeps the resize corner and keeps a size the player drags", function()
+    local w = make({ StartSize = { Width = 640, Height = 420 } })
+    h.expect(w.Main.Size.X.Offset).toBe(640)
+    h.expect(w.Main.Size.Y.Offset).toBe(420)
+    h.expect(w.Main:FindFirstChild("ResizeGrip").Visible).toBe(true)
+    resizeBy(w, -100, -60)
+    h.expect(w.Main.Size.X.Offset).toBe(540)
+    w:AdaptToViewport()
+    h.expect(w.Main.Size.X.Offset).toBe(540)                 -- the dragged size is kept
+    h.expect(w.Main.Size.Y.Offset).toBe(360)
+  end)
+
+  h.it("StartSize is re-applied on a screen change until the player resizes", function()
+    local w = make({ StartSize = { Width = 640, Height = 420 } })
+    setViewport(900, 500)
+    w:AdaptToViewport()
+    h.expect(w.Main.Size.X.Offset).toBe(640)
+    h.expect(w.Main.Size.Y.Offset).toBe(420)
+    setViewport(VPX, VPY)
+  end)
+
+  h.it("a FixedSize or StartSize that is not { Width, Height } with positive numbers is refused", function()
+    local function fails(cfg) local ok = pcall(make, cfg); return not ok end
+    h.expect(fails({ FixedSize = { Width = 0, Height = 400 } })).toBe(true)
+    h.expect(fails({ FixedSize = { Width = 620 } })).toBe(true)
+    h.expect(fails({ StartSize = "big" })).toBe(true)
+    h.expect(fails({ FixedSize = { Width = 620, Height = 400 }, StartSize = { Width = 620, Height = 400 } })).toBe(true)
+  end)
+
+  h.it("the title-bar drag clamp uses the size the window shows", function()
+    local w, R = make({ FixedSize = { Width = 620, Height = 400 } })
+    w:SetUIScale(0.5)
+    local keep, bar = R.Theme.Sizes.dragKeep, R.Theme.Sizes.titleBar
+    local halfW, halfH = 620 * 0.5 / 2, 400 * 0.5 / 2
+    dragBarTo(w, -4900, 10, h.roblox.Vector2.new(100, 10))
+    h.expect((centreOf(w.Main))).toBeCloseTo(keep - halfW)
+    dragBarTo(w, 9100, -5000)
+    local cx, cy = centreOf(w.Main)
+    h.expect(cx).toBeCloseTo(VPX - keep + halfW)
+    h.expect(cy).toBeCloseTo(halfH)
+    dragBarTo(w, 100, 9000)
+    local _, cy2 = centreOf(w.Main)
+    h.expect(cy2).toBeCloseTo(VPY - bar * 0.5 + halfH)
+    endDrag(w, 100, 9000)
+  end)
+
+  h.it("a screen change keeps a moved window on screen by the size it shows", function()
+    local w = make({ FixedSize = { Width = 620, Height = 400 } })
+    w:SetUIScale(0.5)
+    dragBarTo(w, -4900, 10, h.roblox.Vector2.new(100, 10))
+    endDrag(w, -4900, 10)
+    w:AdaptToViewport()
+    local cx, cy = centreOf(w.Main)
+    h.expect(cx - 620 * 0.5 / 2).toBeCloseTo(0)              -- left edge as shown is flush
+    h.expect(cy - 400 * 0.5 / 2 >= 0).toBeTruthy()
+  end)
+
+  h.it("SetUIScale puts a moved window back on screen at the new scale", function()
+    local w = make({ FixedSize = { Width = 620, Height = 400 } })
+    w:SetUIScale(0.5)
+    dragBarTo(w, -4900, 10, h.roblox.Vector2.new(100, 10))
+    endDrag(w, -4900, 10)
+    w:SetUIScale(1)
+    local cx = centreOf(w.Main)
+    h.expect(cx - 620 / 2).toBeCloseTo(0)
+  end)
+
+  h.it("a resize at a UI scale follows the pointer and keeps the shown corner still", function()
+    local w = make({ StartSize = { Width = 640, Height = 420 } })
+    w:SetUIScale(0.5)
+    local cx0, cy0 = centreOf(w.Main)
+    local left0, top0 = cx0 - 640 * 0.5 / 2, cy0 - 420 * 0.5 / 2
+    resizeBy(w, -50, -30)                                    -- 50 px on screen = 100 px of window at 0.5
+    h.expect(w.Main.Size.X.Offset).toBe(540)
+    h.expect(w.Main.Size.Y.Offset).toBe(360)
+    local cx, cy = centreOf(w.Main)
+    h.expect(cx - 540 * 0.5 / 2).toBeCloseTo(left0)
+    h.expect(cy - 360 * 0.5 / 2).toBeCloseTo(top0)
+  end)
+
+  h.it("a size can be given positionally, like Ratio", function()
+    local w = make({ FixedSize = { 620, 400 } })
+    h.expect(w.Main.Size.X.Offset).toBe(620)
+    h.expect(w.Main.Size.Y.Offset).toBe(400)
+  end)
+
+  h.it("a preset size is floored at the minimum window and to whole pixels; infinity is refused", function()
+    local w = make({ FixedSize = { Width = 200, Height = 120 } })
+    h.expect(w.Main.Size.X.Offset).toBe(380)
+    h.expect(w.Main.Size.Y.Offset).toBe(260)
+    local w2 = make({ StartSize = { Width = 620.7, Height = 400.2 } })
+    h.expect(w2.Main.Size.X.Offset).toBe(620)
+    h.expect(w2.Main.Size.Y.Offset).toBe(400)
+    h.expect((pcall(make, { FixedSize = { Width = math.huge, Height = 400 } }))).toBe(false)
+  end)
+
+  h.it("a size the player chose comes back when a smaller screen goes away", function()
+    local w = make({ StartSize = { Width = 640, Height = 420 } })
+    resizeBy(w, 500, 200)
+    h.expect(w.Main.Size.X.Offset).toBe(1140)
+    setViewport(800, 480)
+    w:AdaptToViewport()
+    h.expect(w.Main.Size.X.Offset).toBe(math.floor(800 * 0.92))
+    setViewport(VPX, VPY)
+    w:AdaptToViewport()
+    h.expect(w.Main.Size.X.Offset).toBe(1140)
+    h.expect(w.Main.Size.Y.Offset).toBe(620)
+  end)
+
+  h.it("a scale change during a drag is applied when the drag ends", function()
+    local w, R = make({ FixedSize = { Width = 620, Height = 400 } })
+    local keep = R.Theme.Sizes.dragKeep
+    dragBarTo(w, -4900, 10, h.roblox.Vector2.new(100, 10))
+    h.expect((centreOf(w.Main))).toBeCloseTo(keep - 310)
+    w:SetUIScale(0.5)                                        -- mid-drag: the drag owns Position
+    h.expect((centreOf(w.Main))).toBeCloseTo(keep - 310)
+    endDrag(w, -4900, 10)
+    h.expect((centreOf(w.Main))).toBeCloseTo(620 * 0.5 / 2)  -- shown left edge back on screen
+  end)
+
+  h.it("a resize at a UI scale stops at the screen as shown", function()
+    local w = make({ StartSize = { Width = 640, Height = 420 } })
+    w:SetUIScale(0.5)
+    resizeBy(w, 5000, 5000)
+    h.expect(w.Main.Size.X.Offset).toBe(VPX / 0.5)
+    h.expect(w.Main.Size.Y.Offset).toBe(VPY / 0.5)
+  end)
+end)
+
+-- EzUI's own words, for a hub that runs in another language. Plain strings given at creation.
+h.describe("window: Strings", function()
+  local STR = { Search = "Cari…", None = "Tidak ada", Select = "Pilih", CloseTitle = "Tutup jendela?",
+    CloseMessage = "Pesan tutup", Cancel = "Batal", Close = "Tutup" }
+  local function make(cfg)
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    cfg = cfg or {}
+    cfg.Title = cfg.Title or "M"; cfg.Parent = screen
+    return R.Window.new(cfg), R, screen
+  end
+  local function texts(root, out)
+    out = out or {}
+    for _, c in ipairs(root:GetChildren()) do
+      if c.Text ~= nil and c.Text ~= "" then out[c.Text] = true end
+      texts(c, out)
+    end
+    return out
+  end
+  local function find(root, name)
+    for _, c in ipairs(root:GetChildren()) do
+      if c.Name == name then return c end
+      local hit = find(c, name)
+      if hit then return hit end
+    end
+  end
+
+  h.it("the window search, the dropdowns and the close question use the given words", function()
+    local w, R, screen = make({ Strings = STR })
+    h.expect(find(w.Main, "SearchInput").PlaceholderText).toBe("Cari…")
+    local tab = w:AddTab({ Name = "T" })
+    local multi = tab:AddSelectBox({ Text = "Pets", Multi = true, Options = { "a", "b" } })
+    local single = tab:AddSelectBox({ Text = "Egg", AllowNone = true, Options = { "x", "y" } })
+    single.SetValue(nil)
+    h.expect(multi.Frame:FindFirstChild("Field"):FindFirstChild("Value").Text).toBe("Tidak ada")
+    h.expect(single.Frame:FindFirstChild("Field"):FindFirstChild("Value").Text).toBe("Pilih")
+    local list = tab:AddSelectBox({ Text = "Many", Searchable = true, Options = { "a", "b" } })
+    list.Open()
+    local dd
+    for _, c in ipairs(R.Overlay.get(screen):GetChildren()) do if c.Name == "SelectDropdown" then dd = c end end
+    h.expect(dd:FindFirstChild("Search"):FindFirstChild("Input").PlaceholderText).toBe("Cari…")
+    list.Close()
+    w.Main:FindFirstChild("TitleBar"):FindFirstChild("Close").MouseButton1Click:Fire()
+    local seen = texts(w.Main:FindFirstChild("Dialog"))
+    h.expect(seen["Tutup jendela?"]).toBe(true)
+    h.expect(seen["Pesan tutup"]).toBe(true)
+    h.expect(seen["Batal"]).toBe(true)
+    h.expect(seen["Tutup"]).toBe(true)
+  end)
+
+  h.it("missing words fall back to English", function()
+    local w = make({ Strings = { Cancel = "Batal" } })
+    h.expect(find(w.Main, "SearchInput").PlaceholderText).toBe("Search…")
+    w.Main:FindFirstChild("TitleBar"):FindFirstChild("Close").MouseButton1Click:Fire()
+    local seen = texts(w.Main:FindFirstChild("Dialog"))
+    h.expect(seen["Close window?"]).toBe(true)
+    h.expect(seen["Batal"]).toBe(true)
+    h.expect(seen["Close"]).toBe(true)
+  end)
+
+  h.it("every built-in word is covered: loading, empty states and the reset question", function()
+    local words = { Loading = "Memuat…", NoResults = "Tidak ketemu", NoMatches = "Tidak cocok", NoRows = "Kosong",
+      ResetTitle = "Reset?", ResetMessage = "Kembalikan semua", Reset = "Reset!", ResetDone = "Sudah direset", Cancel = "Batal" }
+    local w, R, screen = make({ Strings = words, Config = { Enabled = true, FileName = "STR", AutoSave = false } })
+    local tab = w:AddTab({ Name = "T" })
+    local loading = tab:AddSelectBox({ Text = "L", Options = { "a" }, Loading = true })
+    h.expect(loading.Frame:FindFirstChild("Field"):FindFirstChild("Value").Text).toBe("Memuat…")
+    local sb = tab:AddSelectBox({ Text = "S", Searchable = true, Options = { "a", "b" } })
+    sb.Open()
+    local dd
+    for _, c in ipairs(R.Overlay.get(screen):GetChildren()) do if c.Name == "SelectDropdown" then dd = c end end
+    h.expect(texts(dd)["Tidak ketemu"]).toBe(true)
+    sb.Close()
+    local tbl = tab:AddTable({ Columns = { "A" } })
+    h.expect(texts(tbl.Frame or tbl.Root or w.Main)["Kosong"]).toBe(true)
+    h.expect(texts(w.Main)["Tidak cocok"]).toBe(true)
+    w:ResetConfiguration()
+    local seen = texts(w.Main:FindFirstChild("Dialog"))
+    h.expect(seen["Reset?"]).toBe(true)
+    h.expect(seen["Kembalikan semua"]).toBe(true)
+    h.expect(seen["Reset!"]).toBe(true)
+    h.expect(seen["Batal"]).toBe(true)
+  end)
+
+  h.it("an unknown word warns and is ignored, so a newer key never breaks an older release", function()
+    local ok = pcall(make, { Strings = { Serch = "Cari…" } })
+    h.expect(ok).toBe(true)
+  end)
+
+  h.it("a word that is not a string is refused", function()
+    h.expect((pcall(make, { Strings = { None = 5 } }))).toBe(false)
+    h.expect((pcall(make, { Strings = "id" }))).toBe(false)
+  end)
+end)
+
 h.run()
+

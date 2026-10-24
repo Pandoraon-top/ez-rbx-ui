@@ -19,7 +19,7 @@ local SKELETON_H, SKELETON_GAP = 10, 8
 local LOADING_H = #SKELETON_ROWS * SKELETON_H + (#SKELETON_ROWS - 1) * SKELETON_GAP
 -- 3.4 dropdown empty state. `search-x` is NOT in core/icons.lua (the atlas builder skips names
 -- missing upstream), so the block uses the glyph that actually resolves.
-local EMPTY_ICON, EMPTY_TEXT = "search", "No results"
+local EMPTY_ICON = "search"
 -- ...and the height it needs: one Sizes.icon glyph, a Spacing.gap and one muted line, with a
 -- second gap of air so it is not flush against the popover edge. The popover must be at least
 -- this tall or ClipsDescendants does not trim the message, it removes it — the same hazard
@@ -94,13 +94,14 @@ function SelectBox.new(opts)
   local posConn -- repositions the open dropdown when the control scrolls
   local searchFocus -- focus ring of the dropdown search; torn down with the dropdown
   local ddUnreg -- 2.11: themer registration the OPEN popover holds; released in teardown
-  -- One entry per option row of the OPEN popover, in list order (components/selectrows.lua).
-  local optButtons = {}
+  -- The OPEN popover's option list: virtualised rows (components/selectrows.lua); nil while closed
+  -- or loading.
+  local ddRows
   local skeletons = {}  -- 3.1: Effects.skeleton handles of the OPEN loading body; Stop()ped in teardown
   local emptyState      -- 3.4: Recipes.empty block on the OPEN dropdown root; dies with it
   -- The open popover's list, its dividers and the shape it was built for (search box or not, and
   -- height), so SetOptions can update the rows in place instead of building the popover again.
-  local ddList, ddDividers, ddSearchable, ddHeight, ddLoading = nil, {}, false, 0, false
+  local ddSearchable, ddHeight, ddLoading = false, 0, false
   local ddSlide  -- the open popover's entrance slide (a Position tween), while it may still run
   local lastQuery = ""  -- the filter in force on the open popover, lower-cased
   local buildDropdown, rebuild, computePos, refresh, syncSelection, syncRows
@@ -113,16 +114,18 @@ function SelectBox.new(opts)
     return tostring(v)
   end
 
+  -- EzUI's own words (CreateWindow { Strings }); a theme without them reads the English defaults
+  local words = theme.Strings or DefaultTheme.Strings
   local function display()
     if multi then
-      if #value == 0 then return "None" end
+      if #value == 0 then return words.None end
       local shown = {}
       for i = 1, math.min(2, #value) do shown[i] = labelFor(value[i]) end
       local s = table.concat(shown, ", ")
       if #value > 2 then s = s .. " +" .. (#value - 2) end
       return s
     end
-    if value == nil then return "Select" end
+    if value == nil then return words.Select end
     return labelFor(value)
   end
 
@@ -262,7 +265,7 @@ function SelectBox.new(opts)
       fieldIcon.Visible = false
       clearBtn.Visible = false
       relayout()
-      valueLabel.Text = "Loading…"
+      valueLabel.Text = words.Loading
       return
     end
     local ic = selectedIcon()
@@ -331,10 +334,11 @@ function SelectBox.new(opts)
 
   -- Re-paint every open row from the live palette and the current selection: the open popover's
   -- themer closure (2.11) replays this one loop.
-  local function retintRows()
+  local function pickedTest()
     local set = pickedSet()
-    for _, e in ipairs(optButtons) do SelectRows.repaint(e, rowPicked(e.value, set), theme) end
+    return function(v) return rowPicked(v, set) end
   end
+  local function retintRows() if ddRows then ddRows:repaint() end end
 
   local function pick(opt)
     if multi then
@@ -362,32 +366,23 @@ function SelectBox.new(opts)
   -- it again on the same pass. nil while the dropdown is closed or still loading.
   local function syncEmpty()
     if not emptyState then return end
-    for _, e in ipairs(optButtons) do
-      if e.vis then emptyState.SetVisible(false); return end
-    end
-    emptyState.SetVisible(true)
+    emptyState.SetVisible(not (ddRows and ddRows.rowsShown > 0))
   end
 
-  -- Writes Visible only on rows whose visibility changes: a keystroke, or a SetOptions on a long
-  -- list, must not touch every row.
+  -- The list re-lays the matching rows and binds only the ones in view.
   function api.Filter(query)
     query = (query or ""):lower()
     lastQuery = query
-    for _, e in ipairs(optButtons) do
-      local vis = query == "" or e.find:find(query, 1, true) ~= nil
-      if e.vis ~= vis then e.btn.Visible = vis; e.vis = vis end
-    end
+    if ddRows then ddRows:filter(query) end
     syncEmpty()
   end
 
-  local rowCtx = { theme = theme, onPick = pick }
+  -- viewH: the list's height until the engine measures it (set per popover)
+  local rowCtx = { theme = theme, onPick = pick, picked = pickedTest, viewH = 0 }
 
-  -- Tick exactly the rows whose selection changed: the cheap path for a pick, a SetValue and a
-  -- SetOptions (retintRows is the full repaint).
-  function syncSelection()
-    local set = pickedSet()
-    for _, e in ipairs(optButtons) do SelectRows.tick(e, rowPicked(e.value, set), theme) end
-  end
+  -- Tick exactly the rows in view whose selection changed: the cheap path for a pick, a SetValue
+  -- and a SetOptions (retintRows is the full repaint).
+  function syncSelection() if ddRows then ddRows:syncSelection() end end
 
   -- Search box or not, and height, for the current options. SetOptions on an open popover
   -- resizes it in place when only the height changes, and rebuilds it only when a short list
@@ -410,9 +405,9 @@ function SelectBox.new(opts)
     return searchable, math.min(bodyH + (searchable and 44 or 8), 240)
   end
 
-  -- SetOptions on an open popover: the rows are updated in place, keyed by Value (SelectRows.sync).
-  -- The list, its scroll position and the search box are never touched, and the query in force is
-  -- applied again so new rows obey it.
+  -- SetOptions on an open popover: the list takes the new options in place. Its scroll position and
+  -- the search box are never touched, the query in force still filters, and only the rows in view
+  -- write what changed.
   function syncRows()
     local searchable, ddH = popoverShape()
     if searchable ~= ddSearchable then rebuild(); return end
@@ -427,17 +422,15 @@ function SelectBox.new(opts)
       dropdown.Size = UDim2.new(0, width, 0, ddH)
       dropdown.Position = UDim2.new(0, x, 0, y)
       Effects.place(shadow, x, y, width * ddScale, ddH * ddScale, "popover", theme)
+      rowCtx.viewH = ddH - (ddSearchable and 34 or 4) - 4
     end
-    local set = pickedSet()
-    optButtons, ddDividers = SelectRows.sync(ddList, optButtons, ddDividers, normed,
-      function(v) return rowPicked(v, set) end, rowCtx)
-    syncSelection()
-    api.Filter(lastQuery)
+    if ddRows then ddRows:setOptions(normed) end
+    syncEmpty()
   end
 
   -- `query`: the search text to carry over when the popover is rebuilt (a fresh Open passes none).
   function buildDropdown(query)
-    optButtons = {}
+    ddRows = nil
     skeletons = {}
     lastQuery = ""
     local searchable, ddH = popoverShape()
@@ -480,7 +473,6 @@ function SelectBox.new(opts)
     local searchBox, searchInput, searchStroke, searchRest
     local searchFocused = false
     local loadingRow = nil
-    ddDividers = {}
     local listTop = 4
     if searchable then
       listTop = 34 -- 4 top pad + 26 search + 4 gap
@@ -488,7 +480,7 @@ function SelectBox.new(opts)
         Position = UDim2.new(0, 4, 0, 4), Size = UDim2.new(1, -8, 0, 26), ZIndex = 1003, Parent = dropdown,
         Create.corner(theme.Radius.sm), Create.padding({ left = 8, right = 8 }) })
       searchInput = Create("TextBox", { Name = "Input", BackgroundTransparency = 1, Text = "",
-        PlaceholderText = "Search…", PlaceholderColor3 = theme.Colors.mutedForeground, TextColor3 = theme.Colors.foreground,
+        PlaceholderText = words.Search, PlaceholderColor3 = theme.Colors.mutedForeground, TextColor3 = theme.Colors.foreground,
         TextXAlignment = Enum.TextXAlignment.Left,
         ClearTextOnFocus = false, ZIndex = 1003, Size = UDim2.new(1, 0, 1, 0), Parent = searchBox })
       Create.text(searchInput, theme, "muted")
@@ -506,17 +498,16 @@ function SelectBox.new(opts)
       searchInput:GetPropertyChangedSignal("Text"):Connect(function() Safe.mutate(function() api.Filter(searchInput.Text) end) end)
     end
 
-    -- scrolling list of options/dividers, below the pinned search
+    -- scrolling list of options/dividers, below the pinned search. No layout: the virtual list
+    -- places each row itself and sizes the canvas to the whole list.
     local list = Create("ScrollingFrame", {
       Name = "List", BackgroundTransparency = 1, BorderSizePixel = 0,
       Position = UDim2.new(0, 4, 0, listTop),
       Size = UDim2.new(1, -8, 1, -(listTop + 4)),
       ClipsDescendants = true, ZIndex = 1001,
-      AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(0, 0, 0, 0),
+      AutomaticCanvasSize = Enum.AutomaticSize.None, CanvasSize = UDim2.new(0, 0, 0, 0),
       Parent = dropdown,
-      Create.listLayout({ Padding = 2 }),
     })
-    ddList = list
     Recipes.scrollbar(list, theme) -- 3.7: same pill (thickness, border tint, Scrollbar.alpha) as the table
 
     if loading then
@@ -534,19 +525,13 @@ function SelectBox.new(opts)
         })
       end
     else
-    local picked = pickedSet()
-    for i, e in ipairs(normed) do
-      if e.divider then
-        ddDividers[#ddDividers + 1] = Create("Frame", { Name = "Divider", BackgroundColor3 = theme.Colors.border, BorderSizePixel = 0,
-          Size = UDim2.new(1, -8, 0, 1), LayoutOrder = i, ZIndex = 1002, Parent = list })
-      else
-        optButtons[#optButtons + 1] = SelectRows.make(list, e, i, rowPicked(e.value, picked), rowCtx)
-      end
-    end
-    -- 3.4: parented to the dropdown ROOT, never to the List — the List owns a UIListLayout, so an
-    -- Empty child there would be laid out as one more option row. ZIndex above the rows (1002) so
-    -- it reads over the (now hidden) list instead of under it.
-    emptyState = Recipes.empty(dropdown, { theme = theme, text = EMPTY_TEXT, icon = EMPTY_ICON, zIndex = 1003 })
+    rowCtx.viewH = ddH - listTop - 4
+    ddRows = SelectRows.new(list, rowCtx)
+    ddRows:setOptions(normed)
+    -- 3.4: parented to the dropdown ROOT, never to the List — the List holds the option rows, so
+    -- an Empty child there would sit among them. ZIndex above the rows (1002) so it reads over the
+    -- (now empty) list instead of under it.
+    emptyState = Recipes.empty(dropdown, { theme = theme, text = words.NoResults, icon = EMPTY_ICON, zIndex = 1003 })
     -- Recipes.empty hardcodes (1,0,1,0) and carries no position, so on a searchable popover the
     -- centred icon/label stack would sit ON the pinned search field. Pin it over the LIST rect
     -- after the fact — the same placement window.lua gives its sidebar block.
@@ -578,13 +563,12 @@ function SelectBox.new(opts)
         searchStroke.Color = searchFocused and theme.Colors.ring or theme.Colors.border
         searchStroke.Transparency = searchFocused and theme.Stroke.control or searchRest()
       end
-      for _, d in ipairs(ddDividers) do d.BackgroundColor3 = theme.Colors.border end
       -- 3.1 skeleton blocks follow the surface token; the shimmer band keeps the mode it was born
       -- with (core/effects.lua has no 'skeleton' kind for Effects.reskin — reported as a deviation),
       -- which is invisible in practice: the band is a 1.1s sweep over a placeholder.
       for _, sk in ipairs(skeletons) do sk.Frame.BackgroundColor3 = theme.Colors.surface end
       if emptyState then emptyState.reskin() end       -- 3.4 muted icon + label
-      retintRows()                                     -- rows: fill, check, lead, label, description
+      retintRows()                                     -- rows and dividers: fill, check, lead, label, description
     end) or nil
     -- a rebuilt popover keeps the query the player typed (and the filter it drives)
     if searchInput and query and query ~= "" then
@@ -622,8 +606,8 @@ function SelectBox.new(opts)
     -- landing mid-fold can never paint the frame that is being destroyed.
     if ddUnreg then ddUnreg(); ddUnreg = nil end
     if searchFocus then searchFocus.disconnect(); searchFocus = nil end
-    for _, e in ipairs(optButtons) do if e.hover then e.hover.disconnect() end end
-    optButtons, ddList, ddDividers, lastQuery, ddSlide = {}, nil, {}, "", nil
+    if ddRows then ddRows:destroy() end
+    ddRows, lastQuery, ddSlide = nil, "", nil
     Overlay.untrackPopover(api.Close)
     local function stopSkeletons() for _, sk in ipairs(sks) do sk.Stop() end end
     if not dd then stopSkeletons(); return end

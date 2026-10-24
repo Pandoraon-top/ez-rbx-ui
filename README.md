@@ -89,6 +89,8 @@ See [`example/main.lua`](example/main.lua) for a full playground (`make run` to 
 | `Subtitle` | string | secondary line under the title |
 | `Image` | string | title-bar logo (`rbxassetid://` or `http(s)://`) |
 | `Ratio` | `{ Width, Height }` \| number | window size as a fraction of the viewport — `{ Width = 0.4, Height = 0.55 }` = 40% × 55% (a single number = same fraction both axes); default `{ Width = 0.45, Height = 0.6 }` |
+| `FixedSize` / `StartSize` | `{ Width, Height }` | window size in px on every screen instead of `Ratio`: `FixedSize` has no resize corner, `StartSize` keeps it and keeps the size the player drags |
+| `Strings` | table | EzUI's own words (`Search`, `None`, `Select`, `Loading`, `NoResults`, `NoMatches`, `NoRows`, `CloseTitle`, `CloseMessage`, `Cancel`, `Close`, `ResetTitle`, `ResetMessage`, `Reset`, `ResetDone`) for a hub in another language |
 | `Transparency` | number | window background transparency `0..1` (default `0.12`) |
 | `ToggleKey` | `Enum.KeyCode` | show/hide key (default `RightControl`) |
 | `FloatingToggle` | table | `{ Type, Position, Image, Size, Draggable, AutoHide }` (or `false` to disable) |

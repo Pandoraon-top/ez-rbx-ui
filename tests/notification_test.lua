@@ -16,6 +16,14 @@ local function expectEdge(stroke, theme, accent, border)
   h.expect(stroke.Color.G).toBeCloseTo(want.G)
   h.expect(stroke.Color.B).toBeCloseTo(want.B)
 end
+-- Tweens on a glyph other than its fade (a toast fades every part's own transparency).
+local function motionTweens(inst)
+  local out = {}
+  for _, tw in ipairs(h.mock.tweensFor(inst)) do
+    if tw.Goal.ImageTransparency == nil and tw.Goal.BackgroundTransparency == nil then out[#out + 1] = tw end
+  end
+  return out
+end
 h.describe("notification", function()
   h.it("persistent toast mounts; dismiss removes it", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(gui)
@@ -42,10 +50,10 @@ h.describe("notification", function()
     h.expect(bar() ~= nil).toBeTruthy()
     h.expect(bar().BackgroundColor3.G8).toBe(R.Theme.Colors.success.G8) -- success tint (compare by value; window deep-copies its theme)
     h.mock.stepHeartbeat(0.5)
-    h.expect(math.abs(bar().Size.X.Scale - 0.5) < 0.12).toBeTruthy()
+    h.expect(toastCount(gui)).toBe(1)
     cont().MouseEnter:Fire()              -- pause
     h.mock.stepHeartbeat(1.0)             -- would have dismissed if not paused
-    h.expect(bar() ~= nil).toBeTruthy()   -- still alive, bar frozen
+    h.expect(bar() ~= nil).toBeTruthy()   -- still alive
     cont().MouseLeave:Fire()              -- resume
     h.mock.stepHeartbeat(1.0)             -- past remaining -> dismiss
     h.expect(toastCount(gui)).toBe(0)
@@ -344,7 +352,7 @@ h.describe("notification", function()
     local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
     local id = R.Notification.loading({ Title = "Saving" })
     local icon = firstToast(root):FindFirstChild("TitleRow"):FindFirstChild("Icon")
-    local tw = h.mock.tweensFor(icon)[1]
+    local tw = motionTweens(icon)[1]
     h.expect(tw ~= nil).toBeTruthy()
     h.expect(tw.Info.RepeatCount).toBe(-1)
     h.expect(tw.Goal.Rotation).toBe(360)
@@ -352,7 +360,7 @@ h.describe("notification", function()
     R.Notification.update(id, { Type = "success", Duration = 0 })
     h.expect(tw.cancelled).toBe(true)
     h.expect(icon.Rotation).toBe(0)
-    h.expect(#h.mock.tweensFor(icon)).toBe(1)   -- no second spin for a non-loading type
+    h.expect(#motionTweens(icon)).toBe(1)       -- no second spin for a non-loading type
     R.Notification.clearAll()
   end)
 
@@ -409,10 +417,8 @@ h.describe("notification", function()
     h.expect(h.mock.heartbeatHandlers() <= base).toBeTruthy()   -- Init released the previous ticker
     local gui = h.roblox.Instance.new("ScreenGui"); local root = R3.Overlay.get(gui)
     R3.Notification.show({ Title = "t", Duration = 1000 })
-    local bar = firstToast(root):FindFirstChild("Progress")
-    h.mock.stepHeartbeat(0.5)
-    h.expect(bar.Size.X.Scale).toBeCloseTo(0.5, 0.01)   -- one ticker: 0.5 remaining, not 0
-    h.expect(R3.Notification.count()).toBe(1)
+    h.mock.stepHeartbeat(0.6)
+    h.expect(R3.Notification.count()).toBe(1)           -- one ticker: 0.4 s left, not -0.2 s
     R3.Notification.clearAll()
   end)
 
@@ -439,7 +445,7 @@ h.describe("notification", function()
     local pt = h.mock.tweensFor(toast)
     h.expect(pt[1].Info.EasingStyle).toBe(h.roblox.Enum.EasingStyle.Back)   -- position springs home
     h.expect(pt[1].Goal.Position.X.Offset).toBe(0)
-    h.expect(toast.GroupTransparency).toBe(0)                         -- faded in by the second tween
+    h.expect(toast.BackgroundTransparency).toBe(0)                    -- faded in by its own tween
     R.Notification.clearAll()
   end)
 
@@ -457,7 +463,7 @@ h.describe("notification", function()
     h.expect(st[#st].Goal.Scale).toBe(R.Theme.Toast.exitScale)
     local ft = h.mock.tweensFor(toast)
     h.expect(#ft).toBe(1)                                             -- one tween for the card itself
-    h.expect(ft[1].Goal.GroupTransparency).toBe(1)
+    h.expect(ft[1].Goal.BackgroundTransparency).toBe(1)
     h.expect(ft[1].Goal.Position.X.Offset).toBe(restX + R.Theme.Toast.exitSlide)  -- bottom-right: outward = right
     h.expect(ft[1].Info.EasingDirection).toBe(h.roblox.Enum.EasingDirection.In)
     h.expect(firstToast(root)).toBeNil()                              -- destroyed once the fold-out finishes
@@ -536,7 +542,7 @@ h.describe("notification", function()
     local icon = firstToast(root):FindFirstChild("TitleRow"):FindFirstChild("Icon")
     local iconScale = icon:FindFirstChildOfClass("UIScale")
     h.expect(iconScale ~= nil).toBeTruthy()          -- the pop scales a UIScale UNDER the glyph...
-    h.expect(#h.mock.tweensFor(icon)).toBe(0)        -- ...never the glyph (its Rotation is the spinner's)
+    h.expect(#motionTweens(icon)).toBe(0)            -- ...never the glyph (its Rotation is the spinner's)
     h.expect(iconScale.Scale).toBe(1)
     R.Notification.clearAll(); h.mock.resetTweens()
     R.Notification.show({ Title = "bad", Type = "error", Duration = 0 })
@@ -560,7 +566,7 @@ h.describe("notification", function()
       R.Notification.show({ Title = "bad", Type = "error", Duration = 0 })
       local toast = firstToast(root)
       h.expect(h.mock.tweenCount()).toBe(0)
-      h.expect(toast.GroupTransparency).toBe(0)      -- entrance applied instantly
+      h.expect(toast.BackgroundTransparency).toBe(0) -- entrance applied instantly
       h.expect(toast.Rotation).toBeNil()             -- never rotated at all
       R.Notification.clearAll()
       h.expect(toast.Parent).toBeNil()               -- exit is instant too
@@ -686,4 +692,133 @@ h.describe("notification", function()
     R.Notification.clearAll()
   end)
 end)
+-- A CanvasGroup renders its contents into a texture and renders them again whenever anything
+-- inside changes: a countdown bar resized every frame (and a loading spinner) re-rendered every
+-- visible toast on every frame. A toast is a plain Frame now: it fades by moving each part's own
+-- transparency, the bar is one tween, and the per-frame ticker only counts time.
+h.describe("toast: nothing re-renders every frame", function()
+  local function setup()
+    R.Notification.clearAll(); h.mock.resetTweens()
+    local gui = h.roblox.Instance.new("ScreenGui"); local root = R.Overlay.get(gui)
+    local function cont() for _, c in ipairs(root:GetChildren()) do if c.Name == "ToastContainer" then return c end end end
+    if cont() then cont().MouseLeave:Fire() end     -- no hover left over from another test
+    local function toasts()
+      local out = {}
+      for _, t in ipairs(cont():GetChildren()) do if t.Name == "Toast" then out[#out + 1] = t end end
+      return out
+    end
+    return cont, toasts
+  end
+  local function title(t) return t:FindFirstChild("TitleRow"):FindFirstChild("Title") end
+
+  h.it("a toast is a plain Frame and no CanvasGroup is left in the stack", function()
+    local cont, toasts = setup()
+    R.Notification.show({ Title = "a", Duration = 1000 })
+    R.Notification.loading({ Title = "b" })
+    for _, t in ipairs(toasts()) do h.expect(t.ClassName).toBe("Frame") end
+    local function anyGroup(inst)
+      for _, c in ipairs(inst:GetChildren()) do
+        if c.ClassName == "CanvasGroup" or anyGroup(c) then return true end
+      end
+      return false
+    end
+    h.expect(anyGroup(cont())).toBe(false)
+    R.Notification.clearAll()
+  end)
+
+  h.it("the countdown bar is one linear tween over the duration", function()
+    local _, toasts = setup()
+    R.Notification.show({ Title = "a", Duration = 2500 })
+    local bar = toasts()[1]:FindFirstChild("Progress")
+    local tws = {}
+    for _, tw in ipairs(h.mock.tweensFor(bar)) do if tw.Goal.Size then tws[#tws + 1] = tw end end
+    h.expect(#tws).toBe(1)
+    h.expect(tws[1].Info.Time).toBeCloseTo(2.5)
+    h.expect(tws[1].Info.EasingStyle).toBe(h.roblox.Enum.EasingStyle.Linear)
+    h.expect(tws[1].Goal.Size.X.Scale).toBe(0)
+    R.Notification.clearAll()
+  end)
+
+  h.it("while a toast counts down, a frame writes nothing to the GUI", function()
+    setup()
+    R.Notification.show({ Title = "a", Duration = 5000 })
+    R.Notification.show({ Title = "b", Duration = 5000 })
+    R.Safe._setCapabilityCheck(function() return true end)
+    h.mock.writes = 0
+    for _ = 1, 30 do h.mock.stepHeartbeat(1 / 60) end
+    h.expect(h.mock.writes).toBe(0)
+    R.Safe._setCapabilityCheck(nil)
+    R.Notification.clearAll()
+  end)
+
+  h.it("hover stops the bar and leaving runs it again for the time that is left", function()
+    local cont, toasts = setup()
+    R.Notification.show({ Title = "a", Duration = 2000 })
+    local bar = toasts()[1]:FindFirstChild("Progress")
+    h.mock.stepHeartbeat(0.5)
+    local first
+    for _, tw in ipairs(h.mock.tweensFor(bar)) do if tw.Goal.Size then first = tw end end
+    cont().MouseEnter:Fire()
+    h.expect(first.cancelled).toBe(true)
+    h.expect(bar.Size.X.Scale).toBeCloseTo(0.75)      -- held where the countdown is
+    h.mock.stepHeartbeat(5)
+    cont().MouseLeave:Fire()
+    local tws = h.mock.tweensFor(bar)
+    h.expect(tws[#tws].Goal.Size.X.Scale).toBe(0)
+    h.expect(tws[#tws].Info.Time).toBeCloseTo(1.5)
+    R.Notification.clearAll()
+  end)
+
+  h.it("the toast fades as a whole: every part rests at its own value, a peeking one is lighter", function()
+    local _, toasts = setup()
+    R.Notification.show({ Title = "old", Message = "m", Duration = 0 })
+    R.Notification.show({ Title = "new", Duration = 0 })
+    local back, front = toasts()[1], toasts()[2]
+    h.expect(front.BackgroundTransparency).toBe(0)
+    h.expect(title(front).TextTransparency).toBe(0)
+    h.expect(front:FindFirstChildOfClass("UIStroke").Transparency).toBe(R.Theme.Stroke.floating)
+    h.expect(front:FindFirstChild("TitleRow"):FindFirstChild("IconBadge").BackgroundTransparency).toBe(R.Theme.Toast.badgeAlpha)
+    local f = R.Theme.Toast.peekFade
+    h.expect(title(back).TextTransparency).toBeCloseTo(f)
+    h.expect(back.BackgroundTransparency).toBeCloseTo(f)
+    h.expect(back:FindFirstChild("Message").TextTransparency).toBeCloseTo(f)
+    local badgeRest = R.Theme.Toast.badgeAlpha
+    h.expect(back:FindFirstChild("TitleRow"):FindFirstChild("IconBadge").BackgroundTransparency)
+      .toBeCloseTo(badgeRest + (1 - badgeRest) * f)
+    R.Notification.clearAll()
+  end)
+
+  h.it("a dismissed toast fades every part out", function()
+    local _, toasts = setup()
+    local id = R.Notification.show({ Title = "a", Message = "m", Duration = 0 })
+    local t = toasts()[1]
+    local msg, ttl = t:FindFirstChild("Message"), title(t)
+    R.Notification.dismiss(id)
+    h.expect(ttl.TextTransparency).toBe(1)
+    h.expect(msg.TextTransparency).toBe(1)
+    h.expect(t.Parent).toBeNil()
+  end)
+
+  h.it("a message added by an update joins the toast's fade", function()
+    local _, toasts = setup()
+    local back = R.Notification.show({ Title = "a", Duration = 0 })
+    R.Notification.show({ Title = "b", Duration = 0 })
+    R.Notification.update(back, { Message = "late" })
+    h.expect(toasts()[1]:FindFirstChild("Message").TextTransparency).toBeCloseTo(R.Theme.Toast.peekFade)
+    R.Notification.clearAll()
+  end)
+
+  h.it("reduced motion: the bar holds still and the toast still leaves on time", function()
+    h.withReducedMotion(R, function()
+      local _, toasts = setup()
+      R.Notification.show({ Title = "a", Duration = 1000 })
+      local bar = toasts()[1]:FindFirstChild("Progress")
+      h.expect(#h.mock.tweensFor(bar)).toBe(0)
+      h.expect(bar.Size.X.Scale).toBe(1)
+      h.mock.stepHeartbeat(1.1)
+      h.expect(R.Notification.count()).toBe(0)
+    end)
+  end)
+end)
+
 h.run()

@@ -212,7 +212,8 @@ function Table.new(opts)
   -- ZIndex -- under ZIndexBehavior.Sibling that puts it above Body and everything inside it.
   local emptyArea = Create("Frame", { Name = "EmptyArea", BackgroundTransparency = 1, Active = false,
     Position = UDim2.new(0, 0, 0, BODY_Y), Size = UDim2.new(1, 0, 1, -BODY_Y), ZIndex = 2, Parent = root })
-  local empty = Recipes.empty(emptyArea, { theme = theme, text = "No rows", icon = "inbox", zIndex = 2 })
+  local words = theme.Strings or DefaultTheme.Strings   -- CreateWindow { Strings } (NoRows)
+  local empty = Recipes.empty(emptyArea, { theme = theme, text = words.NoRows, icon = "inbox", zIndex = 2 })
 
   -- Body rows answer hover through the FILL kind of the hover recipe: the Row lays its cells out
   -- with a horizontal UIListLayout, so a wash Frame would be laid out as an extra column. `fill`

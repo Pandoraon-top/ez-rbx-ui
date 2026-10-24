@@ -58,7 +58,7 @@ local SIDEBAR_TOP = 36
 -- the whole library asks for attention in one voice; only the geometry and the count live here.
 local HALO_OUT, HALO_CYCLES = 12, 5
 -- 3.4 Sidebar empty state. 'search' (not 'search-x', which the Lucide atlas does not carry).
-local SIDEBAR_EMPTY_ICON, SIDEBAR_EMPTY_TEXT = "search", "No matches"
+local SIDEBAR_EMPTY_ICON = "search"
 -- 3.1 how long the title logo's slot may stand empty before the wait is called off. No theme
 -- token holds a fetch budget (reported as a deviation), so a module-local fallback in the style
 -- core/animate.lua uses for FALLBACK, carrying the 60s selectbox.lua gives its loader.
@@ -99,8 +99,33 @@ end
 
 function Window.new(config)
   config = config or {}
+  -- Strings = { Search, None, Select, CloseTitle, CloseMessage, Cancel, Close }: EzUI's own words
+  -- for a hub in another language. They ride on the theme (theme.Strings), which every control
+  -- already holds; a key left out keeps the English default.
+  -- An unknown key only warns: a hub written for a newer EzUI may run on an older cached one.
+  local function themeOverrides()
+    local over, words = config.Theme or {}, config.Strings
+    if words == nil then return over end
+    if type(words) ~= "table" then error("CreateWindow: Strings must be a table of strings", 4) end
+    local known = DefaultTheme.Strings or {}
+    local merged, all = {}, {}
+    for k, v in pairs(over) do merged[k] = v end
+    if type(over.Strings) == "table" then for k, v in pairs(over.Strings) do all[k] = v end end
+    for k, v in pairs(words) do
+      if type(v) ~= "string" then
+        error(("CreateWindow: Strings.%s must be a string, got %s"):format(tostring(k), type(v)), 4)
+      end
+      if known[k] == nil then
+        if warn then warn(("[EzUI] CreateWindow: unknown Strings key %q is ignored"):format(tostring(k))) end
+      else
+        all[k] = v
+      end
+    end
+    merged.Strings = all
+    return merged
+  end
   -- merge a partial Theme override onto the defaults (verbatim use would crash on missing tokens)
-  local theme = DefaultTheme.new(config.Theme or {})
+  local theme = DefaultTheme.new(themeOverrides())
   -- a Theme = { Motion = {...} } override retunes every Animate token name (process-wide, like enabled)
   Animate.useMotion(theme.Motion)
   if config.Mode == "light" then DefaultTheme.applyMode(theme, "light") else theme.Mode = "dark" end
@@ -131,6 +156,25 @@ function Window.new(config)
     return wf, hf
   end
   local widthFrac, heightFrac = fractionsFromRatio(config.Ratio)
+  -- FixedSize / StartSize = { Width, Height } in px: the window gets that size on every screen
+  -- instead of a share of the viewport (a hub fits a small screen with SetUIScale). FixedSize has
+  -- no resize corner and never changes size; StartSize keeps the corner, and a size the player
+  -- drags is kept from then on.
+  -- { Width, Height } or positional { w, h } like Ratio; floored at the minimum window (MIN_W x
+  -- MIN_H) and to whole pixels, so a preset can never open a window too small to lay out.
+  local function sizeOption(name)
+    local v = config[name]
+    if v == nil then return nil end
+    local w = type(v) == "table" and tonumber(v.Width or v[1]) or nil
+    local ht = type(v) == "table" and tonumber(v.Height or v[2]) or nil
+    if not (w and ht and w > 0 and ht > 0 and w < math.huge and ht < math.huge) then
+      error(("CreateWindow: %s must be { Width = n, Height = n } with positive numbers"):format(name), 4)
+    end
+    return { math.max(MIN_W, math.floor(w)), math.max(MIN_H, math.floor(ht)) }
+  end
+  local fixedSize, startSize = sizeOption("FixedSize"), sizeOption("StartSize")
+  if fixedSize and startSize then error("CreateWindow: give FixedSize or StartSize, not both", 3) end
+  local presetSize = fixedSize or startSize
   local function viewportSize()
     local cam = workspace and workspace.CurrentCamera
     local vp = cam and cam.ViewportSize
@@ -138,6 +182,7 @@ function Window.new(config)
     return FALLBACK_VP
   end
   local function computeSize()
+    if presetSize then return presetSize[1], presetSize[2] end
     local vp = viewportSize()
     local w = vp.X * widthFrac
     local h = vp.Y * heightFrac
@@ -162,6 +207,12 @@ function Window.new(config)
   local userMoved = false  -- set when the user drags/resizes; viewport changes then clamp instead of re-centering
   local dragging = false   -- title-bar drag in flight (read by AdaptToViewport and the fold drift)
   local userResized = false  -- set when the user drags the grip; AdaptToViewport then preserves the manual size
+  -- The size the player chose with the grip. A smaller screen narrows the window without forgetting
+  -- it, so the window grows back when the screen does (rotating a phone back and forth).
+  local userW, userH
+  -- AdaptToViewport skipped while a drag owned the window (a scale or screen change mid-gesture);
+  -- the drag's end runs it (flushAdapt, assigned once api exists).
+  local adaptPending, flushAdapt = false, nil
   local closeCallback
   local themer = Themer.new()
   local lockables = {}
@@ -221,6 +272,11 @@ function Window.new(config)
   local mainStroke = main:FindFirstChildOfClass("UIStroke")
   local winScale = Create("UIScale", { Scale = 1, Parent = main })
   local userScale = 1
+  -- The scale the window is SHOWN at (SetUIScale); a junk value reads as 1. Every clamp below works
+  -- in screen px, so it multiplies the window's own (unscaled) size by this.
+  local function shownScale()
+    return (type(userScale) == "number" and userScale > 0 and userScale < math.huge) and userScale or 1
+  end
   -- Drop shadow: a SIBLING of Main under the ScreenGui with a LOWER ZIndex (Main is 1) -- under
   -- ZIndexBehavior.Sibling a child would render above its parent's fill. The overlay is not in
   -- this ScreenGui any more (see Overlay.get): it draws above the window by DisplayOrder, and
@@ -461,7 +517,7 @@ function Window.new(config)
   local searchStroke = Create.stroke(theme.Colors.border, 1, theme.modeVal(theme, theme.Stroke.search))
   searchStroke.Parent = searchBox
   local searchInput = Create("TextBox", {
-    Name = "SearchInput", BackgroundTransparency = 1, Text = "", PlaceholderText = "Search…",
+    Name = "SearchInput", BackgroundTransparency = 1, Text = "", PlaceholderText = theme.Strings.Search,
     PlaceholderColor3 = theme.Colors.mutedForeground, TextColor3 = theme.Colors.foreground,
     TextXAlignment = Enum.TextXAlignment.Left,
     ClearTextOnFocus = false, Size = UDim2.new(1, 0, 1, 0), Parent = searchBox,
@@ -503,7 +559,7 @@ function Window.new(config)
   -- never to the sidebar: the sidebar owns a UIListLayout, so an Empty child there would be laid
   -- out as one more tab row. Body positions its children by hand (like the indicator), so the
   -- block is sized over the sidebar band and applySidebarWidth keeps it in step.
-  local sidebarEmpty = Recipes.empty(body, { theme = theme, text = SIDEBAR_EMPTY_TEXT,
+  local sidebarEmpty = Recipes.empty(body, { theme = theme, text = theme.Strings.NoMatches,
     icon = SIDEBAR_EMPTY_ICON, zIndex = 4 })
   sidebarEmpty.Frame.Position = UDim2.new(0, 0, 0, SIDEBAR_TOP)
   sidebarEmpty.Frame.Size = UDim2.new(0, sidebarW, 1, -SIDEBAR_TOP)
@@ -638,7 +694,7 @@ function Window.new(config)
       local bp = body.AbsolutePosition
       applySidebarWidth(pos.X - (bp and bp.X or 0) - cgap / 2)
     end,
-    onEnd = function() sbDrag = false; paintGrip() end,
+    onEnd = function() sbDrag = false; paintGrip(); if flushAdapt then flushAdapt() end end,
   }, maid)
 
   -- single active-tab indicator that slides between sidebar buttons (lives in Body so the
@@ -941,7 +997,8 @@ function Window.new(config)
         onDone = function()
           -- the drift is transient: put the window back, but only if nothing else moved it in
           -- the meantime (a drag started mid-fold would already own Position)
-          if drift and main.Position == drift then main.Position = restPos; syncShadow() end
+          -- (restingPos, not restPos: a screen or scale change during the fold re-clamped it)
+          if drift and main.Position == drift then main.Position = restingPos or restPos; syncShadow() end
           if gen ~= hideGen then return end  -- a Show raced the fold: it owns Visible now
           restingPos = nil
           main.Visible = false
@@ -1009,6 +1066,8 @@ function Window.new(config)
         Overlay.setScale(n)
         if Notif.setScale then Notif.setScale(n) end   -- toast container scale (cross-group contract)
       end
+      -- a moved window was kept on screen at the OLD scale; a bigger one can now overhang the edge
+      if userMoved and api.AdaptToViewport then api:AdaptToViewport() end
       syncShadow()   -- last: mirror the geometry everything else just settled on
     end)
     return n
@@ -1034,14 +1093,15 @@ function Window.new(config)
     if not cfg then return end
     local function doReset()
       cfg:Reset({ ClearFile = o.ClearFile })
-      api:ShowSuccess({ Title = "Reset", Message = "Settings restored to defaults." })
+      api:ShowSuccess({ Title = theme.Strings.Reset, Message = theme.Strings.ResetDone })
     end
     if o.Confirm == false then
       doReset()
     else
-      api:Dialog({ Title = "Reset settings?", Message = "This restores all options to their defaults.", Buttons = {
-        { Text = "Cancel", Variant = "secondary" },
-        { Text = "Reset", Variant = "destructive", Callback = doReset },
+      local words = theme.Strings
+      api:Dialog({ Title = words.ResetTitle, Message = words.ResetMessage, Buttons = {
+        { Text = words.Cancel, Variant = "secondary" },
+        { Text = words.Reset, Variant = "destructive", Callback = doReset },
       } })
     end
   end
@@ -1477,15 +1537,18 @@ function Window.new(config)
       -- and the top edge stays in [0, vp.Y - titleH]. The Scale halves of the start Position are
       -- preserved, so a window that was never dropped keeps its 0.5/0.5 anchoring.
       -- AdaptToViewport is NOT involved (it early-returns while dragging): one clamp, one writer.
+      -- Sizes are the SHOWN ones (times the UI scale): the clamp is in screen px.
       local vp = viewportSize()
+      local s = shownScale()
+      local sw, sh, sbar = width * s, height * s, titleH * s
       local baseX, baseY = dragStartPos.X.Scale * vp.X, dragStartPos.Y.Scale * vp.Y
-      local cx = clamp(baseX + dragStartPos.X.Offset + dx, S.dragKeep - width / 2, vp.X - S.dragKeep + width / 2)
-      local cy = clamp(baseY + dragStartPos.Y.Offset + dy, height / 2, vp.Y - titleH + height / 2)
+      local cx = clamp(baseX + dragStartPos.X.Offset + dx, S.dragKeep - sw / 2, vp.X - S.dragKeep + sw / 2)
+      local cy = clamp(baseY + dragStartPos.Y.Offset + dy, sh / 2, vp.Y - sbar + sh / 2)
       main.Position = UDim2.new(dragStartPos.X.Scale, cx - baseX, dragStartPos.Y.Scale, cy - baseY)
       userMoved = true
       syncShadow()
     end,
-    onEnd = function() dragging = false; grabbed(false) end,
+    onEnd = function() dragging = false; grabbed(false); flushAdapt() end,
   }, maid)
 
   -- resize via bottom-right grip. The glyph lives in the rounded corner gutter (Sizes.resizeGrip
@@ -1499,6 +1562,7 @@ function Window.new(config)
   -- because no handler was ever bound to it. The affordance was eating the gesture it advertises.
   grip = Create("ImageLabel", {
     Name = "ResizeGrip", BackgroundTransparency = 1,
+    Visible = not fixedSize,   -- FixedSize: no resize corner
     AnchorPoint = Vector2.new(1, 1), Size = UDim2.new(0, S.resizeGrip, 0, S.resizeGrip),
     Position = UDim2.new(1, -S.resizeGripInset, 1, -S.resizeGripInset),
     ZIndex = 50, Parent = main,
@@ -1519,6 +1583,7 @@ function Window.new(config)
   local gripHitPx = math.max(gripReach, Device.IsTouch() and S.touchHit or 0)
   local resizeHit = Create("ImageButton", {
     Name = "ResizeHit", AutoButtonColor = false, BackgroundTransparency = 1,
+    Visible = not fixedSize, Active = not fixedSize,
     AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(0, gripHitPx, 0, gripHitPx), Position = UDim2.new(1, 0, 1, 0),
     ZIndex = 51, Parent = main,
   })
@@ -1532,23 +1597,26 @@ function Window.new(config)
       Overlay.closeAll(); grabbed(true)
     end,
     onChange = function(dx, dy)
-      width = math.max(MIN_W, rSize.X + dx)
-      height = math.max(MIN_H, rSize.Y + dy)
+      -- the pointer moves in screen px; at a UI scale s one window px shows as s screen px
+      local s = shownScale()
+      width = math.max(MIN_W, rSize.X + dx / s)
+      height = math.max(MIN_H, rSize.Y + dy / s)
       local vp = viewportSize()
-      width = math.min(width, vp.X); height = math.min(height, vp.Y)
+      width = math.min(width, vp.X / s); height = math.min(height, vp.Y / s)
       main.Size = UDim2.new(0, width, 0, height)
-      -- centre pivot: half of every size delta goes into Position, otherwise growing the window
-      -- from the bottom-right corner would walk its top-left corner up and to the left. Derived
-      -- from the drag START each event, so it never accumulates rounding.
-      main.Position = UDim2.new(rPos.X.Scale, rPos.X.Offset + (width - rSize.X) / 2,
-        rPos.Y.Scale, rPos.Y.Offset + (height - rSize.Y) / 2)
+      -- centre pivot: half of every SHOWN size delta goes into Position, otherwise growing the
+      -- window from the bottom-right corner would walk its top-left corner up and to the left.
+      -- Derived from the drag START each event, so it never accumulates rounding.
+      main.Position = UDim2.new(rPos.X.Scale, rPos.X.Offset + (width - rSize.X) * s / 2,
+        rPos.Y.Scale, rPos.Y.Offset + (height - rSize.Y) * s / 2)
       widthFrac = width / vp.X      -- keep proportions current; only used when not userResized
       heightFrac = height / vp.Y
+      userW, userH = width, height
       userMoved = true
       userResized = true
       syncShadow()
     end,
-    onEnd = function() resizing = false; grabbed(false) end,
+    onEnd = function() resizing = false; grabbed(false); flushAdapt() end,
   }, maid)
 
   -- toggle key
@@ -1560,39 +1628,50 @@ function Window.new(config)
     if config.ConfirmClose == false then api:Close(); return end
     -- Close is permanent (the toggle key and the floating button go with it), so say so, and point
     -- at the one button that keeps the window around.
-    api:Dialog({ Title = "Close window?",
-      Message = "This closes it for good; run the script again to get it back. To just hide it, minimize it with the – button next to the X.",
+    local words = theme.Strings
+    api:Dialog({ Title = words.CloseTitle, Message = words.CloseMessage,
       Buttons = {
-        { Text = "Cancel", Variant = "secondary" },
-        { Text = "Close", Variant = "destructive", Callback = function() api:Close() end },
+        { Text = words.Cancel, Variant = "secondary" },
+        { Text = words.Close, Variant = "destructive", Callback = function() api:Close() end },
       } })
   end
 
   -- responsive: always re-fit to the viewport, preserving the configured Ratio
   function api:AdaptToViewport()
-    if dragging or resizing or sbDrag then return end  -- don't fight an active drag/resize
+    -- don't fight an active drag/resize: the gesture's end runs this instead
+    if dragging or resizing or sbDrag then adaptPending = true; return end
+    adaptPending = false
     local vp = viewportSize()
+    local s = shownScale()
     if userResized then
-      -- honor the user's manual size; only shrink to fit a smaller viewport
-      width = math.max(MIN_W, math.min(width, math.floor(vp.X * VP_MARGIN)))
-      height = math.max(MIN_H, math.min(height, math.floor(vp.Y * VP_MARGIN)))
+      -- honor the user's manual size; only narrow it to fit a smaller viewport (as shown)
+      width = math.max(MIN_W, math.min(userW or width, math.floor(vp.X * VP_MARGIN / s)))
+      height = math.max(MIN_H, math.min(userH or height, math.floor(vp.Y * VP_MARGIN / s)))
     else
       width, height = computeSize()
     end
     main.Size = UDim2.new(0, width, 0, height)
+    -- A Hide in flight owns Main's Position (its tween) and will put the window back at
+    -- restingPos: re-place THAT, or the fold would restore the position for the old screen.
+    local folding = restingPos ~= nil
+    local place
     if userMoved then
       -- honor the user's placement; just keep it on-screen in the new viewport. Position is the
-      -- centre, so clamp the top-left corner derived from it and write the centre back.
-      local cx = main.Position.X.Scale * vp.X + main.Position.X.Offset
-      local cy = main.Position.Y.Scale * vp.Y + main.Position.Y.Offset
-      local left = clamp(cx - width / 2, 0, vp.X - width)
-      local top = clamp(cy - height / 2, 0, vp.Y - height)
-      main.Position = UDim2.new(0, left + width / 2, 0, top + height / 2)
+      -- centre, so clamp the top-left corner derived from it and write the centre back, all in
+      -- screen px (the SHOWN size).
+      local at = restingPos or main.Position
+      local sw, sh = width * s, height * s
+      local cx = at.X.Scale * vp.X + at.X.Offset
+      local cy = at.Y.Scale * vp.Y + at.Y.Offset
+      local left = clamp(cx - sw / 2, 0, vp.X - sw)
+      local top = clamp(cy - sh / 2, 0, vp.Y - sh)
+      place = UDim2.new(0, left + sw / 2, 0, top + sh / 2)
     else
-      main.Position = UDim2.new(0.5, 0, 0.5, 0)
+      place = UDim2.new(0.5, 0, 0.5, 0)
     end
-    syncShadow()
+    if folding then restingPos = place else main.Position = place; syncShadow() end
   end
+  flushAdapt = function() if adaptPending then api:AdaptToViewport() end end
   api:AdaptToViewport()
   do
     local cam = workspace and workspace.CurrentCamera

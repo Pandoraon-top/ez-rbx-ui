@@ -1,9 +1,12 @@
 -- Deps injected via Init(R). Sonner-style toasts: slide in from the anchored edge, stack
 -- bottom-right (newest in front), older ones peek behind (scaled + faded); hover the stack to
--- expand into a full list. Each toast is a CanvasGroup so it fades -- and exits -- as one piece.
+-- expand into a full list. A toast is a plain Frame that fades as one piece by moving each part's
+-- own transparency (see fadeTo): a CanvasGroup renders its contents into a texture again whenever
+-- anything inside changes, and a countdown bar or a loading spinner changes every frame.
 local Notification = {}
 local Create, DefaultTheme, Maid, Overlay, Animate, Icons, Safe, Effects, Recipes
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local container
 local stackShadow  -- ONE shadow under the front toast (sibling of the toasts, ZIndex 0)
 local order = {}   -- array of entries (oldest first, newest last)
@@ -81,23 +84,85 @@ local function stopTicker()
   if stepConn then stepConn:Disconnect(); stepConn = nil end
 end
 
+-- Counts time only: no GUI write happens here (the bar is a tween, see runBar), so a frame with
+-- toasts on screen costs one subtraction per timed toast.
 local function tick(dt)
   for i = #order, 1, -1 do
     local e = order[i]
     if e.frame and e.total and not e.paused then
       e.remaining = e.remaining - dt
-      -- Heartbeat handlers lack the GUI capability on strict executors, so a raw write throws.
-      -- pcall (not Safe.mutate) because this is a per-frame cosmetic write -- skip it cleanly when
-      -- there's no capability rather than deferring 60 writes/sec. The countdown + dismiss below
-      -- run on plain Lua state / Safe.mutate, so the toast still expires correctly.
-      if e.bar then
-        local bh = ((e.theme or DefaultTheme).Toast).barHeight
-        pcall(function() e.bar.Size = UDim2.new(math.max(0, e.remaining / e.total), 0, 0, bh) end)
-      end
       if e.remaining <= 0 then Notification.dismiss(e.id) end
     end
   end
   if #order == 0 then stopTicker() end
+end
+
+-- ---- fade ---------------------------------------------------------------------------------------
+-- A part rests at its own transparency; the toast's fade `a` (0 = shown, 1 = gone) lifts each one
+-- toward 1 by the same share, which is what a group fade looks like for an opaque card.
+local function faded(rest, a) return rest + (1 - rest) * a end
+
+-- Register a part of the toast: it takes the toast's current fade at once and follows every fade
+-- after. A part created later (a message, a countdown bar) joins mid-life the same way.
+local function addPart(entry, inst, prop, rest)
+  entry.parts[#entry.parts + 1] = { inst = inst, prop = prop, rest = rest }
+  inst[prop] = faded(rest, entry.alpha or 1)
+end
+local function dropParts(entry, inst)
+  for i = #entry.parts, 1, -1 do if entry.parts[i].inst == inst then table.remove(entry.parts, i) end end
+end
+
+-- Fade the whole toast to `a`: one tween per instance (its faded properties together), with
+-- `frameExtra` (Position for the stack and the exit) riding the card's own tween and `onDone`
+-- hanging off it.
+local function fadeTo(entry, a, dur, style, dir, delay, frameExtra, onDone)
+  entry.alpha = a
+  local goals, insts = {}, {}
+  for _, p in ipairs(entry.parts) do
+    local g = goals[p.inst]
+    if not g then g = {}; goals[p.inst] = g; insts[#insts + 1] = p.inst end
+    g[p.prop] = faded(p.rest, a)
+  end
+  local frame = entry.frame
+  if frameExtra then
+    local g = goals[frame]
+    if not g then g = {}; goals[frame] = g; insts[#insts + 1] = frame end
+    for k, v in pairs(frameExtra) do g[k] = v end
+  end
+  -- the card last: under reduced motion its tween lands (and onDone may destroy it) at once
+  for _, inst in ipairs(insts) do
+    if inst ~= frame then Animate.to(inst, dur, goals[inst], style, dir, delay) end
+  end
+  if goals[frame] then
+    if onDone then Animate.toThen(frame, dur, goals[frame], onDone, style, dir)
+    else Animate.to(frame, dur, goals[frame], style, dir, delay) end
+  elseif onDone then
+    onDone()
+  end
+end
+
+-- ---- countdown bar --------------------------------------------------------------------------
+-- The bar empties through ONE linear tween from where the countdown stands; hover cancels it
+-- (the bar holds) and leaving starts it again for the time that is left. Under reduced motion it
+-- holds still and the toast still leaves on time (the ticker owns the timing).
+local function freezeBar(e)
+  if e.barTween then e.barTween:Cancel(); e.barTween = nil end
+end
+-- hover: stop the bar and hold it exactly where the countdown stands (one write, not per frame)
+local function holdBar(e)
+  freezeBar(e)
+  if not (e.bar and e.total and e.remaining) then return end
+  e.bar.Size = UDim2.new(math.max(0, e.remaining / e.total), 0, 0, (e.theme or DefaultTheme).Toast.barHeight)
+end
+local function runBar(e)
+  freezeBar(e)
+  if not (e.bar and e.total and e.remaining) then return end
+  local bh = (e.theme or DefaultTheme).Toast.barHeight
+  e.bar.Size = UDim2.new(math.max(0, e.remaining / e.total), 0, 0, bh)
+  if not Animate.isEnabled() or e.remaining <= 0 then return end
+  e.barTween = TweenService:Create(e.bar, TweenInfo.new(e.remaining, Enum.EasingStyle.Linear),
+    { Size = UDim2.new(0, 0, 0, bh) })
+  e.barTween:Play()
 end
 
 local function ensureTicker()
@@ -124,12 +189,18 @@ local function ensureContainer(theme)
   Create("UIScale", { Name = "ContainerScale", Scale = currentScale(), Parent = container })
   container.MouseEnter:Connect(function()
     expanded = true
-    for _, e in ipairs(order) do e.paused = true end
+    for _, e in ipairs(order) do
+      e.paused = true
+      if e.bar then Safe.mutate(function() holdBar(e) end) end
+    end
     Notification.relayout("expand")   -- the one pass that fans the rows out on a stagger
   end)
   container.MouseLeave:Connect(function()
     expanded = false
-    for _, e in ipairs(order) do e.paused = false end
+    for _, e in ipairs(order) do
+      e.paused = false
+      if e.bar then Safe.mutate(function() runBar(e) end) end
+    end
     Notification.relayout()
   end)
   Overlay.mount(container)
@@ -223,7 +294,7 @@ function Notification.relayout(reason)
         -- which is why the entrance never actually overshot.
         e.entering = false
         Animate.springTo(e.frame, "enter", { Position = target })
-        Animate.to(e.frame, "base", { GroupTransparency = transp }, Animate.EASING.enter)
+        fadeTo(e, transp, "base", Animate.EASING.enter)
         Animate.springTo(e.scale, "enter", { Scale = scale })
       elseif moved or reason ~= "measure" then
         -- Expanding the stack fans the rows open: each one further back waits an extra
@@ -231,7 +302,12 @@ function Notification.relayout(reason)
         -- the expand pass itself: a reflow that happens to land while expanded (a measurement, an
         -- update that regrew a toast) must move at delay 0 or it re-arms the whole fan.
         local d = (expanded and reason == "expand") and math.min(i, TK.staggerCap) * M.stagger or 0
-        Animate.to(e.frame, "base", { Position = target, GroupTransparency = transp }, Animate.EASING.smooth, nil, d)
+        -- the fade is re-issued only when it changes: it is one tween per part, not one per toast
+        if e.alpha ~= transp then
+          fadeTo(e, transp, "base", Animate.EASING.smooth, nil, d, { Position = target })
+        else
+          Animate.to(e.frame, "base", { Position = target }, Animate.EASING.smooth, nil, d)
+        end
         Animate.to(e.scale, "base", { Scale = scale }, Animate.EASING.smooth, nil, d)
       end
     end
@@ -276,15 +352,23 @@ local function startCountdown(entry, total, accent, theme)
   local bar = Create("Frame", { Name = "Progress", BackgroundColor3 = accent, BorderSizePixel = 0,
     Size = UDim2.new(1, 0, 0, theme.Toast.barHeight), LayoutOrder = 99, Parent = entry.frame,
     Create.corner(theme.Radius.xs) })
+  addPart(entry, bar, "BackgroundTransparency", 0)
   entry.total = total; entry.remaining = total; entry.paused = false; entry.bar = bar
   setProgressPad(entry, true)
+  runBar(entry)
 end
 
-local function createMsgLabel(text, theme, parent)
+local function dropBar(entry)
+  freezeBar(entry)
+  if entry.bar then dropParts(entry, entry.bar); entry.bar:Destroy(); entry.bar = nil end
+end
+
+local function createMsgLabel(text, theme, entry)
   local lbl = Create("TextLabel", { Name = "Message", BackgroundTransparency = 1, Text = text,
     TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
     TextYAlignment = Enum.TextYAlignment.Top,
-    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, Parent = parent })
+    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, Parent = entry.frame })
+  addPart(entry, lbl, "TextTransparency", 0)
   return Create.text(lbl, theme, "muted")
 end
 
@@ -357,7 +441,7 @@ function Notification.show(opts)
   local theme = opts.Theme or DefaultTheme
   seq = seq + 1
   local id = seq
-  local entry = { id = id, onDismiss = opts.OnDismiss, releases = {} }
+  local entry = { id = id, onDismiss = opts.OnDismiss, releases = {}, parts = {}, alpha = 1 }
   order[#order + 1] = entry           -- reserve FIFO slot synchronously
   Safe.mutate(function()
     local TK = theme.Toast
@@ -374,8 +458,8 @@ function Notification.show(opts)
     local hasBar = (ty ~= "loading") and ((opts.Duration or 4000) > 0)
     local padding = Create.padding({ left = TK.padX, right = TK.padX, top = TK.padY,
       bottom = hasBar and TK.progressInset or TK.padY })
-    local toast = Create("CanvasGroup", {
-      Name = "Toast", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0, GroupTransparency = 1,
+    local toast = Create("Frame", {
+      Name = "Toast", BackgroundColor3 = theme.Colors.card, BorderSizePixel = 0,
       AnchorPoint = Vector2.new(pcfg.ax, pcfg.ay), Position = UDim2.new(sx.Scale, sx.Offset, sy.Scale, sy.Offset),
       Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Parent = container,
       Create.corner(theme.Radius.md), padding,
@@ -384,6 +468,10 @@ function Notification.show(opts)
     -- floating surface: opaque hairline (Stroke.floating) tinted Toast.typeTint toward the type
     local stroke = Create.stroke(edgeColor(theme, accent), 1, theme.Stroke.floating)
     stroke.Parent = toast
+    -- Entrance state: every part fully faded (alpha 1); relayout's entering branch fades them in.
+    entry.frame = toast
+    addPart(entry, toast, "BackgroundTransparency", 0)
+    addPart(entry, stroke, "Transparency", theme.Stroke.floating)
     -- Entrance state: off-edge, fully faded, shrunk. relayout (entering branch) animates all three.
     local scale = Create("UIScale", { Scale = theme.Motion.enterScale, Parent = toast })
     entry.entering = true
@@ -409,12 +497,15 @@ function Notification.show(opts)
       Size = UDim2.new(0, theme.Sizes.icon, 0, theme.Sizes.icon),
       Position = UDim2.new(0, 0, 0.5, -theme.Sizes.icon / 2), Parent = titleRow })
     Icons.apply(tIcon, TYPE_ICON[ty] or "info", accent)
+    addPart(entry, badge, "BackgroundTransparency", TK.badgeAlpha)
+    addPart(entry, tIcon, "ImageTransparency", 0)
     local titleX = BADGE + theme.Spacing.icon   -- clears the badge, not just the 16px glyph
     local titleLabel = Create("TextLabel", { Name = "Title", BackgroundTransparency = 1, Text = opts.Title or "",
       TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
       TextTruncate = Enum.TextTruncate.AtEnd,
       Size = UDim2.new(1, -(titleX + theme.Sizes.icon), 1, 0), Position = UDim2.new(0, titleX, 0, 0), Parent = titleRow })
     Create.text(titleLabel, theme, "label")
+    addPart(entry, titleLabel, "TextTransparency", 0)
     local closeBtn = Create("ImageButton", { Name = "Close", AutoButtonColor = false, BackgroundTransparency = 1,
       Size = UDim2.new(0, theme.Sizes.iconSm, 0, theme.Sizes.iconSm),
       Position = UDim2.new(1, -theme.Sizes.iconSm, 0, 0), Parent = titleRow })
@@ -423,9 +514,10 @@ function Notification.show(opts)
     local closeHandle = Recipes.iconButton(closeBtn, { theme = theme, icon = "x", rest = "primary",
       hover = "foreground", parent = titleRow, onClick = function() Notification.dismiss(id) end })
     entry.releases[#entry.releases + 1] = closeHandle.disconnect
+    addPart(entry, closeBtn, "ImageTransparency", 0)
     local msgLabel
     if opts.Message then
-      msgLabel = createMsgLabel(opts.Message, theme, toast)
+      msgLabel = createMsgLabel(opts.Message, theme, entry)
     end
     local aBtn, actionHover
     if opts.Action then
@@ -435,6 +527,8 @@ function Notification.show(opts)
         TextColor3 = theme.Colors.foreground,
         Size = UDim2.new(0, 96, 0, 24), LayoutOrder = 3, Parent = toast, Create.corner(theme.Radius.sm) })
       Create.text(aBtn, theme, "muted")
+      addPart(entry, aBtn, "BackgroundTransparency", 0)
+      addPart(entry, aBtn, "TextTransparency", 0)
       -- wash only: a UIScale on the Action would reflow the toast's UIListLayout rows
       actionHover = Recipes.hover(aBtn, { theme = theme, corner = theme.Radius.sm, kind = "wash" })
       entry.releases[#entry.releases + 1] = actionHover.disconnect
@@ -485,15 +579,15 @@ applyUpdate = function(entry, opts)
     if entry.msgLabel then
       entry.msgLabel.Text = opts.Message
     else
-      entry.msgLabel = createMsgLabel(opts.Message, theme, entry.frame)
+      entry.msgLabel = createMsgLabel(opts.Message, theme, entry)
     end
   end
   if opts.Duration and opts.Duration > 0 then
-    if entry.bar then entry.bar:Destroy(); entry.bar = nil end
+    dropBar(entry)
     startCountdown(entry, opts.Duration / 1000, accent, theme)
   elseif opts.Duration == 0 then
-    if entry.bar then entry.bar:Destroy(); entry.bar = nil end
-    entry.total = nil; entry.remaining = nil; entry.bar = nil
+    dropBar(entry)
+    entry.total = nil; entry.remaining = nil
     setProgressPad(entry, false)
   end
   if morphed then typeFeedback(entry) end
@@ -528,8 +622,9 @@ function Notification.promise(runner, opts)
     end
     if opts.Finally then pcall(opts.Finally) end
   end)
+  local words = (opts.Theme and opts.Theme.Strings) or DefaultTheme.Strings
   local id = Notification.loading({
-    Title = msgText(opts.Loading) or "Loading…", Message = opts.Message, Theme = opts.Theme, AccentReg = opts.AccentReg })
+    Title = msgText(opts.Loading) or words.Loading, Message = opts.Message, Theme = opts.Theme, AccentReg = opts.AccentReg })
   pendingId = id
   return id
 end
@@ -554,6 +649,7 @@ function Notification.dismiss(id)
   -- (FIFO) and releases the themer registration + spin the build created.
   Safe.mutate(function()
     stopSpin(entry)
+    freezeBar(entry)
     releaseEntry(entry)
     local frame = entry.frame
     if not frame then Notification.relayout(); return end
@@ -561,17 +657,16 @@ function Notification.dismiss(id)
     local cfg = POS[position] or POS["bottom-right"]
     local dx, dy = exitOffset(cfg, TK)
     local p = frame.Position
-    local goal = { GroupTransparency = 1 }
-    if p then goal.Position = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset + dy) end
-    -- A real exit (fade + slide out + shrink) instead of vanishing mid-frame; two tweens, and the
-    -- destroy hangs off the fade so the frame is gone the moment the fold-out finishes.
+    local slide = p and { Position = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset + dy) } or nil
+    -- A real exit (fade + slide out + shrink) instead of vanishing mid-frame; the destroy hangs
+    -- off the card's own tween so the frame is gone the moment the fold-out finishes.
     if entry.scale then
       Animate.to(entry.scale, "exit", { Scale = TK.exitScale }, Animate.EASING.exit, Animate.DIR.In)
     end
-    Animate.toThen(frame, "exit", goal, function()
+    fadeTo(entry, 1, "exit", Animate.EASING.exit, Animate.DIR.In, nil, slide, function()
       frame:Destroy()
       Notification.relayout()
-    end, Animate.EASING.exit, Animate.DIR.In)
+    end)
   end)
 end
 
