@@ -13,6 +13,8 @@
 --   getgenv().EZUI_BENCH_URL   = "<bundle url>"  -- compare another release on the same client
 --   getgenv().EZUI_BENCH_SCALE = 0.78            -- force a UI scale (default: fit 620x400 to the screen)
 --   getgenv().EZUI_BENCH_SECS  = 4               -- seconds per scenario (default 3)
+--   getgenv().EZUI_BENCH_EFFECTS = "light"       -- build the window with Effects = "light" | "auto"
+--                                                   (run once with and once without to compare)
 --
 -- Run it ON ITS OWN: EzUI keeps one window per client, so the bench replaces any hub window that is
 -- already open. Rejoin (or re-execute the hub) afterwards.
@@ -27,6 +29,7 @@ local DEFAULT_URL = "https://raw.githubusercontent.com/Pandoraon-top/ez-rbx-ui/m
 local env = (type(getgenv) == "function" and getgenv()) or _G
 local URL = env.EZUI_BENCH_URL or DEFAULT_URL
 local SECS = tonumber(env.EZUI_BENCH_SECS) or 3
+local EFFECTS = env.EZUI_BENCH_EFFECTS   -- nil = the library default ("full")
 local FIXED_W, FIXED_H = 620, 400   -- the fixed size phone hubs ship
 
 local RunService = game:GetService("RunService")
@@ -95,7 +98,7 @@ local function timed(fn)
   return result, os.clock() - t0
 end
 
-say("library: %s", URL)
+say("library: %s   Effects: %s", URL, tostring(EFFECTS or "default (full)"))
 say("engine stats: %s%s", #readable > 0 and "gpu = Stats.RenderGPUFrameTime, rcpu = RenderCPUFrameTime, ui-draws/ui-tris = UI2D counts" or "none readable",
   #unreadable > 0 and ("   (not readable here: " .. table.concat(unreadable, ", ") .. ")") or "")
 
@@ -117,7 +120,7 @@ local status = { page = {}, collapsed = {}, otherTab = {} }
 -- the build: one synchronous burst, the way most hubs do it (the worst execute case)
 local window, tabs, accordions, closedAcc = nil, {}, {}, nil
 local _, tBuild = timed(function()
-  window = EzUI:CreateWindow({ Title = "EzUI bench", Subtitle = "measuring", FloatingToggle = true })
+  window = EzUI:CreateWindow({ Title = "EzUI bench", Subtitle = "measuring", FloatingToggle = true, Effects = EFFECTS })
   for i = 1, 10 do tabs[i] = window:AddTab({ Name = "Tab " .. i, Icon = "home" }) end
   local page = tabs[1]
   -- first on the page, so they are inside the visible part of a 400 px window
