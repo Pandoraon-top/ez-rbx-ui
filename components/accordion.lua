@@ -110,6 +110,9 @@ function Accordion.new(opts)
     return acs ~= nil and (acs.Y or 0) > 0
   end
 
+  -- This is also the expand tween's target, and the engine's own fit takes over at its end, so the
+  -- two must agree or the card settles visibly: Content's UIPadding (below) adds only `bottom =
+  -- inputY` to the list's AbsoluteContentSize. A new top padding has to be added here too.
   local function contentHeight()
     -- real Roblox: UIListLayout.AbsoluteContentSize.Y; mock returns nil -> 0
     local acs = layout.AbsoluteContentSize
@@ -123,7 +126,21 @@ function Accordion.new(opts)
   -- a script-driven re-measure there silently fails and ClipsDescendants then crops every row past
   -- the first. Collapsed uses AutomaticSize.None + a fixed header height (so the collapse can tween
   -- the Size down). Toggle animations run on the header-click handler, which keeps capability.
+  --
+  -- With AutomaticSize set, Roblox reads Size as the MINIMUM size, so every hand-over to the engine
+  -- also drops Size back to HEADER_H. The expand tween used to leave Size at its target, which then
+  -- acted as a floor: hidden or destroyed rows left an empty slab until a close/reopen re-measured.
+  -- `motion` numbers each toggle, and a settle also re-checks the state it was started for, so a
+  -- superseded tween's Completed (Roblox fires it on a cancel too) can never apply its end state
+  -- over a newer toggle's.
+  local motion = 0
+  local function settle(gen, want, fn)
+    -- Completed runs on an engine thread: the late write goes through Safe.mutate like the rest
+    return function() Safe.mutate(function() if gen == motion and expanded == want then fn() end end) end
+  end
   local function applyHeight(animated)
+    motion = motion + 1
+    local gen = motion
     if animated then
       -- Quint/Out, NOT the rotateTo default (Back/Out): a Back overshoot swings a 16px glyph past
       -- its stop and back, which reads as a jitter rather than a flourish at that size. The pop
@@ -146,9 +163,10 @@ function Accordion.new(opts)
           container.AutomaticSize = Enum.AutomaticSize.None
           local target = REST_Y + contentHeight()
           container.Size = UDim2.new(1, 0, 0, HEADER_H)
-          Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, target) }, function()
-            if expanded then container.AutomaticSize = Enum.AutomaticSize.Y end
-          end)
+          Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, target) }, settle(gen, true, function()
+            container.AutomaticSize = Enum.AutomaticSize.Y
+            container.Size = UDim2.new(1, 0, 0, HEADER_H)   -- min only; the engine fits the content
+          end))
         else
           -- nothing to measure: contentHeight() would still report the bottom padding, so the
           -- tween would open to a slab of empty card and snap shut again. Hand the height straight
@@ -167,9 +185,9 @@ function Accordion.new(opts)
         local from = (sz and sz.Y and sz.Y > HEADER_H) and sz.Y or (REST_Y + contentHeight())
         container.AutomaticSize = Enum.AutomaticSize.None
         container.Size = UDim2.new(1, 0, 0, from)
-        Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, HEADER_H) }, function()
-          if not expanded then content.Visible = false; divider.Visible = false end
-        end)
+        Animate.toThen(container, "base", { Size = UDim2.new(1, 0, 0, HEADER_H) }, settle(gen, false, function()
+          content.Visible = false; divider.Visible = false
+        end))
       end
     else
       content.Position = UDim2.new(0, 0, 0, REST_Y)
