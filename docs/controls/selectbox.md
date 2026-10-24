@@ -34,8 +34,8 @@ When an option is a table, `Value` is stored/flagged and `Text`/`Label` is shown
 | Method | Returns | Notes |
 |---|---|---|
 | `GetValue()` | any | Current value(s) |
-| `SetValue(v)` | `nil` | Set selection programmatically |
-| `SetOptions(o)` | `nil` | Replace the option list |
+| `SetValue(v)` | `nil` | Set selection programmatically. An open dropdown re-ticks its rows |
+| `SetOptions(o)` | `nil` | Replace the option list. On an open dropdown the rows are updated in place, matched by `Value`: the list keeps its scroll position and the search query, and only rows whose label, description, icon or selection changed are written. Cheap enough to call every few seconds on a long list |
 | `SetDisabled(b)` | `nil` | Dims the field and the caret and blocks `Open`. `SetValue` and flag restores still apply — see [Enabled and disabled](/controls/#enabled-and-disabled) |
 | `SetLoading(b)` | `nil` | Toggle the loading state |
 | `Reload()` | `nil` | Re-run `LoadOptions` (loading state is handled automatically) |

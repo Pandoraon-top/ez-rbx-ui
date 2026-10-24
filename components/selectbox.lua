@@ -1,12 +1,12 @@
 -- Deps injected via Init(R).
 local RunService = game:GetService("RunService")
 local SelectBox = {}
-local Create, DefaultTheme, Animate, Maid, Icons, Overlay, Flag, Safe, Recipes, Effects, Acrylic
+local Create, DefaultTheme, Animate, Maid, Icons, Overlay, Flag, Safe, Recipes, Effects, Acrylic, SelectRows
 
 function SelectBox.Init(R)
   Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate; Maid = R.Maid
   Icons = R.Icons; Overlay = R.Overlay; Flag = R.Flag; Safe = R.Safe; Recipes = R.Recipes
-  Effects = R.Effects; Acrylic = R.Acrylic
+  Effects = R.Effects; Acrylic = R.Acrylic; SelectRows = R.SelectRows
 end
 
 local CARET_OPEN = 180 -- chevron-down reads as chevron-up while the list is open
@@ -28,11 +28,11 @@ local function emptyH(t) return t.Sizes.icon + t.Spacing.gap * 2 + t.Font.muted.
 
 local function frostAlpha(theme) return theme.Acrylic.popoverFrost end
 
--- Popover open/close motion. Animate.popIn/popOut rest a popover's UIScale at 1, which is right
--- until the window forwards a UI scale (2.22): a scaled popover must rest at Overlay.scale(), so
--- the scaled case runs the same curves and the same Motion tokens against `scale` instead.
+-- Popover open/close motion: Animate.popIn's curves and Motion tokens, run against the UI scale
+-- the popover rests at (Overlay.scale(), 2.22 -- popIn itself rests at 1). Returns the slide's
+-- Position tween, so a resize while the popover is still arriving can stop it (the slide would
+-- otherwise land the frame on the spot computed for the old height).
 local function popOpen(frame, theme, edge, scale)
-  if scale == 1 then return Animate.popIn(frame, edge) end
   local us = frame:FindFirstChildOfClass("UIScale")
   if not us then return nil end
   if not Animate.isEnabled() then us.Scale = scale; return nil end
@@ -40,8 +40,9 @@ local function popOpen(frame, theme, edge, scale)
   us.Scale = scale * theme.Motion.exitScale
   local dy = (edge == "up") and theme.Motion.popSlide or -theme.Motion.popSlide
   frame.Position = UDim2.new(target.X.Scale, target.X.Offset, target.Y.Scale, target.Y.Offset + dy)
-  Animate.to(frame, "fast", { Position = target }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-  return Animate.springTo(us, "base", { Scale = scale })
+  local slide = Animate.to(frame, "fast", { Position = target }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+  Animate.springTo(us, "base", { Scale = scale })
+  return slide
 end
 
 local function popShut(frame, theme, scale, onDone)
@@ -69,22 +70,23 @@ local function normOpt(o)
   return { value = o }
 end
 
-local function countOptions(arr)
-  local n = 0
-  for _, raw in ipairs(arr) do if not normOpt(raw).divider then n = n + 1 end end
-  return n
-end
-
 function SelectBox.new(opts)
   opts = opts or {}
   local theme = opts.Theme or DefaultTheme
   local maid = Maid.new()
-  local options = opts.Options or {}
+  -- The options, normalised once per SetOptions: every pass below (labels, icon, search shape,
+  -- rows) reads this instead of normalising the raw list again.
+  local normed = {}
+  local function setOptionList(o)
+    normed = {}
+    for i, raw in ipairs(o or {}) do normed[i] = normOpt(raw) end
+  end
+  setOptionList(opts.Options)
   local multi = opts.Multi == true
   -- For per-item options the entries are tables ({ Value, Icon, ... }); the stored
   -- value must be the option's value, not the raw option table (else display() would
-  -- tostring a table address and isSelected/Flag would never match).
-  local function firstValue() return options[1] ~= nil and normOpt(options[1]).value or nil end
+  -- tostring a table address and selection/Flag would never match).
+  local function firstValue() return normed[1] ~= nil and normed[1].value or nil end
   local value = multi and (opts.Default or {}) or (opts.Default ~= nil and opts.Default or firstValue())
   local dropdown
   local shadow -- overlay sibling under the open dropdown; nil while Effect.shadowId is ''
@@ -92,15 +94,20 @@ function SelectBox.new(opts)
   local posConn -- repositions the open dropdown when the control scrolls
   local searchFocus -- focus ring of the dropdown search; torn down with the dropdown
   local ddUnreg -- 2.11: themer registration the OPEN popover holds; released in teardown
-  local optButtons = {} -- { { btn, text (live search), sel, hover (row hover handle) }, ... }
+  -- One entry per option row of the OPEN popover, in list order (components/selectrows.lua).
+  local optButtons = {}
   local skeletons = {}  -- 3.1: Effects.skeleton handles of the OPEN loading body; Stop()ped in teardown
   local emptyState      -- 3.4: Recipes.empty block on the OPEN dropdown root; dies with it
-  local buildDropdown, rebuild, computePos, refresh
+  -- The open popover's list, its dividers and the shape it was built for (search box or not, and
+  -- height), so SetOptions can update the rows in place instead of building the popover again.
+  local ddList, ddDividers, ddSearchable, ddHeight, ddLoading = nil, {}, false, 0, false
+  local ddSlide  -- the open popover's entrance slide (a Position tween), while it may still run
+  local lastQuery = ""  -- the filter in force on the open popover, lower-cased
+  local buildDropdown, rebuild, computePos, refresh, syncSelection, syncRows
   local onChanged = opts.Callback
 
   local function labelFor(v)
-    for _, raw in ipairs(options) do
-      local e = normOpt(raw)
+    for _, e in ipairs(normed) do
       if not e.divider and e.value == v then return e.label or tostring(e.value) end
     end
     return tostring(v)
@@ -205,7 +212,7 @@ function SelectBox.new(opts)
 
   local function selectedIcon()
     if multi then return nil end
-    for _, raw in ipairs(options) do local e = normOpt(raw); if e.value == value then return e.icon end end
+    for _, e in ipairs(normed) do if e.value == value then return e.icon end end
     return nil
   end
   local function relayout()
@@ -265,21 +272,29 @@ function SelectBox.new(opts)
     relayout()
     valueLabel.Text = display()
   end
-  local function apply(v) value = v; Safe.mutate(function() refresh() end) end
+  -- An open popover ticks its rows too, so a SetValue from the hub (or a config load) never
+  -- leaves a stale check on screen.
+  local function apply(v)
+    value = v
+    Safe.mutate(function()
+      refresh()
+      if dropdown and not loading then syncSelection() end
+    end)
+  end
   local commit = Flag.bind(opts, value, apply)
 
   local api = { Frame = btn }
   function api.GetValue() return value end
   function api.SetValue(v) commit(v); if onChanged then onChanged(value) end end
   function api.SetOptions(o)
-    options = o or {}
-    local function present(v)
-      for _, raw in ipairs(options) do
-        local e = normOpt(raw)
-        if not e.divider and e.value == v then return true end
-      end
-      return false
+    setOptionList(o)
+    -- one pass over the options, not one per picked value: a 300-option list with 40 picks
+    -- used to normalise 12,000 option tables on every call
+    local offered = {}
+    for _, e in ipairs(normed) do
+      if not e.divider and SelectRows.keyOf(e.value) ~= SelectRows.NOKEY then offered[e.value] = true end
     end
+    local function present(v) return v ~= nil and offered[v] == true end
     if multi then
       local nv = {}
       for _, v in ipairs(value) do if present(v) then nv[#nv + 1] = v end end
@@ -287,52 +302,38 @@ function SelectBox.new(opts)
     elseif value ~= nil and not present(value) then
       value = opts.AllowNone and nil or firstValue()
     end
+    -- An open popover keeps its rows, scroll position and search query: only what changed is
+    -- written (see syncRows). A loading popover shows the skeleton, which the rebuild redraws.
     Safe.mutate(function()
       refresh()
-      if dropdown then rebuild() end
+      if dropdown then
+        -- a skeleton popover (built while loading) is rebuilt, never synced: it has no rows
+        if loading or ddLoading then rebuild() else syncRows() end
+      end
     end)
   end
   function api.SetDisabled(b) setDisabled(b) end
   function api.SetLoading(b) setLoading(b) end
 
-  local function isSelected(opt) return multi and contains(value, opt) or (value == opt) end
-
-  -- Row hover answers on transparency ONLY: the row keeps the pure surface token as its
-  -- BackgroundColor3 (identity assertions) and the recipe captures its current transparency as
-  -- the rest it returns to — 0 for a selected row, 1 for an unselected one.
-  local function bindRowHover(o)
-    return Recipes.hover(o, { theme = theme, kind = "fill", hoverAlpha = theme.Opacity.optionHover })
+  -- The picked values as a set (one lookup per row instead of a scan of the picks).
+  local function pickedSet()
+    local set = {}
+    local function add(v) if SelectRows.keyOf(v) ~= SelectRows.NOKEY then set[v] = true end end
+    if multi then for _, v in ipairs(value) do add(v) end else add(value) end
+    return set
+  end
+  -- Is the row for option value `v` picked? The one rule every painter uses. A valueless option
+  -- (an "Any" sentinel) reads as picked while a single select holds nothing.
+  local function rowPicked(v, set)
+    if v == nil then return not multi and value == nil end
+    return set[v] == true
   end
 
-  -- Re-tint the open option rows in place to match the current selection. Used for multi
-  -- picks so the dropdown is NOT torn down and rebuilt — that reset the scroll position
-  -- and wiped any active search query. Each row already owns a Check icon child.
-  -- Every colour is re-read from the live palette here, so the open popover's themer closure
-  -- (2.11) reuses this one loop instead of duplicating it.
+  -- Re-paint every open row from the live palette and the current selection: the open popover's
+  -- themer closure (2.11) replays this one loop.
   local function retintRows()
-    for _, e in ipairs(optButtons) do
-      local o = e.btn
-      local sel = isSelected(o:GetAttribute("OptValue"))
-      o.BackgroundColor3 = theme.Colors.surface
-      o.BackgroundTransparency = sel and 0 or 1
-      -- The hover recipe captured the row's rest transparency when it bound, so a row whose
-      -- selection just flipped is re-bound against its new rest (a pointer leaving it would
-      -- otherwise clear a fresh selection, or re-tint a row that was just deselected).
-      if sel ~= e.sel then
-        if e.hover then e.hover.disconnect() end
-        e.hover = bindRowHover(o)
-        e.sel = sel
-      end
-      local check = o:FindFirstChild("Check")
-      if check then
-        if sel then Icons.apply(check, "check", theme.Colors.foreground) end
-        check.Visible = sel
-      end
-      local lead = o:FindFirstChild("Lead")
-      if lead and e.icon then Icons.apply(lead, e.icon, theme.Colors.foreground) end
-      local lab = o:FindFirstChild("OptLabel"); if lab then lab.TextColor3 = theme.Colors.foreground end
-      local desc = o:FindFirstChild("Desc"); if desc then desc.TextColor3 = theme.Colors.mutedForeground end
-    end
+    local set = pickedSet()
+    for _, e in ipairs(optButtons) do SelectRows.repaint(e, rowPicked(e.value, set), theme) end
   end
 
   local function pick(opt)
@@ -345,7 +346,7 @@ function SelectBox.new(opts)
         nv[#nv + 1] = opt
       end
       api.SetValue(nv)
-      if dropdown then retintRows() end -- re-tint in place (keeps scroll + search; no OnOpen)
+      if dropdown then syncSelection() end -- re-tick in place (keeps scroll + search; no OnOpen)
     else
       if opts.AllowNone and value == opt then
         api.SetValue(nil)
@@ -361,38 +362,88 @@ function SelectBox.new(opts)
   -- it again on the same pass. nil while the dropdown is closed or still loading.
   local function syncEmpty()
     if not emptyState then return end
-    -- `~= false`, not truthiness: a row that no filter has touched yet has never been written to,
-    -- and Visible defaults to true (nil under the mock) — only an explicit false means filtered out.
     for _, e in ipairs(optButtons) do
-      if e.btn.Visible ~= false then emptyState.SetVisible(false); return end
+      if e.vis then emptyState.SetVisible(false); return end
     end
     emptyState.SetVisible(true)
   end
 
+  -- Writes Visible only on rows whose visibility changes: a keystroke, or a SetOptions on a long
+  -- list, must not touch every row.
   function api.Filter(query)
     query = (query or ""):lower()
+    lastQuery = query
     for _, e in ipairs(optButtons) do
-      e.btn.Visible = (query == "" or e.text:lower():find(query, 1, true) ~= nil)
+      local vis = query == "" or e.find:find(query, 1, true) ~= nil
+      if e.vis ~= vis then e.btn.Visible = vis; e.vis = vis end
     end
     syncEmpty()
   end
 
-  function buildDropdown()
-    optButtons = {}
-    skeletons = {}
+  local rowCtx = { theme = theme, onPick = pick }
+
+  -- Tick exactly the rows whose selection changed: the cheap path for a pick, a SetValue and a
+  -- SetOptions (retintRows is the full repaint).
+  function syncSelection()
+    local set = pickedSet()
+    for _, e in ipairs(optButtons) do SelectRows.tick(e, rowPicked(e.value, set), theme) end
+  end
+
+  -- Search box or not, and height, for the current options. SetOptions on an open popover
+  -- resizes it in place when only the height changes, and rebuilds it only when a short list
+  -- crosses the search threshold (the search box has to come or go) -- too short to cost anything.
+  local function popoverShape()
     local searchable = false
     if not loading then
       if opts.Searchable ~= nil then searchable = opts.Searchable == true
-      else searchable = countOptions(options) > 5 end
+      else
+        local n = 0
+        for _, e in ipairs(normed) do if not e.divider then n = n + 1 end end
+        searchable = n > 5
+      end
     end
-    local sz = btn.AbsoluteSize or { X = 140, Y = 38 }
-    local width = math.max(140, sz.X or 140)
     -- 3.1: the loading body is three skeleton lines tall, not one text row — the popover must be
     -- sized for what it actually shows or the shimmer would be clipped by ClipsDescendants.
     -- 3.4: the same floor for the empty block, which the rows cannot pay for — with no options at
     -- all the body would be 0px and the "no results" message would never reach the screen.
-    local bodyH = loading and LOADING_H or math.max(#options * 28, emptyH(theme))
-    local ddH = math.min(bodyH + (searchable and 44 or 8), 240)
+    local bodyH = loading and LOADING_H or math.max(#normed * 28, emptyH(theme))
+    return searchable, math.min(bodyH + (searchable and 44 or 8), 240)
+  end
+
+  -- SetOptions on an open popover: the rows are updated in place, keyed by Value (SelectRows.sync).
+  -- The list, its scroll position and the search box are never touched, and the query in force is
+  -- applied again so new rows obey it.
+  function syncRows()
+    local searchable, ddH = popoverShape()
+    if searchable ~= ddSearchable then rebuild(); return end
+    if ddH ~= ddHeight then
+      -- same flip-aware, viewport-clamped placement buildDropdown computed, for the new height;
+      -- the entrance slide is stopped first or it would carry the frame back to the old spot
+      ddHeight = ddH
+      if ddSlide and ddSlide.Cancel then ddSlide:Cancel() end
+      ddSlide = nil
+      local width = dropdown.Size.X.Offset
+      local x, y = computePos(width, ddH, ddScale)
+      dropdown.Size = UDim2.new(0, width, 0, ddH)
+      dropdown.Position = UDim2.new(0, x, 0, y)
+      Effects.place(shadow, x, y, width * ddScale, ddH * ddScale, "popover", theme)
+    end
+    local set = pickedSet()
+    optButtons, ddDividers = SelectRows.sync(ddList, optButtons, ddDividers, normed,
+      function(v) return rowPicked(v, set) end, rowCtx)
+    syncSelection()
+    api.Filter(lastQuery)
+  end
+
+  -- `query`: the search text to carry over when the popover is rebuilt (a fresh Open passes none).
+  function buildDropdown(query)
+    optButtons = {}
+    skeletons = {}
+    lastQuery = ""
+    local searchable, ddH = popoverShape()
+    ddSearchable, ddHeight, ddLoading = searchable, ddH, loading
+    local sz = btn.AbsoluteSize or { X = 140, Y = 38 }
+    local width = math.max(140, sz.X or 140)
     -- The window's UI scale reaches overlay children through Overlay.scale() (2.22): the UIScale
     -- goes on the popover's own root (never the overlay root, whose catcher must stay full-screen).
     local scale = Overlay.scale()
@@ -428,7 +479,8 @@ function SelectBox.new(opts)
     -- Hoisted out of the branch so the popover's themer closure below can repaint them.
     local searchBox, searchInput, searchStroke, searchRest
     local searchFocused = false
-    local dividers, loadingRow = {}, nil
+    local loadingRow = nil
+    ddDividers = {}
     local listTop = 4
     if searchable then
       listTop = 34 -- 4 top pad + 26 search + 4 gap
@@ -464,6 +516,7 @@ function SelectBox.new(opts)
       Parent = dropdown,
       Create.listLayout({ Padding = 2 }),
     })
+    ddList = list
     Recipes.scrollbar(list, theme) -- 3.7: same pill (thickness, border tint, Scrollbar.alpha) as the table
 
     if loading then
@@ -481,43 +534,13 @@ function SelectBox.new(opts)
         })
       end
     else
-    for i, raw in ipairs(options) do
-      local e = normOpt(raw)
+    local picked = pickedSet()
+    for i, e in ipairs(normed) do
       if e.divider then
-        dividers[#dividers + 1] = Create("Frame", { Name = "Divider", BackgroundColor3 = theme.Colors.border, BorderSizePixel = 0,
+        ddDividers[#ddDividers + 1] = Create("Frame", { Name = "Divider", BackgroundColor3 = theme.Colors.border, BorderSizePixel = 0,
           Size = UDim2.new(1, -8, 0, 1), LayoutOrder = i, ZIndex = 1002, Parent = list })
       else
-        local rowH = e.desc and 38 or 26
-        local sel = isSelected(e.value)
-        local o = Create("TextButton", { Name = "Opt", AutoButtonColor = false, Text = "",
-          BackgroundColor3 = theme.Colors.surface, BackgroundTransparency = sel and 0 or 1, ZIndex = 1002,
-          Size = UDim2.new(1, 0, 0, rowH), LayoutOrder = i, Parent = list, Create.corner(theme.Radius.sm),
-          Create.padding({ left = 6, right = 6 }) })
-        o:SetAttribute("OptValue", e.value)
-        local check = Create("ImageLabel", { Name = "Check", BackgroundTransparency = 1, ZIndex = 1003,
-          Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 0, 0.5, -7), Parent = o })
-        if sel then Icons.apply(check, "check", theme.Colors.foreground) else check.Visible = false end
-        local textX = 20
-        if e.icon then
-          local lead = Create("ImageLabel", { Name = "Lead", BackgroundTransparency = 1, ZIndex = 1003,
-            Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 20, 0.5, -7), Parent = o })
-          Icons.apply(lead, e.icon, theme.Colors.foreground)
-          textX = 40
-        end
-        local optLabel = Create("TextLabel", { Name = "OptLabel", BackgroundTransparency = 1, Text = e.label or tostring(e.value), ZIndex = 1003,
-          TextColor3 = theme.Colors.foreground, TextXAlignment = Enum.TextXAlignment.Left,
-          Size = UDim2.new(1, -textX - 4, e.desc and 0 or 1, e.desc and 16 or 0),
-          Position = UDim2.new(0, textX, 0, e.desc and 4 or 0), Parent = o })
-        Create.text(optLabel, theme, "body")
-        if e.desc then
-          local desc = Create("TextLabel", { Name = "Desc", BackgroundTransparency = 1, Text = e.desc, ZIndex = 1003,
-            TextColor3 = theme.Colors.mutedForeground, TextXAlignment = Enum.TextXAlignment.Left,
-            Size = UDim2.new(1, -textX - 4, 0, 14), Position = UDim2.new(0, textX, 0, 20), Parent = o })
-          Create.text(desc, theme, "muted")
-        end
-        o.MouseButton1Click:Connect(function() pick(e.value) end)
-        optButtons[#optButtons + 1] = { btn = o, sel = sel, hover = bindRowHover(o), icon = e.icon,
-          text = tostring(e.value) .. " " .. tostring(e.label or "") .. " " .. tostring(e.desc or "") }
+        optButtons[#optButtons + 1] = SelectRows.make(list, e, i, rowPicked(e.value, picked), rowCtx)
       end
     end
     -- 3.4: parented to the dropdown ROOT, never to the List — the List owns a UIListLayout, so an
@@ -555,7 +578,7 @@ function SelectBox.new(opts)
         searchStroke.Color = searchFocused and theme.Colors.ring or theme.Colors.border
         searchStroke.Transparency = searchFocused and theme.Stroke.control or searchRest()
       end
-      for _, d in ipairs(dividers) do d.BackgroundColor3 = theme.Colors.border end
+      for _, d in ipairs(ddDividers) do d.BackgroundColor3 = theme.Colors.border end
       -- 3.1 skeleton blocks follow the surface token; the shimmer band keeps the mode it was born
       -- with (core/effects.lua has no 'skeleton' kind for Effects.reskin — reported as a deviation),
       -- which is invisible in practice: the band is a 1.1s sweep over a placeholder.
@@ -563,10 +586,15 @@ function SelectBox.new(opts)
       if emptyState then emptyState.reskin() end       -- 3.4 muted icon + label
       retintRows()                                     -- rows: fill, check, lead, label, description
     end) or nil
+    -- a rebuilt popover keeps the query the player typed (and the filter it drives)
+    if searchInput and query and query ~= "" then
+      searchInput.Text = query
+      api.Filter(query)
+    end
     setOpen(true)
     -- Grows out of the field: the final Position is the one written above, so layout code
     -- reading dropdown.Position right after Open still sees the computed spot.
-    popOpen(dropdown, theme, openUp and "up" or "down", scale)
+    ddSlide = popOpen(dropdown, theme, openUp and "up" or "down", scale)
   end
 
   function api.Open()
@@ -595,7 +623,7 @@ function SelectBox.new(opts)
     if ddUnreg then ddUnreg(); ddUnreg = nil end
     if searchFocus then searchFocus.disconnect(); searchFocus = nil end
     for _, e in ipairs(optButtons) do if e.hover then e.hover.disconnect() end end
-    optButtons = {}
+    optButtons, ddList, ddDividers, lastQuery, ddSlide = {}, nil, {}, "", nil
     Overlay.untrackPopover(api.Close)
     local function stopSkeletons() for _, sk in ipairs(sks) do sk.Stop() end end
     if not dd then stopSkeletons(); return end
@@ -606,8 +634,9 @@ function SelectBox.new(opts)
     if instant then drop(); stopSkeletons() else stopSkeletons(); popShut(dd, theme, ddScale, drop) end
   end
   function rebuild()
+    local query = lastQuery
     if dropdown then teardown(true) end
-    buildDropdown()
+    buildDropdown(query)
   end
   function api.Close() teardown(); setOpen(false) end
 
