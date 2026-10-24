@@ -30,6 +30,9 @@ local Window = EzUI:CreateWindow({
 | `Image` | `string` \| `{ dark, light }` | Title-bar logo — `rbxassetid://` / `rbxthumb://` or an `http(s)://` URL. Pass a `{ dark = ..., light = ... }` table to swap **per color mode** automatically on `SetMode` (for full-color logo tiles that bake in their own background). See [Color mode](#color-mode) |
 | `ImageAdaptive` | `bool` | Treat `Image` as a **monochrome glyph** and tint it to the `foreground` token so it follows dark/light and re-tints on `SetMode`. Default `false` (the image renders full-color). Supply a **white-on-transparent** PNG — `ImageColor3` multiplies, so white tints cleanly to any color |
 | `Ratio` | `{ Width, Height }` \| `number` | Window size as a **fraction of the viewport**: `{ Width = 0.4, Height = 0.55 }` = 40% wide × 55% tall. A single number applies the same fraction to both axes. Capped at 92% per axis; stays responsive. Default `{ Width = 0.45, Height = 0.6 }` |
+| `FixedSize` | `{ Width, Height }` | Window size in px (floored at 380 x 260) on every screen, instead of `Ratio`. No resize corner, and a screen change never resizes it; fit a small screen with `SetUIScale`. Not with `StartSize` |
+| `StartSize` | `{ Width, Height }` | Opening size in px on every screen, instead of `Ratio`. The resize corner stays, and once the player resizes, their size is kept. Not with `FixedSize` |
+| `Strings` | `table` | EzUI's own words for a hub in another language: `Search`, `None`, `Select`, `Loading`, `NoResults`, `NoMatches`, `NoRows`, `CloseTitle`, `CloseMessage`, `Cancel`, `Close`, `ResetTitle`, `ResetMessage`, `Reset`, `ResetDone` (plain strings; a key left out keeps the English). See [Built-in words](#strings) |
 | `Transparency` | `number` | Window background transparency `0..1`; `0` = opaque, higher = more see-through. Default `0.12` (the `Acrylic.frost` token) |
 | `Animations` | `bool` | Enable entrance/transition motion (FAB pop, window open/close, accordion + tab transitions). When **omitted**, the default follows the player's OS reduce-motion setting (`GuiService.ReducedMotionEnabled` → instant transitions) — unless motion was already chosen explicitly via an earlier `Animations` or `SetAnimationsEnabled`, in which case that choice stands. Pass `true` / `false` to choose explicitly (low-end devices, accessibility). See [Reduced motion](#reduced-motion) |
 | `ToggleKey` | `Enum.KeyCode` | Show/hide key (default `RightControl`) |
@@ -192,6 +195,11 @@ That forwarded value is a single **process-wide** number, so with more than one 
 call wins (the window's own scale stays its own). The forward is guarded: a value that is not a
 positive number is not passed on.
 
+Dragging, resizing and screen changes all work from the size the window **shows** (its size times
+the scale): a scaled-down window can be dragged until `dragKeep` px of it is left on screen, its
+resize corner follows the pointer, and it is kept on screen by its shown size. A window the player
+has moved is put back on screen when the scale changes. At scale `1` nothing differs.
+
 ```lua
 Window:SetUIScale(1.25)
 ```
@@ -211,7 +219,7 @@ See [Reduced motion](#reduced-motion) for the full resolution order.
 
 ### `AdaptToViewport()` {#adapttoviewport}
 
-Re-fits the window to the current viewport, preserving the configured `Ratio`. A window the user hasn't moved is re-centered; once the user drags or resizes it, its position is kept (clamped on-screen) instead. Called automatically on creation and whenever the viewport size changes — the window is always responsive.
+Re-fits the window to the current viewport, preserving the configured `Ratio` (a `FixedSize` window keeps its size; a `StartSize` window returns to it until the player resizes). A window the user hasn't moved is re-centered; once the user drags or resizes it, its position is kept (clamped on-screen) instead, and a size the player chose comes back when the screen grows again. Called automatically on creation, whenever the viewport size changes and when `SetUIScale` changes the scale; a call during a drag is applied when the drag ends. A `FixedSize` or `StartSize` window is never scaled to fit: pair it with `SetUIScale` on small screens.
 
 ### `GetMode()`
 
@@ -531,6 +539,39 @@ Resets a single flag to its default value without confirmation.
 The config object attached to this window (`EzUI:NewConfig` instance). Use it to call `cfg:Get(k)`, `cfg:Set(k, v)`, or other [Config API](/api/core#config) methods directly.
 
 ---
+
+## Built-in words {#strings}
+
+EzUI writes a few words of its own. A hub in another language replaces them with `Strings` at
+creation; every key is optional and a missing one keeps the English. Pass plain strings, already
+translated: they are read when each part is built.
+
+| Key | Where | English |
+|---|---|---|
+| `Search` | placeholder of the sidebar search and of every dropdown search | `Search…` |
+| `None` | a multi-select with nothing picked | `None` |
+| `Select` | a select with no value | `Select` |
+| `CloseTitle` | title of the close question | `Close window?` |
+| `CloseMessage` | text of the close question | `This closes it for good; …` |
+| `Cancel` / `Close` | the close question's buttons (`Cancel` also on the reset question) | `Cancel` / `Close` |
+| `Loading` | a select that is loading, and the default title of `Promise` | `Loading…` |
+| `NoResults` | a dropdown search that matches nothing | `No results` |
+| `NoMatches` | a sidebar search that matches nothing | `No matches` |
+| `NoRows` | an empty table | `No rows` |
+| `ResetTitle` / `ResetMessage` / `Reset` | the `ResetConfiguration` question | `Reset settings?` / `This restores all options to their defaults.` / `Reset` |
+| `ResetDone` | the toast after a reset | `Settings restored to defaults.` |
+
+```lua
+local Window = EzUI:CreateWindow({
+    Title = "Hub",
+    FixedSize = { Width = 620, Height = 400 },
+    Strings = { Search = "Cari…", None = "Tidak ada", Select = "Pilih",
+        CloseTitle = "Tutup jendela?", Cancel = "Batal", Close = "Tutup" },
+})
+```
+
+A value that is not a string is refused when the window is created. A key EzUI does not know only
+warns (a hub written for a newer EzUI may run on an older cached one).
 
 ## Color mode
 

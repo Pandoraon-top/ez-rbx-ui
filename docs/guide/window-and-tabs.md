@@ -25,6 +25,9 @@ local Window = EzUI:CreateWindow({
 | `Subtitle` | `string` | Secondary line under the title (grows the title bar) |
 | `Image` | `string` \| `{ dark, light }` | Title-bar logo — `rbxassetid://` / `rbxthumb://` or an `http(s)://` URL. A `{ dark = ..., light = ... }` table swaps per color mode on `SetMode` |
 | `Ratio` | `{ Width, Height }` \| `number` | Window size as a fraction of the viewport — `{ Width = 0.4, Height = 0.55 }` = 40% × 55% (a single number = same fraction both axes); capped at 92% per axis; auto-fits and stays responsive. Default `{ Width = 0.45, Height = 0.6 }` |
+| `FixedSize` | `{ Width, Height }` | Window size in px (floored at 380 x 260) on every screen, instead of `Ratio`. No resize corner, and a screen change never resizes it; fit a small screen with `SetUIScale`. Not with `StartSize` |
+| `StartSize` | `{ Width, Height }` | Opening size in px on every screen, instead of `Ratio`. The resize corner stays, and once the player resizes, their size is kept. Not with `FixedSize` |
+| `Strings` | `table` | EzUI's own words for a hub in another language: `Search`, `None`, `Select`, `Loading`, `NoResults`, `NoMatches`, `NoRows`, `CloseTitle`, `CloseMessage`, `Cancel`, `Close`, `ResetTitle`, `ResetMessage`, `Reset`, `ResetDone` (plain strings; a key left out keeps the English). See [Built-in words](/api/window#strings) |
 | `Transparency` | `number` | Window background transparency `0..1` (default `0.12`) |
 | `ToggleKey` | `Enum.KeyCode` | Show/hide key (default `RightControl`) |
 | `Animations` | `bool` | Explicitly enable or disable all library motion. Omitted, the player's OS reduce-motion setting decides — see [Motion](#motion) |

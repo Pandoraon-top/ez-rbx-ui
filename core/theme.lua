@@ -90,6 +90,17 @@ local DEFAULT = {
     padX = 12, padY = 8, progressInset = 0, slide = 48, exitSlide = 32, exitScale = 0.95, typeTint = 0.35,
     badgeAlpha = 0.85, staggerCap = 5,
   },
+  -- EzUI's own words. CreateWindow { Strings = {...} } replaces any of them (a hub in another
+  -- language); a key it leaves out keeps the English here.
+  Strings = {
+    Search = "Search…", None = "None", Select = "Select", Loading = "Loading…",
+    NoResults = "No results", NoMatches = "No matches", NoRows = "No rows",
+    CloseTitle = "Close window?",
+    CloseMessage = "This closes it for good; run the script again to get it back. To just hide it, minimize it with the – button next to the X.",
+    Cancel = "Cancel", Close = "Close",
+    ResetTitle = "Reset settings?", ResetMessage = "This restores all options to their defaults.",
+    Reset = "Reset", ResetDone = "Settings restored to defaults.",
+  },
 }
 
 Theme.PALETTES = {

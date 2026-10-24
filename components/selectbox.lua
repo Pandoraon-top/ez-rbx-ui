@@ -19,7 +19,7 @@ local SKELETON_H, SKELETON_GAP = 10, 8
 local LOADING_H = #SKELETON_ROWS * SKELETON_H + (#SKELETON_ROWS - 1) * SKELETON_GAP
 -- 3.4 dropdown empty state. `search-x` is NOT in core/icons.lua (the atlas builder skips names
 -- missing upstream), so the block uses the glyph that actually resolves.
-local EMPTY_ICON, EMPTY_TEXT = "search", "No results"
+local EMPTY_ICON = "search"
 -- ...and the height it needs: one Sizes.icon glyph, a Spacing.gap and one muted line, with a
 -- second gap of air so it is not flush against the popover edge. The popover must be at least
 -- this tall or ClipsDescendants does not trim the message, it removes it — the same hazard
@@ -113,16 +113,18 @@ function SelectBox.new(opts)
     return tostring(v)
   end
 
+  -- EzUI's own words (CreateWindow { Strings }); a theme without them reads the English defaults
+  local words = theme.Strings or DefaultTheme.Strings
   local function display()
     if multi then
-      if #value == 0 then return "None" end
+      if #value == 0 then return words.None end
       local shown = {}
       for i = 1, math.min(2, #value) do shown[i] = labelFor(value[i]) end
       local s = table.concat(shown, ", ")
       if #value > 2 then s = s .. " +" .. (#value - 2) end
       return s
     end
-    if value == nil then return "Select" end
+    if value == nil then return words.Select end
     return labelFor(value)
   end
 
@@ -262,7 +264,7 @@ function SelectBox.new(opts)
       fieldIcon.Visible = false
       clearBtn.Visible = false
       relayout()
-      valueLabel.Text = "Loading…"
+      valueLabel.Text = words.Loading
       return
     end
     local ic = selectedIcon()
@@ -488,7 +490,7 @@ function SelectBox.new(opts)
         Position = UDim2.new(0, 4, 0, 4), Size = UDim2.new(1, -8, 0, 26), ZIndex = 1003, Parent = dropdown,
         Create.corner(theme.Radius.sm), Create.padding({ left = 8, right = 8 }) })
       searchInput = Create("TextBox", { Name = "Input", BackgroundTransparency = 1, Text = "",
-        PlaceholderText = "Search…", PlaceholderColor3 = theme.Colors.mutedForeground, TextColor3 = theme.Colors.foreground,
+        PlaceholderText = words.Search, PlaceholderColor3 = theme.Colors.mutedForeground, TextColor3 = theme.Colors.foreground,
         TextXAlignment = Enum.TextXAlignment.Left,
         ClearTextOnFocus = false, ZIndex = 1003, Size = UDim2.new(1, 0, 1, 0), Parent = searchBox })
       Create.text(searchInput, theme, "muted")
@@ -546,7 +548,7 @@ function SelectBox.new(opts)
     -- 3.4: parented to the dropdown ROOT, never to the List — the List owns a UIListLayout, so an
     -- Empty child there would be laid out as one more option row. ZIndex above the rows (1002) so
     -- it reads over the (now hidden) list instead of under it.
-    emptyState = Recipes.empty(dropdown, { theme = theme, text = EMPTY_TEXT, icon = EMPTY_ICON, zIndex = 1003 })
+    emptyState = Recipes.empty(dropdown, { theme = theme, text = words.NoResults, icon = EMPTY_ICON, zIndex = 1003 })
     -- Recipes.empty hardcodes (1,0,1,0) and carries no position, so on a searchable popover the
     -- centred icon/label stack would sit ON the pinned search field. Pin it over the LIST rect
     -- after the fact — the same placement window.lua gives its sidebar block.
