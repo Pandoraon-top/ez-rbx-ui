@@ -141,9 +141,12 @@ function Dialog.open(opts)
     BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 1,
     Size = UDim2.new(1, 0, 1, 0), ZIndex = Overlay.Z.modal, Modal = modal })
   -- CanvasGroup so the whole card (fill, stroke, text, buttons) fades as ONE piece instead of a
-  -- dozen independently tweened transparencies.
-  local card = Create("CanvasGroup", { Name = "Card", Size = UDim2.new(0, width, 0, 0),
-    AutomaticSize = Enum.AutomaticSize.Y, GroupTransparency = 1,
+  -- dozen independently tweened transparencies. A light window (theme.Lite) uses a plain Frame: a
+  -- CanvasGroup renders its contents into a texture again on every change inside it. That card
+  -- appears with the zoom and the rise but no fade, and leaves at once while the scrim fades.
+  local flat = theme.Lite == true
+  local card = Create(flat and "Frame" or "CanvasGroup", { Name = "Card", Size = UDim2.new(0, width, 0, 0),
+    AutomaticSize = Enum.AutomaticSize.Y, GroupTransparency = (not flat) and 1 or nil,
     AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), ZIndex = zOf(1), Parent = dim,
     Create.corner(theme.Radius.lg), Create.padding({ all = theme.Spacing.pad }),
     Create.listLayout({ Padding = theme.Spacing.gap }) })
@@ -206,9 +209,15 @@ function Dialog.open(opts)
     dim.Modal = false
     dim.Active = false
     -- Fold out: shrink + fade + drop, scrim last so the card is gone before the room lights up.
-    Animate.to(us, "exit", { Scale = base * CLOSE_SCALE }, Animate.EASING.exit, Animate.DIR.In)
-    Animate.to(card, "exit", { GroupTransparency = 1, Position = UDim2.new(0.5, 0, 0.5, theme.Motion.dialogDrop) },
-      Animate.EASING.exit, Animate.DIR.In)
+    if flat then
+      -- no group fade on a plain Frame: the card leaves at once (its exit zoom would move nothing
+      -- visible), the scrim fades
+      card.Visible = false
+    else
+      Animate.to(us, "exit", { Scale = base * CLOSE_SCALE }, Animate.EASING.exit, Animate.DIR.In)
+      Animate.to(card, "exit", { GroupTransparency = 1, Position = UDim2.new(0.5, 0, 0.5, theme.Motion.dialogDrop) },
+        Animate.EASING.exit, Animate.DIR.In)
+    end
     if shadow then Animate.to(shadow, "exit", { ImageTransparency = 1 }, Animate.EASING.exit, Animate.DIR.In) end
     Animate.toThen(dim, "exit", { BackgroundTransparency = 1 }, function() maid:DoCleanup(); dim:Destroy() end,
       Animate.EASING.exit, Animate.DIR.In)
@@ -261,7 +270,8 @@ function Dialog.open(opts)
   -- Unfold: fade + zoom from Motion.enterScale + a rise of Motion.dialogRise (shadcn fade-zoom-95).
   card.Position = UDim2.new(0.5, 0, 0.5, theme.Motion.dialogRise)
   Animate.to(dim, "base", { BackgroundTransparency = scrimGoal })
-  Animate.to(card, "base", { GroupTransparency = 0, Position = UDim2.new(0.5, 0, 0.5, 0) }, Animate.EASING.smooth)
+  Animate.to(card, "base", flat and { Position = UDim2.new(0.5, 0, 0.5, 0) }
+    or { GroupTransparency = 0, Position = UDim2.new(0.5, 0, 0.5, 0) }, Animate.EASING.smooth)
   Animate.springTo(us, "enter", { Scale = base })
   if shadow then Animate.to(shadow, "base", { ImageTransparency = (theme.fx or Theme.fx)(theme).shadow }) end
   return handle

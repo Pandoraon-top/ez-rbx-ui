@@ -12,6 +12,7 @@ end
 
 local function noop() end
 local NOOP_HANDLE = { reskin = noop, disconnect = noop }
+local selectionAdornment   -- the shared invisible gamepad selection image (Recipes.focus)
 
 -- Module defaults stand in when a caller has no window theme yet (Theme exposes DEFAULT groups).
 local function themeOf(opts) return (opts and opts.theme) or Theme end
@@ -307,10 +308,14 @@ function Recipes.focus(stroke, host, getColor, opts)
   bind("Focused", on); bind("FocusLost", off)
   bind("SelectionGained", on); bind("SelectionLost", off)
   -- Gamepad selection: the stroke IS the ring, so the engine's default adornment is replaced by
-  -- an invisible, unparented Frame. Written blind under pcall: nil is the default in Roblox and
-  -- in the mock alike, so reading it back could never tell "unset" from "unsupported".
+  -- an invisible, unparented Frame -- ONE, shared by every focus ring (it was one per control: 163
+  -- in a large hub). Written blind under pcall: nil is the default in Roblox and in the mock alike,
+  -- so reading it back could never tell "unset" from "unsupported".
   pcall(function()
-    host.SelectionImageObject = Create("Frame", { Name = "SelectionImage", BackgroundTransparency = 1, BorderSizePixel = 0 })
+    if not selectionAdornment then
+      selectionAdornment = Create("Frame", { Name = "SelectionImage", BackgroundTransparency = 1, BorderSizePixel = 0 })
+    end
+    host.SelectionImageObject = selectionAdornment
   end)
   return { set = apply, disconnect = disconnectAll(conns) }
 end

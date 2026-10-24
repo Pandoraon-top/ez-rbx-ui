@@ -207,9 +207,12 @@ function Accordion.new(opts)
     end
   end
 
-  function api:Toggle() expanded = not expanded; applyHeight(true); return expanded end
-  function api:Expand() if not expanded then expanded = true; applyHeight(true) end end
-  function api:Collapse() if expanded then expanded = false; applyHeight(true) end end
+  -- A light window (theme.Lite) or motion off opens and closes a section at once: the animated
+  -- branch tweens the container's Size, and every frame of that re-lays the page below it.
+  local function animates() return Animate.isEnabled() and not theme.Lite end
+  function api:Toggle() expanded = not expanded; applyHeight(animates()); return expanded end
+  function api:Expand() if not expanded then expanded = true; applyHeight(animates()) end end
+  function api:Collapse() if expanded then expanded = false; applyHeight(animates()) end end
   function api:IsExpanded() return expanded end
   -- the same title again costs nothing: compared here, before Safe.mutate (and its probe)
   local shownTitle = opts.Title or "Section"

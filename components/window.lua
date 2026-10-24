@@ -313,7 +313,9 @@ function Window.new(config)
     Parent = gui,
     Create.corner(theme.Radius.window),
   })
-  local transp = type(config.Transparency) == "number" and config.Transparency or theme.Acrylic.frost
+  -- a light window is opaque unless the hub asks for see-through (one blended full-window layer less)
+  local transp = type(config.Transparency) == "number" and config.Transparency
+    or (theme.Lite and 0 or theme.Acrylic.frost)
   -- The shell hairline has ONE source: the acrylic repaint and the fold/grab tweens below both
   -- read Stroke.window, so a re-skin mid-drag cannot disagree with the dissolve.
   local function strokeRest() return theme.Stroke.window end

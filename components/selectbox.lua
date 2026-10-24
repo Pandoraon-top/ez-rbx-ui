@@ -209,14 +209,48 @@ function SelectBox.new(opts)
     fieldFocus.set(open)
   end
 
-  local fieldIcon = Create("ImageLabel", { Name = "FieldIcon", BackgroundTransparency = 1, Visible = false,
-    Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 8, 0.5, -7), Parent = field })
-  local clearBtn = Create("ImageButton", { Name = "Clear", BackgroundTransparency = 1, Visible = false,
-    Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -38, 0.5, -7), Parent = field })
-  Icons.apply(clearBtn, "x", theme.Colors.mutedForeground)
-  local spinner = Create("ImageLabel", { Name = "Spinner", BackgroundTransparency = 1, Visible = false,
-    Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -20, 0.5, -7), Parent = field })
-  Icons.apply(spinner, "loader", theme.Colors.mutedForeground)
+  -- The field's optional glyphs are built the first time they have something to show: most select
+  -- boxes never load, never hold a multi pick and carry no option icons, and a hub with 95 of them
+  -- paid 285 hidden images. nil = never needed yet (relayout and the themer read it that way).
+  local fieldIcon, clearBtn, spinner
+  local clearPicks   -- the clear button's action (assigned once the api exists)
+  -- The Config keeps this control's apply after Destroy (a profile switch can still call it), so
+  -- a destroyed box builds nothing: nil reads as "nothing to show" everywhere below.
+  local gone = false
+  maid:Give(function() gone = true end)
+  local function ensureFieldIcon()
+    if gone then return nil end
+    if not fieldIcon then
+      fieldIcon = Create("ImageLabel", { Name = "FieldIcon", BackgroundTransparency = 1, Visible = false,
+        Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 8, 0.5, -7), Parent = field })
+    end
+    return fieldIcon
+  end
+  local function ensureClear()
+    if gone then return nil end
+    if not clearBtn then
+      clearBtn = Create("ImageButton", { Name = "Clear", BackgroundTransparency = 1, Visible = false,
+        Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -38, 0.5, -7), Parent = field })
+      Icons.apply(clearBtn, "x", theme.Colors.mutedForeground)
+      maid:Give(clearBtn.MouseButton1Click:Connect(function() if clearPicks then clearPicks() end end))
+    end
+    return clearBtn
+  end
+  local function ensureSpinner()
+    if gone then return nil end
+    if not spinner then
+      spinner = Create("ImageLabel", { Name = "Spinner", BackgroundTransparency = 1, Visible = false,
+        Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -20, 0.5, -7), Parent = field })
+      Icons.apply(spinner, "loader", theme.Colors.mutedForeground)
+    end
+    return spinner
+  end
+
+  -- What the field shows, recorded by refresh once it has painted (Flag's skip compares with it): a
+  -- paint queued and lost never reads as done, and a value pruned by SetOptions reads as shown only
+  -- once it is. NOTHING = loading, or never painted.
+  local NOTHING = {}
+  local painted = NOTHING
 
   local function selectedIcon()
     if multi then return nil end
@@ -224,8 +258,8 @@ function SelectBox.new(opts)
     return nil
   end
   local function relayout()
-    local left = fieldIcon.Visible and 26 or 8
-    local right = clearBtn.Visible and 38 or 24
+    local left = (fieldIcon and fieldIcon.Visible) and 26 or 8
+    local right = (clearBtn and clearBtn.Visible) and 38 or 24
     valueLabel.Position = UDim2.new(0, left, 0, 0)
     valueLabel.Size = UDim2.new(1, -(left + right), 1, 0)
   end
@@ -256,9 +290,10 @@ function SelectBox.new(opts)
     loading = b and true or false
     Safe.mutate(function()
       caret.Visible = not loading
-      spinner.Visible = loading
+      local sp = loading and ensureSpinner() or nil
+      if sp then sp.Visible = true elseif spinner then spinner.Visible = false end
       stopSpin()
-      if loading then spin = Animate.spin(spinner) end
+      if sp then spin = Animate.spin(sp) end
       refresh()
       if dropdown then rebuild() end
     end)
@@ -267,18 +302,22 @@ function SelectBox.new(opts)
   function refresh()
     if loading then
       -- while loading, hide the (possibly stale) value and show a placeholder instead
-      fieldIcon.Visible = false
-      clearBtn.Visible = false
+      if fieldIcon then fieldIcon.Visible = false end
+      if clearBtn then clearBtn.Visible = false end
       relayout()
       valueLabel.Text = words.Loading
+      painted = NOTHING   -- the field shows no value while loading
       return
     end
     local ic = selectedIcon()
-    if ic then Icons.apply(fieldIcon, ic, theme.Colors.foreground); fieldIcon.Visible = true
-    else fieldIcon.Visible = false end
-    clearBtn.Visible = multi and #value > 0
+    local fi = ic and ensureFieldIcon() or nil
+    if fi then Icons.apply(fi, ic, theme.Colors.foreground); fi.Visible = true
+    elseif fieldIcon then fieldIcon.Visible = false end
+    local cb = (multi and #value > 0) and ensureClear() or nil
+    if cb then cb.Visible = true elseif clearBtn then clearBtn.Visible = false end
     relayout()
     valueLabel.Text = display()
+    painted = value   -- last: only a paint that ran records what the field shows
   end
   -- An open popover ticks its rows too, so a SetValue from the hub (or a config load) never
   -- leaves a stale check on screen.
@@ -289,12 +328,25 @@ function SelectBox.new(opts)
       if dropdown and not loading then syncSelection() end
     end)
   end
-  local commit = Flag.bind(opts, value, apply)
+  local commit = Flag.bind(opts, value, apply, function() return painted end)
 
   local api = { Frame = btn }
   function api.GetValue() return value end
   function api.SetValue(v) commit(v); if onChanged then onChanged(value) end end
+  -- The same options again (a hub mirroring its list every few seconds) cost nothing.
+  local function sameOptions(o)
+    o = o or {}
+    if #o ~= #normed then return false end
+    for i, raw in ipairs(o) do
+      local a, b = normOpt(raw), normed[i]
+      if a.value ~= b.value or a.label ~= b.label or a.icon ~= b.icon or a.desc ~= b.desc or a.divider ~= b.divider then
+        return false
+      end
+    end
+    return true
+  end
   function api.SetOptions(o)
+    if sameOptions(o) then return end
     setOptionList(o)
     -- one pass over the options, not one per picked value: a 300-option list with 40 picks
     -- used to normalise 12,000 option tables on every call
@@ -655,7 +707,7 @@ function SelectBox.new(opts)
     if disabled then return end
     if dropdown then api.Close() else api.Open() end
   end))
-  maid:Give(clearBtn.MouseButton1Click:Connect(function() if multi then api.SetValue({}) end end))
+  clearPicks = function() if multi then api.SetValue({}) end end
   maid:Give(btn)
   maid:Give(stopSpin)
   maid:Give(function() api.Close() end)
@@ -670,9 +722,9 @@ function SelectBox.new(opts)
     local de = btn:FindFirstChild("Description"); if de then de.TextColor3 = theme.Colors.mutedForeground end
     paintDisabled()
     Icons.apply(caret, "chevron-down", caretColor())
-    Icons.apply(clearBtn, "x", theme.Colors.mutedForeground)
-    if fieldIcon.Visible then local ic = selectedIcon(); if ic then Icons.apply(fieldIcon, ic, theme.Colors.foreground) end end
-    Icons.apply(spinner, "loader", theme.Colors.mutedForeground)
+    if clearBtn then Icons.apply(clearBtn, "x", theme.Colors.mutedForeground) end
+    if fieldIcon and fieldIcon.Visible then local ic = selectedIcon(); if ic then Icons.apply(fieldIcon, ic, theme.Colors.foreground) end end
+    if spinner then Icons.apply(spinner, "loader", theme.Colors.mutedForeground) end
   end)) end
 
   -- Options loader. opts.LoadOptions is a function that returns the options table; it may
