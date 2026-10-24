@@ -151,8 +151,9 @@ local function paintStroke(frame, theme, o)
   if not stroke then return end
   stroke.Color = theme.Colors.border
   stroke.Transparency = o.strokeAlpha
-  -- rim on opt-in, and re-painted whenever one already exists (reskin without the edge opt)
-  if Effects and (o.edge or stroke:FindFirstChildOfClass("UIGradient")) then Effects.rim(stroke, theme) end
+  -- rim on opt-in, and re-painted whenever one already exists (reskin without the edge opt);
+  -- a light window (theme.Lite) keeps the plain hairline
+  if Effects and not theme.Lite and (o.edge or stroke:FindFirstChildOfClass("UIGradient")) then Effects.rim(stroke, theme) end
 end
 
 local function paintFrost(frame, theme, fx, transparency)
@@ -178,7 +179,7 @@ local function paint(frame, theme, o)
   if o.solid then frame.BackgroundTransparency = 0
   elseif o.transparency ~= nil then frame.BackgroundTransparency = o.transparency end
   paintStroke(frame, theme, o)
-  if o.edge and not o.solid and frame:FindFirstChildOfClass("UIGradient") then ensureGlint(frame, theme, o, fx) end
+  if o.edge and not o.solid and not theme.Lite and frame:FindFirstChildOfClass("UIGradient") then ensureGlint(frame, theme, o, fx) end
   paintFrost(frame, theme, fx, frame.BackgroundTransparency or 0)
   return frame
 end
@@ -187,7 +188,8 @@ function Acrylic.decorate(frame, theme, opts)
   local o = resolve(frame, theme, opts)
   if o.transparency == nil then o.transparency = tokens(theme).frost or FROST end
   ensureStroke(frame, theme, o)
-  if not o.solid then
+  -- theme.Lite (Effects = "light"): a flat fill and the hairline, no noise, sheen, glint or gradient
+  if not o.solid and not theme.Lite then
     local fx = Theme.fx(theme)
     ensureNoise(frame, theme, o, fx)
     ensureGradient(frame, theme, fx)

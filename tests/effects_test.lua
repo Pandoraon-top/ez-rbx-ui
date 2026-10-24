@@ -545,4 +545,24 @@ h.describe("effects.skeleton", function()
   end)
 end)
 
+h.describe("shadow geometry cache", function()
+  h.it("a lift clears the cached size, so the next geometry write sets it again", function()
+    local R = h.loadLib()
+    local theme = R.Theme.new({})
+    local parent = R.Create("Frame", {})
+    local U = h.roblox.UDim2
+    local host = R.Create("Frame", { Size = U.new(0, 100, 0, 50), Position = U.new(0, 10, 0, 10), Parent = parent })
+    local sh = R.Effects.shadow(parent, theme, { level = "window" })
+    R.Effects.mirror(sh, host, "window", theme)
+    h.mock.writes = 0
+    R.Effects.mirror(sh, host, "window", theme)
+    h.expect(h.mock.writes).toBe(1)                          -- Position only: the size is unchanged
+    R.Effects.lift(sh, theme, true)
+    R.Effects.lift(sh, theme, false)
+    h.mock.writes = 0
+    R.Effects.mirror(sh, host, "window", theme)
+    h.expect(h.mock.writes).toBe(2)                          -- the size is written again after a lift
+  end)
+end)
+
 h.run()

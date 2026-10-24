@@ -127,8 +127,20 @@ function Tab.new(opts)
   -- -sign*panelH, both in sync and on the SAME curve (EASING.smooth) — so the two pages move as
   -- one filmstrip, never colliding or drifting apart mid-slide.
   -- dir +1 = navigating to a later tab (filmstrip scrolls up); -1 = earlier tab (scrolls down).
+  -- Transition = "none" (CreateWindow TabTransition) swaps the pages at once: a slide renders two
+  -- whole pages moving for Motion.slow. Motion off is instant as well.
+  local function slides() return opts.Transition ~= "none" and Animate.isEnabled() end
+
   function api:Select(dir)
     selected = true
+    if not slides() then
+      content.Position = UDim2.new(0, 0, 0, 0)
+      content.Visible = true
+      if content.Parent then content.Parent.CanvasPosition = Vector2.new(0, 0) end
+      syncCanvas()
+      paintState(true)
+      return
+    end
     local sign = (dir == -1) and -1 or 1
     content.Position = UDim2.new(0, 0, 0, sign * panelH())
     content.Visible = true
@@ -141,6 +153,11 @@ function Tab.new(opts)
   function api:Deselect(dir)
     if not selected then content.Visible = false; return end  -- already inactive: nothing to animate out
     selected = false
+    if not slides() then
+      content.Visible = false
+      paintState(true)
+      return
+    end
     local sign = (dir == -1) and -1 or 1
     Animate.toThen(content, "slow", { Position = UDim2.new(0, 0, 0, -sign * panelH()) }, function()
       if not selected then content.Visible = false; content.Position = UDim2.new(0, 0, 0, 0) end
@@ -181,7 +198,11 @@ function Tab.new(opts)
   end
 
   function api:SetIcon(name) opts.Icon = name; Safe.mutate(function() Icons.apply(icon, name, tint()); icon.Visible = true end) end
-  function api:SetTitle(s) Safe.mutate(function() label.Text = s end) end
+  local shownTitle = opts.Name or "Tab"
+  function api:SetTitle(s)
+    if s == shownTitle then return end   -- compared before Safe.mutate (and its probe)
+    Safe.mutate(function() label.Text = s; shownTitle = s end)   -- cached once written: a lost write is retried
+  end
 
   -- Wash: the button's own fill at Opacity.tabHover while the pointer is over an UNselected tab
   -- (the selected one is already solid). Bound only where a pointer exists — touch fires

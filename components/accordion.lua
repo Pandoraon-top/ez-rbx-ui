@@ -211,7 +211,12 @@ function Accordion.new(opts)
   function api:Expand() if not expanded then expanded = true; applyHeight(true) end end
   function api:Collapse() if expanded then expanded = false; applyHeight(true) end end
   function api:IsExpanded() return expanded end
-  function api:SetTitle(s) Safe.mutate(function() title.Text = s end) end
+  -- the same title again costs nothing: compared here, before Safe.mutate (and its probe)
+  local shownTitle = opts.Title or "Section"
+  function api:SetTitle(s)
+    if s == shownTitle then return end
+    Safe.mutate(function() title.Text = s; shownTitle = s end)   -- cached once written: a lost write is retried
+  end
   function api:SetIcon(name) if leadIcon then Safe.mutate(function() Icons.apply(leadIcon, name, theme.Colors[theme.Icon.accent]) end) end end
 
   function api.MountRow(child)

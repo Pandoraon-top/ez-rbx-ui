@@ -72,6 +72,11 @@ list scrolls. A picker with hundreds of options opens as fast as a short one (30
 80 instances instead of 1,500), the scrollbar still spans the whole list, and the search covers
 every option.
 
+### When the control moves
+
+An open list follows its control through a small move — one more line of text appearing above
+it — and closes on a bigger one, such as a scroll, the way a native select does.
+
 ### Empty results
 
 When every option is filtered away — by the search box or by a `Filter(q)` call — the list is

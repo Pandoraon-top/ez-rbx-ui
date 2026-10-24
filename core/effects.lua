@@ -62,7 +62,10 @@ local function levelOf(theme, level, layer)
   return lv
 end
 
+-- theme.Lite (a window built with Effects = "light") draws no 9-slice layer at all: every
+-- shadow and glow below returns nil, and their callers already treat nil as "none".
 local function shadowId(theme)
+  if theme.Lite then return nil end
   local id = theme.Effect.shadowId
   if type(id) ~= "string" or id == "" then return nil end
   return id
@@ -186,10 +189,18 @@ local function growth(theme, m)
   return m.lifted and 2 * theme.Effect.lift.spreadDelta or 0
 end
 
+-- Size is written only when it changes: a window drag re-mirrors the shadow on every pointer
+-- move, and its size does not move with it. `m.size` is the last size written here; lift (the
+-- only other Size writer) clears it. Position is always written: window tweens move it too.
 local function writeGeometry(shadow, theme, m, rest, xs, xo, ys, yo)
   m.rest = rest
   local g = growth(theme, m)
-  shadow.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
+  local sw, sh = rest[2] + g, rest[4] + g
+  local c = m.size
+  if not c or c[1] ~= rest[1] or c[2] ~= sw or c[3] ~= rest[3] or c[4] ~= sh then
+    shadow.Size = UDim2.new(rest[1], sw, rest[3], sh)
+    m.size = { rest[1], sw, rest[3], sh }
+  end
   shadow.Position = UDim2.new(xs, xo, ys, yo)
 end
 
@@ -262,7 +273,7 @@ end
 -- (lit at the top, fading down). stroke.Color is never touched (tests compare it by reference)
 -- and a second call updates the existing gradient in place (reskin path).
 function Effects.rim(stroke, theme)
-  if not stroke then return nil end
+  if not stroke or (type(theme) == "table" and theme.Lite) then return nil end   -- light: plain hairline
   local fx = Theme.fx(need(theme, "rim"))
   local g = stroke:FindFirstChildOfClass("UIGradient")
   if g then return paintRim(g, fx) end
@@ -303,6 +314,9 @@ function Effects.lift(shadow, theme, on, alpha)
   if rest then
     local g = growth(theme, m)
     goal.Size = UDim2.new(rest[1], rest[2] + g, rest[3], rest[4] + g)
+    -- the size is in motion now (and the tween may be cut short by another one), so the next
+    -- geometry write must not trust a cached value
+    m.size = nil
   end
   return Animate.to(shadow, "fast", goal)
 end

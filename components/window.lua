@@ -126,6 +126,17 @@ function Window.new(config)
   end
   -- merge a partial Theme override onto the defaults (verbatim use would crash on missing tokens)
   local theme = DefaultTheme.new(themeOverrides())
+  -- Effects = "full" (default) | "light" | "auto": how much material the window draws. Light is
+  -- flat -- no acrylic noise, sheen, glint or gradients, no 9-slice shadows or glows -- with the
+  -- strokes, corners and colours kept; "auto" is light on a touch-only device. theme.Lite carries
+  -- it to every control and popover (they all hold this theme). An unknown value warns.
+  local effects = config.Effects or "full"
+  if effects ~= "full" and effects ~= "light" and effects ~= "auto" then
+    if warn then warn(("[EzUI] CreateWindow: unknown Effects %q, using full"):format(tostring(effects))) end
+    effects = "full"
+  end
+  if effects == "auto" then effects = (Device.IsTouch() and not Device.SupportsHover()) and "light" or "full" end
+  theme.Lite = effects == "light"
   -- a Theme = { Motion = {...} } override retunes every Animate token name (process-wide, like enabled)
   Animate.useMotion(theme.Motion)
   if config.Mode == "light" then DefaultTheme.applyMode(theme, "light") else theme.Mode = "dark" end
@@ -172,6 +183,13 @@ function Window.new(config)
     end
     return { math.max(MIN_W, math.floor(w)), math.max(MIN_H, math.floor(ht)) }
   end
+  -- TabTransition = "slide" (default) | "none": pages swap at once instead of sliding. An unknown
+  -- value warns and slides, so a hub written for a newer EzUI still runs on an older one.
+  local tabTransition = config.TabTransition or "slide"
+  if tabTransition ~= "slide" and tabTransition ~= "none" then
+    if warn then warn(("[EzUI] CreateWindow: unknown TabTransition %q, sliding"):format(tostring(tabTransition))) end
+    tabTransition = "slide"
+  end
   local fixedSize, startSize = sizeOption("FixedSize"), sizeOption("StartSize")
   if fixedSize and startSize then error("CreateWindow: give FixedSize or StartSize, not both", 3) end
   local presetSize = fixedSize or startSize
@@ -215,8 +233,44 @@ function Window.new(config)
   local adaptPending, flushAdapt = false, nil
   local closeCallback
   local themer = Themer.new()
-  local lockables = {}
-  local function registerControl(c) lockables[#lockables + 1] = c end
+  -- Registries of live controls (LockAll, the sidebar search). Each registration hands back its
+  -- own removal, which Host.attach ties to the control's lifetime; a control destroyed with its
+  -- section (its own Destroy never called) is dropped the next time a list is walked, because its
+  -- frame has left the tree. A hub that rebuilds a section on every expand otherwise grew both
+  -- lists forever and kept every destroyed frame alive.
+  local function removeFrom(list, item)
+    for i = #list, 1, -1 do if list[i] == item then table.remove(list, i); return end end
+  end
+  -- Parent read under pcall: on a thread without the GUI capability the read throws, and an
+  -- entry we cannot inspect is kept rather than dropped.
+  local function readParent(f) return f.Parent end
+  local function inTree(frame)
+    local ok, parent = pcall(readParent, frame)
+    return not ok or parent ~= nil
+  end
+  local function prune(list, frameOf)
+    local n = 0
+    for i = 1, #list do
+      local item = list[i]
+      local f = frameOf(item)
+      if f == nil or inTree(f) then n = n + 1; list[n] = item end
+    end
+    for i = #list, n + 1, -1 do list[i] = nil end
+  end
+  -- A hub that never searches or locks still sheds what it destroyed: a list is pruned whenever
+  -- it has doubled since the last prune (amortised, so a registration stays O(1) on average).
+  local function grown(list, mark, frameOf)
+    if #list > math.max(64, 2 * mark) then prune(list, frameOf); return #list end
+    return mark
+  end
+  local function controlFrame(c) return c.Frame end
+  local function searchFrame(s) return s.frame end
+  local lockables, lockMark = {}, 0
+  local function registerControl(c)
+    lockables[#lockables + 1] = c
+    lockMark = grown(lockables, lockMark, controlFrame)
+    return function() removeFrom(lockables, c) end
+  end
 
   -- optional config persistence (controls register their flags against this)
   local cfg = nil
@@ -589,8 +643,11 @@ function Window.new(config)
     for i, st in ipairs(stops) do kps[i] = ColorSequenceKeypoint.new(st[1], st[2]) end
     return ColorSequence.new(kps)
   end
-  local insetShade = Create.gradient({ rotation = 90, stops = insetStops() })
-  insetShade.Name = "PanelInset"; insetShade.Parent = contentPanel
+  local insetShade
+  if not theme.Lite then   -- a light window keeps the panel flat
+    insetShade = Create.gradient({ rotation = 90, stops = insetStops() })
+    insetShade.Name = "PanelInset"; insetShade.Parent = contentPanel
+  end
   local contentScroll = Create("ScrollingFrame", {
     Name = "Content",
     BackgroundTransparency = 1,
@@ -616,12 +673,17 @@ function Window.new(config)
       Create.shade({ rotation = 90, stops = stops }),
     })
   end
-  local fadeTop = makeFade("ScrollFadeTop", 0, { { 0, 0 }, { 1, 1 } })
-  local fadeBottom = makeFade("ScrollFadeBottom", 1, { { 0, 1 }, { 1, 0 } })
+  -- A light window has no fades, and so no listener on every scroll step either.
+  local fadeTop, fadeBottom
+  if not theme.Lite then
+    fadeTop = makeFade("ScrollFadeTop", 0, { { 0, 0 }, { 1, 1 } })
+    fadeBottom = makeFade("ScrollFadeBottom", 1, { { 0, 1 }, { 1, 0 } })
+  end
   -- Visible is TOGGLED, never tweened: touch scrolling fires these signals hundreds of times a
   -- second and two tweens per event is not a budget. Unmeasured (any of the three nil, as
   -- headless) hides BOTH rather than flashing one on, and a write only happens on a real change.
   local function updateFades()
+    if not fadeTop then return end
     local cp, cs, aws = contentScroll.CanvasPosition, contentScroll.CanvasSize, contentScroll.AbsoluteWindowSize
     local top, bottom = false, false
     if cp and cs and aws then
@@ -633,10 +695,12 @@ function Window.new(config)
     if fadeBottom.Visible ~= bottom then fadeBottom.Visible = bottom end
   end
   -- property signals fire on engine threads (no GUI capability on strict executors) -> marshal
-  for _, prop in ipairs({ "CanvasPosition", "CanvasSize", "AbsoluteWindowSize" }) do
-    maid:Give(contentScroll:GetPropertyChangedSignal(prop):Connect(function() Safe.mutate(updateFades) end))
+  if fadeTop then
+    for _, prop in ipairs({ "CanvasPosition", "CanvasSize", "AbsoluteWindowSize" }) do
+      maid:Give(contentScroll:GetPropertyChangedSignal(prop):Connect(function() Safe.mutate(updateFades) end))
+    end
+    updateFades()
   end
-  updateFades()
   -- ONE painter for the recessed stack, so the shell closure and SetTransparency cannot disagree.
   local function paintPanel()
     local a = panelAlpha()
@@ -644,9 +708,11 @@ function Window.new(config)
     contentPanel.BackgroundTransparency = a
     contentStroke.Color = theme.Colors.border
     contentStroke.Transparency = theme.modeVal(theme, theme.Stroke.panel)
-    insetShade.Color = colorSeq(insetStops())
-    fadeTop.BackgroundColor3 = theme.Colors.card; fadeTop.BackgroundTransparency = a
-    fadeBottom.BackgroundColor3 = theme.Colors.card; fadeBottom.BackgroundTransparency = a
+    if insetShade then insetShade.Color = colorSeq(insetStops()) end
+    if fadeTop then
+      fadeTop.BackgroundColor3 = theme.Colors.card; fadeTop.BackgroundTransparency = a
+      fadeBottom.BackgroundColor3 = theme.Colors.card; fadeBottom.BackgroundTransparency = a
+    end
   end
 
   -- Draggable sidebar↔content divider. The band now STRADDLES the divider (x = the divider
@@ -787,7 +853,7 @@ function Window.new(config)
 
   local tabEntries = {}
   local groups = {}
-  local searchIndex = {} -- { entry = tabEntry, frame = controlFrame, text = lowercased }
+  local searchIndex, searchMark = {}, 0 -- { entry = tabEntry, frame = controlFrame, text = lowercased }
   local sidebarOrder = 0
   local function nextSidebarOrder() sidebarOrder = sidebarOrder + 1; return sidebarOrder end
 
@@ -801,9 +867,13 @@ function Window.new(config)
     tabOpts.Window = api
     tabOpts.AccentThemer = themer
     tabOpts.RegisterControl = registerControl
+    tabOpts.Transition = tabTransition
     -- controls register their searchable text here (full-text search across components)
     tabOpts.RegisterSearchable = function(frame, text)
-      searchIndex[#searchIndex + 1] = { entry = entry, frame = frame, text = (text or ""):lower() }
+      local rec = { entry = entry, frame = frame, text = (text or ""):lower() }
+      searchIndex[#searchIndex + 1] = rec
+      searchMark = grown(searchIndex, searchMark, searchFrame)
+      return function() removeFrom(searchIndex, rec) end
     end
     tabOpts.OnActivate = function(selectedTab)
       Overlay.closeAll()
@@ -857,6 +927,7 @@ function Window.new(config)
 
   function api:SearchTabs(query)
     query = (query or ""):lower()
+    prune(searchIndex, searchFrame)
     -- 1) component-level (full text): show only matching control rows
     for _, s in ipairs(searchIndex) do
       s.frame.Visible = (query == "" or (s.text ~= "" and s.text:find(query, 1, true) ~= nil))
@@ -1008,11 +1079,17 @@ function Window.new(config)
     end)
   end
   function api:Toggle() if closed then return end; if visible then api:Hide() else api:Show() end end
-  function api:SetTitle(s) Safe.mutate(function() titleLabel.Text = s end) end
+  -- the same text again costs nothing: compared here, before Safe.mutate (and its probe)
+  local shownTitle, shownSubtitle = config.Title or "EzUI", config.Subtitle
+  function api:SetTitle(s)
+    if s == shownTitle then return end
+    Safe.mutate(function() titleLabel.Text = s; shownTitle = s end)   -- cached once written
+  end
   function api:SetSubtitle(s)
+    if s == shownSubtitle then return end
     Safe.mutate(function()
       local sub = titleBar:FindFirstChild("Subtitle")
-      if sub then sub.Text = s end
+      if sub then sub.Text = s; shownSubtitle = s end
     end)
   end
   function api:SetImage(v)
@@ -1107,8 +1184,14 @@ function Window.new(config)
   end
 
   function api:GetThemer() return themer end
-  function api:LockAll() for _, c in ipairs(lockables) do if c.SetLocked then c.SetLocked(true) end end end
-  function api:UnlockAll() for _, c in ipairs(lockables) do if c.SetLocked then c.SetLocked(false) end end end
+  function api:LockAll()
+    prune(lockables, controlFrame)
+    for _, c in ipairs(lockables) do if c.SetLocked then c.SetLocked(true) end end
+  end
+  function api:UnlockAll()
+    prune(lockables, controlFrame)
+    for _, c in ipairs(lockables) do if c.SetLocked then c.SetLocked(false) end end
+  end
 
   local tagX = 70 -- offset from the right, left of the min/close buttons
   function api:Tag(o)
@@ -1136,7 +1219,14 @@ function Window.new(config)
       txt.TextColor3 = theme.Colors.foreground
       local ic = pill:FindFirstChild("TagIcon"); if ic then Icons.apply(ic, o.Icon, theme.Colors.primary) end
     end)
-    return { SetText = function(s) Safe.mutate(function() txt.Text = s end) end, Destroy = function() unreg(); pill:Destroy() end }
+    local shown = o.Text or ""
+    return {
+      SetText = function(s)
+        if s == shown then return end
+        Safe.mutate(function() txt.Text = s; shown = s end)
+      end,
+      Destroy = function() unreg(); pill:Destroy() end,
+    }
   end
   local function fgForColor(c)
     local lum = 0.299 * c.R + 0.587 * c.G + 0.114 * c.B

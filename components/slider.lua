@@ -134,6 +134,7 @@ function Slider.new(opts)
   end
 
   local enabled = true
+  local stopListening   -- the drag's global listeners (assigned below)
   local function setEnabled(b)
     local was = enabled
     enabled = b ~= false
@@ -143,7 +144,10 @@ function Slider.new(opts)
       Recipes.disabled(parts, not enabled, theme)
     end)
     -- a drag already under way is forced to finish (value kept) rather than left hanging
-    if was and not enabled and dragging then dragging = false; handleGrow() end
+    if was and not enabled and dragging then
+      dragging = false; handleGrow()
+      if stopListening then stopListening() end   -- the release will not come through them now
+    end
   end
 
   if opts.AccentReg then maid:Give(opts.AccentReg(function()
@@ -166,21 +170,30 @@ function Slider.new(opts)
     if t < 0 then t = 0 elseif t > 1 then t = 1 end
     api.SetValue(minV + t * (maxV - minV))
   end
+  -- The global move / release listeners exist only while the handle is held (connected on the
+  -- press, dropped on the release): permanent ones ran on every mouse movement of the session.
+  local moveConn, endConn
+  function stopListening()
+    if moveConn then moveConn:Disconnect(); moveConn = nil end
+    if endConn then endConn:Disconnect(); endConn = nil end
+  end
+  maid:Give(stopListening)
   maid:Give(hit.InputBegan:Connect(function(input)
     if not enabled then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
       dragging = true; handleGrow(); fromX(input.Position.X)
-    end
-  end))
-  maid:Give(UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-      fromX(input.Position.X)
-    end
-  end))
-  maid:Give(UserInputService.InputEnded:Connect(function(input)
-    if not dragging then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-      dragging = false; handleGrow()
+      if moveConn then return end
+      moveConn = UserInputService.InputChanged:Connect(function(io)
+        if dragging and (io.UserInputType == Enum.UserInputType.MouseMovement or io.UserInputType == Enum.UserInputType.Touch) then
+          fromX(io.Position.X)
+        end
+      end)
+      endConn = UserInputService.InputEnded:Connect(function(io)
+        if not dragging then return end
+        if io.UserInputType == Enum.UserInputType.MouseButton1 or io.UserInputType == Enum.UserInputType.Touch then
+          dragging = false; handleGrow(); stopListening()
+        end
+      end)
     end
   end))
   if Device.SupportsHover() then
