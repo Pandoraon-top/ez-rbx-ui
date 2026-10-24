@@ -316,4 +316,83 @@ h.describe("accordion motion", function()
   end)
 end)
 
+-- With AutomaticSize set, Roblox reads Size as the MINIMUM size. The animated expand tweens Size
+-- up to the measured content height, so handing over to the engine has to drop Size back to the
+-- header height too -- left at the tween's target it is a floor, and an expanded card can no
+-- longer shrink when its rows are hidden or destroyed (it only came right after a close/reopen).
+h.describe("accordion follows its content while expanded", function()
+  local theme = R.Theme
+  local Vector2 = h.roblox.Vector2
+  local HEADER_H = 34
+  local function measured(acc, y) acc.Content:FindFirstChildOfClass("UIListLayout").AbsoluteContentSize = Vector2.new(0, y) end
+
+  h.it("after the animated expand, Size is only the header-height minimum (the engine fits the rest)", function()
+    local acc = Accordion.new({ Parent = parentWithLayout(), Title = "Growth" })
+    measured(acc, 300)
+    acc:Expand()
+    h.expect(acc.Container.AutomaticSize.Name).toBe("Y")
+    h.expect(acc.Container.Size.Y.Scale).toBe(0)
+    h.expect(acc.Container.Size.Y.Offset).toBe(HEADER_H)
+  end)
+
+  h.it("re-expanding after a collapse also ends on the header-height minimum", function()
+    local acc = Accordion.new({ Parent = parentWithLayout(), Title = "Growth", Expanded = true })
+    measured(acc, 300)
+    acc:Collapse()
+    measured(acc, 120)
+    acc:Expand()
+    h.expect(acc.Container.AutomaticSize.Name).toBe("Y")
+    h.expect(acc.Container.Size.Y.Offset).toBe(HEADER_H)
+  end)
+
+  h.it("the hand-over survives a Completed that lands on a thread without GUI capability", function()
+    local acc = Accordion.new({ Parent = parentWithLayout(), Title = "Growth" })
+    measured(acc, 300)
+    R.Safe._setCapabilityCheck(function() return false end)
+    local ok, err = pcall(function() acc:Expand() end)
+    R.Safe._setCapabilityCheck(nil)
+    if not ok then error(err, 0) end
+    h.mock.stepHeartbeat(0)
+    h.expect(acc.Container.AutomaticSize.Name).toBe("Y")
+    h.expect(acc.Container.Size.Y.Offset).toBe(HEADER_H)
+    h.expect(acc.Content.Visible).toBe(true)
+  end)
+
+  h.it("a collapse that interrupts the expand keeps the collapsed end state", function()
+    local acc = Accordion.new({ Parent = parentWithLayout(), Title = "Growth" })
+    measured(acc, 300)
+    -- hold every Completed so the expand's hand-over lands AFTER the collapse has started
+    local held = {}
+    local orig = R.Animate.toThen
+    R.Animate.toThen = function(inst, dur, goal, done, ...)
+      return orig(inst, dur, goal, function() held[#held + 1] = done end, ...)
+    end
+    local ok, err = pcall(function() acc:Expand(); acc:Collapse() end)
+    R.Animate.toThen = orig
+    if not ok then error(err, 0) end
+    for _, done in ipairs(held) do if done then done() end end
+    h.expect(acc:IsExpanded()).toBe(false)
+    h.expect(acc.Container.AutomaticSize.Name).toBe("None")
+    h.expect(acc.Container.Size.Y.Offset).toBe(HEADER_H)
+    h.expect(acc.Content.Visible).toBe(false)
+  end)
+
+  h.it("an expand that interrupts the collapse keeps the expanded end state", function()
+    local acc = Accordion.new({ Parent = parentWithLayout(), Title = "Growth", Expanded = true })
+    measured(acc, 300)
+    local held = {}
+    local orig = R.Animate.toThen
+    R.Animate.toThen = function(inst, dur, goal, done, ...)
+      return orig(inst, dur, goal, function() held[#held + 1] = done end, ...)
+    end
+    local ok, err = pcall(function() acc:Collapse(); acc:Expand() end)
+    R.Animate.toThen = orig
+    if not ok then error(err, 0) end
+    for _, done in ipairs(held) do if done then done() end end
+    h.expect(acc:IsExpanded()).toBe(true)
+    h.expect(acc.Container.AutomaticSize.Name).toBe("Y")
+    h.expect(acc.Container.Size.Y.Offset).toBe(HEADER_H)
+    h.expect(acc.Content.Visible).toBe(true)
+  end)
+end)
 h.run()
