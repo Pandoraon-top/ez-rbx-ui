@@ -106,6 +106,38 @@ h.describe("selectbox", function()
     sb.Frame:GetPropertyChangedSignal("AbsolutePosition"):Fire()
     h.expect(open()).toBe(false)
   end)
+  h.it("a small move of the control (a status line above it grew) carries the dropdown along", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local root = R.Overlay.get(gui); root.AbsoluteSize = h.roblox.Vector2.new(600, 800)
+    local sb = SelectBox.new({ Parent = Create("Frame", {}), Options = { "A", "B" }, Default = "A" })
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(50, 100)
+    sb.Frame.AbsoluteSize = h.roblox.Vector2.new(200, 38)
+    sb.Open()
+    local function dd() for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdown" then return c end end end
+    local pop = dd()
+    local y0 = pop.Position.Y.Offset
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(50, 118)          -- 18 px down: one more text line
+    sb.Frame:GetPropertyChangedSignal("AbsolutePosition"):Fire()
+    h.expect(dd()).toBe(pop)                                            -- still open
+    h.expect(pop.Position.Y.Offset).toBe(y0 + 18)                       -- and moved with the control
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(50, 140)          -- 40 px from where it opened
+    sb.Frame:GetPropertyChangedSignal("AbsolutePosition"):Fire()
+    h.expect(dd()).toBeNil()
+  end)
+  h.it("a dropdown that follows its control stays inside the screen", function()
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local root = R.Overlay.get(gui); root.AbsoluteSize = h.roblox.Vector2.new(600, 400)
+    local sb = SelectBox.new({ Parent = Create("Frame", {}), Options = { "A", "B" }, Default = "A" })
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(390, 100)          -- near the right edge
+    sb.Frame.AbsoluteSize = h.roblox.Vector2.new(200, 38)
+    sb.Open()
+    local dd; for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdown" then dd = c end end
+    local right0 = dd.Position.X.Offset + dd.Size.X.Offset
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(410, 100)          -- 20 px further right
+    sb.Frame:GetPropertyChangedSignal("AbsolutePosition"):Fire()
+    h.expect(dd.Position.X.Offset + dd.Size.X.Offset <= math.max(right0, 600)).toBeTruthy()
+    sb.Close()
+  end)
   h.it("dropdown opens below when there is room", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
     local root = R.Overlay.get(gui)

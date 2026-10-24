@@ -75,7 +75,9 @@ function Host.attach(api, ctx)
       if ctx.registerSearchable and control and control.Frame then
         -- opts.Text may be a function (reactive label); index a stable string only.
         local searchText = (type(opts.Text) == "string" and opts.Text) or opts.Title or opts.Name or ""
-        ctx.registerSearchable(control.Frame, searchText)
+        -- the registry's removal rides the control's lifetime, so a destroyed control leaves it
+        local unreg = ctx.registerSearchable(control.Frame, searchText)
+        if type(unreg) == "function" then Host.own(control, unreg) end
       end
       if control and control.Frame then
         local C = ctx.R.Create
@@ -105,7 +107,10 @@ function Host.attach(api, ctx)
           ctx.R.Safe.mutate(function() scrim.Visible = v; shield.Visible = v end)
         end
         if opts.Locked then control.SetLocked(true) end
-        if ctx.registerControl then ctx.registerControl(control) end
+        if ctx.registerControl then
+          local unreg = ctx.registerControl(control)
+          if type(unreg) == "function" then Host.own(control, unreg) end
+        end
       end
       return control
     end

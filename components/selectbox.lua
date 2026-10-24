@@ -10,6 +10,9 @@ function SelectBox.Init(R)
 end
 
 local CARET_OPEN = 180 -- chevron-down reads as chevron-up while the list is open
+-- How far the control may move while its list is open and still carry the list along: one more
+-- line of text above it (a status paragraph growing) moves it ~18 px. Further (a scroll) closes.
+local REANCHOR = 24
 
 -- 3.1 loading skeleton geometry. Uneven widths on purpose: three equal bars read as a progress
 -- meter, three ragged ones read as text that has not arrived yet. Kept module-local because
@@ -103,8 +106,10 @@ function SelectBox.new(opts)
   -- height), so SetOptions can update the rows in place instead of building the popover again.
   local ddSearchable, ddHeight, ddLoading = false, 0, false
   local ddSlide  -- the open popover's entrance slide (a Position tween), while it may still run
+  -- Where the open popover was placed (overlay px) and where the control was then (screen px).
+  local ddAt, ddAnchor
   local lastQuery = ""  -- the filter in force on the open popover, lower-cased
-  local buildDropdown, rebuild, computePos, refresh, syncSelection, syncRows
+  local buildDropdown, rebuild, computePos, refresh, syncSelection, syncRows, followControl
   local onChanged = opts.Callback
 
   local function labelFor(v)
@@ -422,6 +427,7 @@ function SelectBox.new(opts)
       dropdown.Size = UDim2.new(0, width, 0, ddH)
       dropdown.Position = UDim2.new(0, x, 0, y)
       Effects.place(shadow, x, y, width * ddScale, ddH * ddScale, "popover", theme)
+      ddAt, ddAnchor = { x, y }, btn.AbsolutePosition
       rowCtx.viewH = ddH - (ddSearchable and 34 or 4) - 4
     end
     if ddRows then ddRows:setOptions(normed) end
@@ -442,6 +448,7 @@ function SelectBox.new(opts)
     local scale = Overlay.scale()
     ddScale = scale
     local x, y, openUp = computePos(width, ddH, scale)
+    ddAt, ddAnchor = { x, y }, btn.AbsolutePosition
     -- Outer popover container. Active so clicks on its chrome don't fall through to the
     -- overlay catcher (which would close it). The search bar is pinned here (sticky); the
     -- options live in a nested ScrollingFrame so the search stays put while the list scrolls.
@@ -543,7 +550,7 @@ function SelectBox.new(opts)
     -- would either detach from the control or float outside the window once the control
     -- leaves the content viewport (standard <select> behavior). Scrolling inside the
     -- dropdown itself doesn't move the control's AbsolutePosition, so it stays open.
-    posConn = btn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function() Safe.mutate(api.Close) end)
+    posConn = btn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function() Safe.mutate(followControl) end)
     Overlay.mount(dropdown)
     Overlay.trackPopover(api.Close)
     -- 2.11: while it is open the popover holds a themer registration of its OWN. The control's
@@ -607,7 +614,7 @@ function SelectBox.new(opts)
     if ddUnreg then ddUnreg(); ddUnreg = nil end
     if searchFocus then searchFocus.disconnect(); searchFocus = nil end
     if ddRows then ddRows:destroy() end
-    ddRows, lastQuery, ddSlide = nil, "", nil
+    ddRows, lastQuery, ddSlide, ddAt, ddAnchor = nil, "", nil, nil, nil
     Overlay.untrackPopover(api.Close)
     local function stopSkeletons() for _, sk in ipairs(sks) do sk.Stop() end end
     if not dd then stopSkeletons(); return end
@@ -623,6 +630,24 @@ function SelectBox.new(opts)
     buildDropdown(query)
   end
   function api.Close() teardown(); setOpen(false) end
+
+  -- The control moved while its list is open. A small move (a line of text grew above it) carries
+  -- the list along; a bigger one (a scroll) closes it, as a native select does -- otherwise the
+  -- screen-space popover would detach from the control or float outside the window.
+  function followControl()
+    if not dropdown then return end
+    local p = btn.AbsolutePosition
+    if not (p and ddAnchor and ddAt) then api.Close(); return end
+    local dx, dy = p.X - ddAnchor.X, p.Y - ddAnchor.Y
+    if math.abs(dx) > REANCHOR or math.abs(dy) > REANCHOR then api.Close(); return end
+    if ddSlide and ddSlide.Cancel then ddSlide:Cancel() end   -- the entrance slide must not undo it
+    ddSlide = nil
+    -- placed again from the control's live position, through the same viewport clamp and flip
+    local sz = dropdown.Size
+    local x, y = computePos(sz.X.Offset, sz.Y.Offset, ddScale)
+    dropdown.Position = UDim2.new(0, x, 0, y)
+    Effects.place(shadow, x, y, sz.X.Offset * ddScale, sz.Y.Offset * ddScale, "popover", theme)
+  end
 
   function api.Destroy() api.Close(); maid:DoCleanup() end
 

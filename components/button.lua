@@ -202,10 +202,15 @@ function Button.new(opts)
   if opts.Disabled then setEnabled(false) end
   if opts.Loading then setLoading(true) end
 
+  local shownText = opts.Text or "Button"
   return {
     Frame = btn,
-    -- the same text again writes nothing (a hub refreshing a status button every tick)
-    SetText = function(s) Safe.mutate(function() if label.Text ~= s then label.Text = s end end) end,
+    -- the same text again costs nothing (a hub refreshing a status button every tick): compared
+    -- here, before Safe.mutate and its capability probe
+    SetText = function(s)
+      if s == shownText then return end
+      Safe.mutate(function() label.Text = s; shownText = s end)   -- cached once written: a lost write is retried
+    end,
     -- Blocks USER input only (the Callback is guarded); SetText and a themer reskin still apply.
     SetEnabled = setEnabled,
     SetLoading = setLoading,

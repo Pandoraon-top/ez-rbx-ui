@@ -306,7 +306,7 @@ function M.installInto(env, mock, strict)
   local uisPropSignals = {}
   local UserInputService = {
     InputBegan = makeSignal(), InputChanged = makeSignal(), InputEnded = makeSignal(),
-    LastInputTypeChanged = makeSignal(),
+    LastInputTypeChanged = makeSignal(), WindowFocusReleased = makeSignal(),
     TouchEnabled = false, MouseEnabled = true, KeyboardEnabled = true, GamepadEnabled = false,
   }
   function UserInputService:GetLastInputType() return mock.lastInputType or env.Enum.UserInputType.Keyboard end

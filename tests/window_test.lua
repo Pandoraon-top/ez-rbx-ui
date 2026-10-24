@@ -2393,5 +2393,24 @@ h.describe("window: Strings", function()
   end)
 end)
 
-h.run()
+h.describe("window: a drag step writes only what moved", function()
+  h.it("dragging the title bar writes Main's position and the shadow's, never the unchanged shadow size", function()
+    local R = h.loadLib(); local screen = h.roblox.Instance.new("ScreenGui"); R.Overlay.get(screen)
+    local w = R.Window.new({ Title = "M", Parent = screen })
+    local bar = w.Main:FindFirstChild("TitleBar")
+    local uis = h.roblox.game:GetService("UserInputService")
+    local MB1, MOVE = h.roblox.Enum.UserInputType.MouseButton1, h.roblox.Enum.UserInputType.MouseMovement
+    bar.InputBegan:Fire({ UserInputType = MB1, Position = h.roblox.Vector2.new(300, 10) })
+    R.Safe._setCapabilityCheck(function() return true end)
+    h.mock.writes = 0
+    for i = 1, 20 do uis.InputChanged:Fire({ UserInputType = MOVE, Position = h.roblox.Vector2.new(300 + i, 10 + i) }) end
+    local n = h.mock.writes
+    R.Safe._setCapabilityCheck(nil)
+    bar.InputEnded:Fire({ UserInputType = MB1, Position = h.roblox.Vector2.new(320, 30) })
+    local shadow = w.Gui:FindFirstChild("WindowShadow")
+    -- 20 x Main.Position + 20 x the shadow's Position, and its Size once: the grab's lift moved it
+    h.expect(n).toBe(shadow and 41 or 20)
+  end)
+end)
 
+h.run()
