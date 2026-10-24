@@ -209,7 +209,7 @@ h.describe("selectbox", function()
       Options = { { Value = "Bow", Icon = "target" }, { Value = "Shield", Icon = "shield" } } })
     h.expect(sb.Frame:FindFirstChild("Field"):FindFirstChild("FieldIcon").Visible).toBe(true)
   end)
-  h.it("dropdown is a ScrollingFrame with auto canvas so long lists scroll", function()
+  h.it("dropdown is a ScrollingFrame whose canvas holds the whole list so long lists scroll", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset(); R.Overlay.get(gui)
     local big = {}; for i = 1, 20 do big[i] = "I" .. i end
     local sb = SelectBox.new({ Parent = Create("Frame", {}), Options = big, Default = "I1" })
@@ -217,7 +217,7 @@ h.describe("selectbox", function()
     local dd; for _, c in ipairs(R.Overlay.get(gui):GetChildren()) do if c.Name == "SelectDropdown" then dd = c end end
     local list = dd:FindFirstChild("List")
     h.expect(list.ClassName).toBe("ScrollingFrame")
-    h.expect(list.AutomaticCanvasSize).toBe(h.roblox.Enum.AutomaticSize.Y)
+    h.expect(list.CanvasSize.Y.Offset).toBe(20 * 26 + 19 * 2)   -- every row, 2 px apart
   end)
   h.it("Loading shows a spinner + Loading row; SetLoading(false) restores options", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset(); R.Overlay.get(gui)
@@ -997,10 +997,12 @@ h.describe("selectbox: SetOptions on an open dropdown updates the rows in place"
     local function dd() for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdown" then return c end end end
     return sb, dd
   end
+  -- The list is virtual: an option that is not shown has no visible row (its slot is hidden or
+  -- shows another option), so only VISIBLE rows count.
   local function rows(dd)
     local out = {}
     for _, o in ipairs(dd:FindFirstChild("List"):GetChildren()) do
-      if o.Name == "Opt" then out[#out + 1] = o end
+      if o.Name == "Opt" and o.Visible ~= false then out[#out + 1] = o end
     end
     table.sort(out, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
     return out
@@ -1008,6 +1010,7 @@ h.describe("selectbox: SetOptions on an open dropdown updates the rows in place"
   local function rowFor(dd, v)
     for _, o in ipairs(rows(dd)) do if o:GetAttribute("OptValue") == v then return o end end
   end
+  local function shown(dd, v) return rowFor(dd, v) ~= nil end
   local function pets(n, tag)
     local t = {}
     for i = 1, n do t[i] = { Value = "pet" .. i, Text = "Cat " .. i .. " | " .. tag } end
@@ -1019,34 +1022,37 @@ h.describe("selectbox: SetOptions on an open dropdown updates the rows in place"
     sb.Open()
     local pop, list = dd(), dd():FindFirstChild("List")
     list.CanvasPosition = h.roblox.Vector2.new(0, 300)
-    local input = pop:FindFirstChild("Search"):FindFirstChild("Input")
-    input.Text = "cat 2"
-    input:GetPropertyChangedSignal("Text"):Fire()
+    list:GetPropertyChangedSignal("CanvasPosition"):Fire()
     sb.SetOptions(pets(40, "1.1 KG"))
     h.expect(dd()).toBe(pop)                                    -- not rebuilt
     h.expect(pop:FindFirstChild("List")).toBe(list)
-    h.expect(list.CanvasPosition.Y).toBe(300)
+    h.expect(list.CanvasPosition.Y).toBe(300)                   -- scroll kept
+    local input = pop:FindFirstChild("Search"):FindFirstChild("Input")
+    input.Text = "cat 2"
+    input:GetPropertyChangedSignal("Text"):Fire()
+    sb.SetOptions(pets(40, "1.2 KG"))
     h.expect(input.Text).toBe("cat 2")
-    h.expect(rowFor(pop, "pet2").Visible).toBe(true)            -- "Cat 2 | 1.1 KG" still matches
-    h.expect(rowFor(pop, "pet21").Visible).toBe(true)
-    h.expect(rowFor(pop, "pet3").Visible).toBe(false)           -- the filter still holds
+    h.expect(shown(pop, "pet2")).toBe(true)                     -- "Cat 2 | 1.2 KG" still matches
+    h.expect(shown(pop, "pet21")).toBe(true)
+    h.expect(shown(pop, "pet3")).toBe(false)                    -- the filter still holds
     sb.Close()
   end)
 
-  h.it("rows are keyed by Value: kept rows are reused, new values add rows, gone values drop theirs", function()
+  h.it("the list follows the new options: order, labels, new values and gone values", function()
     local sb, dd = setup({ Options = { { Value = "a", Text = "A1" }, { Value = "b", Text = "B1" }, { Value = "c", Text = "C1" } } })
     sb.Open()
     local pop = dd()
-    local ra, rb, rc = rowFor(pop, "a"), rowFor(pop, "b"), rowFor(pop, "c")
+    local before = rows(pop)
     sb.SetOptions({ { Value = "c", Text = "C2" }, { Value = "d", Text = "D2" }, { Value = "a", Text = "A2" } })
     local now = rows(pop)
     h.expect(#now).toBe(3)
-    h.expect(now[1]).toBe(rc)                                   -- order follows the new list
+    h.expect(now[1]:GetAttribute("OptValue")).toBe("c")         -- order follows the new list
     h.expect(now[2]:GetAttribute("OptValue")).toBe("d")
-    h.expect(now[3]).toBe(ra)
-    h.expect(ra:FindFirstChild("OptLabel").Text).toBe("A2")     -- label updated in place
-    h.expect(rc:FindFirstChild("OptLabel").Text).toBe("C2")
-    h.expect(rb.Parent).toBeNil()                               -- "b" is gone
+    h.expect(now[3]:GetAttribute("OptValue")).toBe("a")
+    h.expect(now[1]:FindFirstChild("OptLabel").Text).toBe("C2")
+    h.expect(now[3]:FindFirstChild("OptLabel").Text).toBe("A2")
+    h.expect(shown(pop, "b")).toBe(false)                       -- "b" is gone
+    for i = 1, 3 do h.expect(now[i]).toBe(before[i]) end        -- the same three rows, re-bound in place
     sb.Close()
   end)
 
@@ -1114,8 +1120,8 @@ h.describe("selectbox: SetOptions on an open dropdown updates the rows in place"
     local empty = pop:FindFirstChild("Empty")
     h.expect(empty.Visible).toBe(true)
     sb.SetOptions({ "Alpha", "Beta", "zzz top" })
-    h.expect(rowFor(pop, "zzz top").Visible).toBe(true)
-    h.expect(rowFor(pop, "Alpha").Visible).toBe(false)
+    h.expect(shown(pop, "zzz top")).toBe(true)
+    h.expect(shown(pop, "Alpha")).toBe(false)
     h.expect(empty.Visible).toBe(false)
     sb.SetOptions({ "Alpha" })
     h.expect(empty.Visible).toBe(true)
@@ -1162,10 +1168,10 @@ h.describe("selectbox: SetOptions on an open dropdown updates the rows in place"
     sb.SetOptions(opts)
     h.expect(dd()).toBe(pop)
     h.expect(pop.Size.Y.Offset > before).toBeTruthy()
-    h.expect(#rows(pop)).toBe(12)
+    h.expect(#rows(pop)).toBe(6)                                -- the six "b" rows match the query
     h.expect(input.Text).toBe("b")
-    h.expect(rowFor(pop, "a1").Visible).toBe(false)
-    h.expect(rowFor(pop, "b2").Visible).toBe(true)
+    h.expect(shown(pop, "a1")).toBe(false)
+    h.expect(shown(pop, "b2")).toBe(true)
     sb.Close()
   end)
 
@@ -1281,6 +1287,198 @@ h.describe("selectbox: SetOptions on an open dropdown updates the rows in place"
     h.expect(rowFor(pop, "C") ~= nil).toBeTruthy()
     h.expect(rowFor(pop, "B")).toBeNil()
     sb.Close()
+  end)
+end)
+
+-- Opening a 300-pet picker built every row at once (about 1,500 instances). The list is virtual
+-- now: only the rows in view plus a buffer exist, and scrolling binds them to the options below.
+h.describe("selectbox: a long list builds only the rows in view", function()
+  local function setup(extra)
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local root = R.Overlay.get(gui); root.AbsoluteSize = h.roblox.Vector2.new(600, 800)
+    local o = { Parent = Create("Frame", {}) }
+    for k, v in pairs(extra or {}) do o[k] = v end
+    local sb = SelectBox.new(o)
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(50, 100)
+    sb.Frame.AbsoluteSize = h.roblox.Vector2.new(200, 38)
+    local function dd() for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdown" then return c end end end
+    return sb, dd
+  end
+  local function pets(n)
+    local t = {}
+    for i = 1, n do t[i] = { Value = "pet" .. i, Text = "Cat " .. i } end
+    return t
+  end
+  local function slots(dd)
+    local all, visible = 0, 0
+    for _, o in ipairs(dd:FindFirstChild("List"):GetChildren()) do
+      if o.Name == "Opt" then all = all + 1; if o.Visible ~= false then visible = visible + 1 end end
+    end
+    return all, visible
+  end
+  local function rowFor(dd, v)
+    for _, o in ipairs(dd:FindFirstChild("List"):GetChildren()) do
+      if o.Name == "Opt" and o.Visible ~= false and o:GetAttribute("OptValue") == v then return o end
+    end
+  end
+  local function scrollTo(dd, y)
+    local list = dd:FindFirstChild("List")
+    list.CanvasPosition = h.roblox.Vector2.new(0, y)
+    list:GetPropertyChangedSignal("CanvasPosition"):Fire()
+  end
+
+  h.it("opening 300 options builds only the rows in view plus a buffer", function()
+    local sb, dd = setup({ Options = pets(300), Multi = true })
+    sb.Open()
+    local all = slots(dd())
+    h.expect(all <= 20).toBeTruthy()
+    h.expect(rowFor(dd(), "pet1") ~= nil).toBeTruthy()
+    h.expect(rowFor(dd(), "pet300")).toBeNil()
+    h.expect(dd():FindFirstChild("List").CanvasSize.Y.Offset).toBe(300 * 26 + 299 * 2)
+    sb.Close()
+  end)
+
+  h.it("rows sit where the list layout put them: 28 px apart, 38 with a description", function()
+    local sb, dd = setup({ Options = { "A", { Value = "B", Desc = "two lines" }, { Divider = true }, "C" } })
+    sb.Open()
+    h.expect(rowFor(dd(), "A").Position.Y.Offset).toBe(0)
+    h.expect(rowFor(dd(), "B").Position.Y.Offset).toBe(28)
+    h.expect(rowFor(dd(), "B").Size.Y.Offset).toBe(38)
+    local div
+    for _, c in ipairs(dd():FindFirstChild("List"):GetChildren()) do if c.Name == "Divider" then div = c end end
+    h.expect(div.Position.Y.Offset).toBe(28 + 38 + 2)
+    h.expect(rowFor(dd(), "C").Position.Y.Offset).toBe(28 + 38 + 2 + 1 + 2)
+    sb.Close()
+  end)
+
+  h.it("scrolling binds the same slots to the rows coming into view", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    scrollTo(dd(), 100 * 28)
+    local band = slots(dd())                                 -- the view plus a buffer each side
+    h.expect(band <= 20).toBeTruthy()
+    scrollTo(dd(), 280 * 28)
+    h.expect(slots(dd())).toBe(band)                         -- recycled, not built
+    h.expect(rowFor(dd(), "pet281") ~= nil).toBeTruthy()
+    h.expect(rowFor(dd(), "pet281").Position.Y.Offset).toBe(280 * 28)
+    h.expect(rowFor(dd(), "pet1")).toBeNil()
+    sb.Close()
+  end)
+
+  h.it("a click on a recycled row picks the option it shows now", function()
+    local sb, dd = setup({ Options = pets(300), Multi = true })
+    sb.Open()
+    scrollTo(dd(), 200 * 28)
+    rowFor(dd(), "pet205").MouseButton1Click:Fire()
+    local v = sb.GetValue()
+    h.expect(#v).toBe(1)
+    h.expect(v[1]).toBe("pet205")
+    h.expect(rowFor(dd(), "pet205"):FindFirstChild("Check").Visible).toBe(true)
+    sb.Close()
+  end)
+
+  h.it("a picked option scrolled into view shows its tick, an unpicked one in its slot does not", function()
+    local sb, dd = setup({ Options = pets(300), Multi = true, Default = { "pet3", "pet250" } })
+    sb.Open()
+    h.expect(rowFor(dd(), "pet3"):FindFirstChild("Check").Visible).toBe(true)
+    scrollTo(dd(), 249 * 28)
+    h.expect(rowFor(dd(), "pet250"):FindFirstChild("Check").Visible).toBe(true)
+    h.expect(rowFor(dd(), "pet251"):FindFirstChild("Check").Visible).toBe(false)
+    sb.Close()
+  end)
+
+  h.it("the search reaches options far down the list", function()
+    local sb, dd = setup({ Options = pets(300), Searchable = true })
+    sb.Open()
+    sb.Filter("cat 299")
+    h.expect(rowFor(dd(), "pet299") ~= nil).toBeTruthy()
+    local _, visible = slots(dd())
+    h.expect(visible).toBe(1)
+    h.expect(rowFor(dd(), "pet299").Position.Y.Offset).toBe(0)
+    sb.Close()
+  end)
+
+  h.it("a filter that shortens the list keeps the scroll inside it", function()
+    local sb, dd = setup({ Options = pets(300), Searchable = true })
+    sb.Open()
+    scrollTo(dd(), 250 * 28)
+    sb.Filter("cat 29")                                      -- 11 rows: pet29, pet290..299
+    local canvas, view = 11 * 26 + 10 * 2, 240 - 34 - 4
+    h.expect(dd():FindFirstChild("List").CanvasPosition.Y).toBe(canvas - view)   -- the new bottom
+    h.expect(rowFor(dd(), "pet299") ~= nil).toBeTruthy()
+    sb.Close()
+  end)
+
+  h.it("at a UI scale the list scrolls to its real bottom (the view is not read in screen px)", function()
+    R.Overlay.setScale(1.25)
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local list = dd():FindFirstChild("List")
+    local view = 240 - 34 - 4
+    list.AbsoluteWindowSize = h.roblox.Vector2.new(200, view * 1.25)   -- what the engine reports
+    local bottom = (300 * 26 + 299 * 2) - view
+    scrollTo(dd(), bottom)
+    h.expect(list.CanvasPosition.Y).toBe(bottom)
+    h.expect(rowFor(dd(), "pet300") ~= nil).toBeTruthy()
+    sb.Close()
+    R.Overlay.setScale(1)
+  end)
+
+  h.it("a press on a row that scrolls to another option before the release picks nothing", function()
+    local sb, dd = setup({ Options = pets(300), Multi = true })
+    sb.Open()
+    local row = rowFor(dd(), "pet2")
+    row.MouseButton1Down:Fire()
+    scrollTo(dd(), 95 * 28)                                  -- the slot now shows another option
+    row.MouseButton1Click:Fire()
+    h.expect(#sb.GetValue()).toBe(0)
+    rowFor(dd(), "pet97").MouseButton1Down:Fire()            -- an ordinary press and release still picks
+    rowFor(dd(), "pet97").MouseButton1Click:Fire()
+    h.expect(sb.GetValue()[1]).toBe("pet97")
+    sb.Close()
+  end)
+
+  h.it("a tick on a recycled row keeps the same hover recipe (no rebinding while scrolling)", function()
+    local sb, dd = setup({ Options = pets(300), Multi = true, Default = { "pet150" } })
+    sb.Open()
+    local row = rowFor(dd(), "pet3")
+    row.MouseEnter:Fire()                                    -- the pointer rests on this row
+    h.expect(row.BackgroundTransparency).toBe(R.Theme.Opacity.optionHover)
+    scrollTo(dd(), 147 * 28)
+    local now = rowFor(dd(), "pet150")
+    h.expect(now:FindFirstChild("Check").Visible).toBe(true)
+    now.MouseLeave:Fire()
+    h.expect(now.BackgroundTransparency).toBe(0)             -- a picked row rests filled
+    sb.Close()
+  end)
+
+  h.it("an option whose Value cannot be an attribute still shows and picks", function()
+    local key = { id = 7 }
+    local sb, dd = setup({ Options = { { Value = key, Text = "Seven" }, { Value = "b", Text = "B" } } })
+    sb.Open()
+    local seven
+    for _, o in ipairs(dd():FindFirstChild("List"):GetChildren()) do
+      if o.Name == "Opt" and o:FindFirstChild("OptLabel").Text == "Seven" then seven = o end
+    end
+    h.expect(seven:GetAttribute("OptValue")).toBeNil()       -- a table is never written as an attribute
+    seven.MouseButton1Click:Fire()
+    h.expect(sb.GetValue()).toBe(key)
+  end)
+
+  h.it("an off-thread scroll is drawn on the next Heartbeat; a closed list ignores it", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local pop = dd()
+    local list = pop:FindFirstChild("List")
+    R.Safe._setCapabilityCheck(function() return false end)
+    list.CanvasPosition = h.roblox.Vector2.new(0, 100 * 28)
+    list:GetPropertyChangedSignal("CanvasPosition"):Fire()
+    R.Safe._setCapabilityCheck(nil)
+    h.expect(rowFor(pop, "pet101")).toBeNil()
+    h.mock.stepHeartbeat(0)
+    h.expect(rowFor(pop, "pet101") ~= nil).toBeTruthy()
+    sb.Close()
+    list:GetPropertyChangedSignal("CanvasPosition"):Fire()   -- disconnected: nothing happens
   end)
 end)
 
