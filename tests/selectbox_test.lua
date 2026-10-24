@@ -982,4 +982,306 @@ h.describe("selectbox", function()
   end)
 end)
 
+-- SetOptions on an OPEN dropdown used to tear the popover down and build it again: every row, the
+-- scroll position and the search query went with it (a hub refreshing a 300-pet list every 2.5 s
+-- paid a whole Open each time, and the list jumped to the top under the player's finger).
+h.describe("selectbox: SetOptions on an open dropdown updates the rows in place", function()
+  local function setup(extra)
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local root = R.Overlay.get(gui); root.AbsoluteSize = h.roblox.Vector2.new(600, 800)
+    local o = { Parent = Create("Frame", {}) }
+    for k, v in pairs(extra or {}) do o[k] = v end
+    local sb = SelectBox.new(o)
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(50, 100)
+    sb.Frame.AbsoluteSize = h.roblox.Vector2.new(200, 38)
+    local function dd() for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdown" then return c end end end
+    return sb, dd
+  end
+  local function rows(dd)
+    local out = {}
+    for _, o in ipairs(dd:FindFirstChild("List"):GetChildren()) do
+      if o.Name == "Opt" then out[#out + 1] = o end
+    end
+    table.sort(out, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+    return out
+  end
+  local function rowFor(dd, v)
+    for _, o in ipairs(rows(dd)) do if o:GetAttribute("OptValue") == v then return o end end
+  end
+  local function pets(n, tag)
+    local t = {}
+    for i = 1, n do t[i] = { Value = "pet" .. i, Text = "Cat " .. i .. " | " .. tag } end
+    return t
+  end
+
+  h.it("keeps the popover, its scroll position and the search query, and filters again", function()
+    local sb, dd = setup({ Options = pets(40, "1.0 KG"), Multi = true, Searchable = true, AllowNone = true })
+    sb.Open()
+    local pop, list = dd(), dd():FindFirstChild("List")
+    list.CanvasPosition = h.roblox.Vector2.new(0, 300)
+    local input = pop:FindFirstChild("Search"):FindFirstChild("Input")
+    input.Text = "cat 2"
+    input:GetPropertyChangedSignal("Text"):Fire()
+    sb.SetOptions(pets(40, "1.1 KG"))
+    h.expect(dd()).toBe(pop)                                    -- not rebuilt
+    h.expect(pop:FindFirstChild("List")).toBe(list)
+    h.expect(list.CanvasPosition.Y).toBe(300)
+    h.expect(input.Text).toBe("cat 2")
+    h.expect(rowFor(pop, "pet2").Visible).toBe(true)            -- "Cat 2 | 1.1 KG" still matches
+    h.expect(rowFor(pop, "pet21").Visible).toBe(true)
+    h.expect(rowFor(pop, "pet3").Visible).toBe(false)           -- the filter still holds
+    sb.Close()
+  end)
+
+  h.it("rows are keyed by Value: kept rows are reused, new values add rows, gone values drop theirs", function()
+    local sb, dd = setup({ Options = { { Value = "a", Text = "A1" }, { Value = "b", Text = "B1" }, { Value = "c", Text = "C1" } } })
+    sb.Open()
+    local pop = dd()
+    local ra, rb, rc = rowFor(pop, "a"), rowFor(pop, "b"), rowFor(pop, "c")
+    sb.SetOptions({ { Value = "c", Text = "C2" }, { Value = "d", Text = "D2" }, { Value = "a", Text = "A2" } })
+    local now = rows(pop)
+    h.expect(#now).toBe(3)
+    h.expect(now[1]).toBe(rc)                                   -- order follows the new list
+    h.expect(now[2]:GetAttribute("OptValue")).toBe("d")
+    h.expect(now[3]).toBe(ra)
+    h.expect(ra:FindFirstChild("OptLabel").Text).toBe("A2")     -- label updated in place
+    h.expect(rc:FindFirstChild("OptLabel").Text).toBe("C2")
+    h.expect(rb.Parent).toBeNil()                               -- "b" is gone
+    sb.Close()
+  end)
+
+  h.it("a reused row picks up a new description and icon", function()
+    local sb, dd = setup({ Options = { { Value = "a", Text = "A" }, { Value = "b", Text = "B", Desc = "old" } } })
+    sb.Open()
+    local pop = dd()
+    sb.SetOptions({ { Value = "a", Text = "A", Desc = "now" }, { Value = "b", Text = "B", Desc = "new", Icon = "home" } })
+    local ra, rb = rowFor(pop, "a"), rowFor(pop, "b")
+    h.expect(ra:FindFirstChild("Desc").Text).toBe("now")
+    h.expect(ra.Size.Y.Offset).toBe(38)                         -- a description makes the row taller
+    h.expect(rb:FindFirstChild("Desc").Text).toBe("new")
+    h.expect(rb:FindFirstChild("Lead") ~= nil).toBeTruthy()
+    h.expect(rb:FindFirstChild("OptLabel").Position.X.Offset).toBe(40) -- text moves past the icon
+    sb.Close()
+  end)
+
+  h.it("selection follows the new list: a picked value that disappears loses its check", function()
+    local sb, dd = setup({ Options = { "A", "B", "C" }, Multi = true, Default = { "A", "B" } })
+    sb.Open()
+    local pop = dd()
+    sb.SetOptions({ "A", "C", "D" })
+    h.expect(#sb.GetValue()).toBe(1)
+    h.expect(rowFor(pop, "A"):FindFirstChild("Check").Visible).toBe(true)
+    h.expect(rowFor(pop, "C"):FindFirstChild("Check").Visible).toBe(false)
+    h.expect(rowFor(pop, "D"):FindFirstChild("Check").Visible).toBe(false)
+    sb.Close()
+  end)
+
+  h.it("SetValue on an open dropdown re-ticks the rows", function()
+    local sb, dd = setup({ Options = { "A", "B", "C" }, Multi = true, Default = { "A" } })
+    sb.Open()
+    local pop = dd()
+    sb.SetValue({ "B", "C" })
+    h.expect(rowFor(pop, "A"):FindFirstChild("Check").Visible).toBe(false)
+    h.expect(rowFor(pop, "A").BackgroundTransparency).toBe(1)
+    h.expect(rowFor(pop, "B"):FindFirstChild("Check").Visible).toBe(true)
+    h.expect(rowFor(pop, "B").BackgroundTransparency).toBe(0)
+    h.expect(dd()).toBe(pop)
+    sb.Close()
+  end)
+
+  h.it("costs a small fraction of an Open", function()
+    local sb = setup({ Options = pets(300, "1.0 KG"), Multi = true, Searchable = true, AllowNone = true,
+      Default = { "pet1", "pet5", "pet9" } })
+    h.mock.writes = 0
+    sb.Open()
+    local openCost = h.mock.writes
+    h.mock.writes = 0
+    sb.SetOptions(pets(300, "1.1 KG"))   -- every label changes, as a growing pet's KG does
+    local syncCost = h.mock.writes
+    h.mock.writes = 0
+    sb.SetOptions(pets(300, "1.1 KG"))   -- nothing changes
+    local idleCost = h.mock.writes
+    h.expect(syncCost * 10 < openCost).toBeTruthy()
+    h.expect(idleCost < 20).toBeTruthy()
+    sb.Close()
+  end)
+
+  h.it("rows that arrive go through the active filter and the empty block follows", function()
+    local sb, dd = setup({ Options = { "Alpha", "Beta" }, Searchable = true })
+    sb.Open()
+    local pop = dd()
+    sb.Filter("zzz")
+    local empty = pop:FindFirstChild("Empty")
+    h.expect(empty.Visible).toBe(true)
+    sb.SetOptions({ "Alpha", "Beta", "zzz top" })
+    h.expect(rowFor(pop, "zzz top").Visible).toBe(true)
+    h.expect(rowFor(pop, "Alpha").Visible).toBe(false)
+    h.expect(empty.Visible).toBe(false)
+    sb.SetOptions({ "Alpha" })
+    h.expect(empty.Visible).toBe(true)
+    sb.Close()
+  end)
+
+  h.it("dividers follow the new list", function()
+    local sb, dd = setup({ Options = { "A", { Divider = true }, "B" } })
+    sb.Open()
+    local pop = dd()
+    sb.SetOptions({ "A", { Divider = true }, "B", { Divider = true }, "C" })
+    local divs = {}
+    for _, c in ipairs(pop:FindFirstChild("List"):GetChildren()) do
+      if c.Name == "Divider" then divs[#divs + 1] = c.LayoutOrder end
+    end
+    table.sort(divs)
+    h.expect(#divs).toBe(2)
+    h.expect(divs[1]).toBe(2)
+    h.expect(divs[2]).toBe(4)
+    h.expect(rowFor(pop, "C").LayoutOrder).toBe(5)
+    sb.Close()
+  end)
+
+  h.it("two options with the same Value keep two rows", function()
+    local sb, dd = setup({ Options = { "A", "B" } })
+    sb.Open()
+    sb.SetOptions({ "A", "A", "B" })
+    h.expect(#rows(dd())).toBe(3)
+    sb.SetOptions({ "A", "B" })
+    h.expect(#rows(dd())).toBe(2)
+    sb.Close()
+  end)
+
+  h.it("a list that outgrows its popover grows it in place and keeps the search query", function()
+    local sb, dd = setup({ Options = { "A", "B" }, Searchable = true })
+    sb.Open()
+    local pop = dd()
+    local before = pop.Size.Y.Offset
+    local input = pop:FindFirstChild("Search"):FindFirstChild("Input")
+    input.Text = "b"
+    input:GetPropertyChangedSignal("Text"):Fire()
+    local opts = {}
+    for i = 1, 12 do opts[i] = (i % 2 == 0) and ("b" .. i) or ("a" .. i) end
+    sb.SetOptions(opts)
+    h.expect(dd()).toBe(pop)
+    h.expect(pop.Size.Y.Offset > before).toBeTruthy()
+    h.expect(#rows(pop)).toBe(12)
+    h.expect(input.Text).toBe("b")
+    h.expect(rowFor(pop, "a1").Visible).toBe(false)
+    h.expect(rowFor(pop, "b2").Visible).toBe(true)
+    sb.Close()
+  end)
+
+  h.it("a short list that crosses the search threshold gets its search box", function()
+    local sb, dd = setup({ Options = { "A", "B", "C" } })
+    sb.Open()
+    h.expect(dd():FindFirstChild("Search")).toBeNil()
+    sb.SetOptions({ "A", "B", "C", "D", "E", "F", "G", "H" })
+    h.expect(dd():FindFirstChild("Search") ~= nil).toBeTruthy()
+    h.expect(#rows(dd())).toBe(8)
+    sb.Close()
+  end)
+
+  h.it("a click on a reused row still picks its value", function()
+    local sb, dd = setup({ Options = { "A", "B" }, Default = "A" })
+    sb.Open()
+    sb.SetOptions({ "B", "A" })
+    rowFor(dd(), "B").MouseButton1Click:Fire()
+    h.expect(sb.GetValue()).toBe("B")
+  end)
+
+  local function collector()
+    local c = { fns = {} }
+    function c.AccentReg(fn)
+      c.fns[#c.fns + 1] = fn
+      return function() for i, f in ipairs(c.fns) do if f == fn then table.remove(c.fns, i); break end end end
+    end
+    function c.reskin() local snap = {}; for i, f in ipairs(c.fns) do snap[i] = f end; for _, f in ipairs(snap) do f("mode") end end
+    return c
+  end
+
+  h.it("a valueless option (an 'Any' row) is ticked while nothing is picked, and a re-skin agrees", function()
+    local reg = collector()
+    local sb, dd = setup({ AllowNone = true, AccentReg = reg.AccentReg,
+      Options = { { Text = "Any" }, { Value = "a", Text = "A" } } })
+    sb.SetValue(nil)
+    sb.Open()
+    local pop = dd()
+    local any
+    for _, o in ipairs(rows(pop)) do if o:FindFirstChild("OptLabel").Text == "Any" then any = o end end
+    h.expect(any:FindFirstChild("Check").Visible).toBe(true)
+    h.expect(any.BackgroundTransparency).toBe(0)
+    reg.reskin()
+    h.expect(any:FindFirstChild("Check").Visible).toBe(true)
+    sb.SetValue("a")
+    h.expect(any:FindFirstChild("Check").Visible).toBe(false)
+    reg.reskin()
+    h.expect(any:FindFirstChild("Check").Visible).toBe(false)
+    sb.SetOptions({ { Text = "Any" }, { Value = "a", Text = "A" }, { Value = "b", Text = "B" } })
+    h.expect(any.Parent ~= nil).toBeTruthy()             -- the valueless row is kept, not rebuilt
+    sb.Close()
+  end)
+
+  h.it("a re-skin after a sync repaints the rows and dividers that the sync added", function()
+    local reg = collector()
+    local t = R.Theme.new({})
+    local sb, dd = setup({ Theme = t, AccentReg = reg.AccentReg, Options = { "A", "B" } })
+    sb.Open()
+    local pop = dd()
+    sb.SetOptions({ "A", { Divider = true }, "B", "C" })
+    R.Theme.applyMode(t, "light")
+    reg.reskin()
+    local light = R.Theme.PALETTES.light
+    for _, c in ipairs(pop:FindFirstChild("List"):GetChildren()) do
+      if c.Name == "Divider" then h.expect(c.BackgroundColor3).toBe(light.border) end
+      if c.Name == "Opt" then h.expect(c:FindFirstChild("OptLabel").TextColor3).toBe(light.foreground) end
+    end
+    sb.Close()
+  end)
+
+  h.it("a resize stops the entrance slide so it cannot carry the popover back", function()
+    local sb, dd = setup({ Options = { "A", "B" }, Searchable = true })
+    h.mock.resetTweens()
+    sb.Open()
+    local pop = dd()
+    local slide
+    for _, tw in ipairs(h.mock.tweensFor(pop)) do if tw.Goal.Position ~= nil then slide = tw end end
+    h.expect(slide ~= nil).toBeTruthy()
+    local opts = {}
+    for i = 1, 12 do opts[i] = "o" .. i end
+    sb.SetOptions(opts)
+    h.expect(slide.cancelled).toBe(true)
+    sb.Close()
+  end)
+
+  h.it("a popover built while loading is rebuilt with rows, never synced into the skeleton", function()
+    local sb, dd = setup({ Options = { "A", "B" }, Loading = true })
+    sb.Open()
+    h.expect(dd():FindFirstChild("List"):FindFirstChild("Loading") ~= nil).toBeTruthy()
+    R.Safe._setCapabilityCheck(function() return false end)
+    sb.SetLoading(false)                                 -- the rebuild is queued, loading is already off
+    R.Safe._setCapabilityCheck(nil)
+    sb.SetOptions({ "A", "B", "C" })                     -- runs before the queued rebuild lands
+    local list = dd():FindFirstChild("List")
+    h.expect(list:FindFirstChild("Loading")).toBeNil()
+    h.expect(#rows(dd())).toBe(3)
+    h.mock.stepHeartbeat(0)
+    h.expect(#rows(dd())).toBe(3)
+    sb.Close()
+  end)
+
+  h.it("an off-thread SetOptions lands on the next Heartbeat with the same in-place update", function()
+    local sb, dd = setup({ Options = { "A", "B" } })
+    sb.Open()
+    local pop = dd()
+    local ra = rowFor(pop, "A")
+    R.Safe._setCapabilityCheck(function() return false end)
+    sb.SetOptions({ "A", "C" })
+    h.expect(rowFor(pop, "C")).toBeNil()                -- queued, not applied yet
+    R.Safe._setCapabilityCheck(nil)
+    h.mock.stepHeartbeat(0)
+    h.expect(rowFor(pop, "A")).toBe(ra)
+    h.expect(rowFor(pop, "C") ~= nil).toBeTruthy()
+    h.expect(rowFor(pop, "B")).toBeNil()
+    sb.Close()
+  end)
+end)
+
 h.run()

@@ -126,6 +126,8 @@ local function newInstance(cls)
     end,
     __newindex = function(_, k, v)
       validateProp(props.ClassName, k)
+      -- every property write, so a test can compare what two code paths cost
+      if M.mock then M.mock.writes = (M.mock.writes or 0) + 1 end
       if k == "Parent" then
         if props.Parent and props.Parent.__removeChild then props.Parent.__removeChild(inst) end
         props.Parent = v
