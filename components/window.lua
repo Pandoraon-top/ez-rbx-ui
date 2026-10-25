@@ -266,9 +266,13 @@ function Window.new(config)
   local function controlFrame(c) return c.Frame end
   local function searchFrame(s) return s.frame end
   local lockables, lockMark = {}, 0
+  -- LockAll is sticky: a control built later (a lazy tab's first visit) comes up locked too, so a
+  -- hub that gates the whole window while it works cannot be bypassed by opening another tab.
+  local lockedAll = false
   local function registerControl(c)
     lockables[#lockables + 1] = c
     lockMark = grown(lockables, lockMark, controlFrame)
+    if lockedAll and c.SetLocked then c.SetLocked(true) end
     return function() removeFrom(lockables, c) end
   end
 
@@ -856,6 +860,8 @@ function Window.new(config)
   local tabEntries = {}
   local groups = {}
   local searchIndex, searchMark = {}, 0 -- { entry = tabEntry, frame = controlFrame, text = lowercased }
+  local activeQuery = ""   -- the search in force (lower-cased), re-applied to pages built later
+  local activateGen = 0    -- bumped per tab activation; a stale one (its Build yielded) gives up
   local sidebarOrder = 0
   local function nextSidebarOrder() sidebarOrder = sidebarOrder + 1; return sidebarOrder end
 
@@ -877,7 +883,17 @@ function Window.new(config)
       searchMark = grown(searchIndex, searchMark, searchFrame)
       return function() removeFrom(searchIndex, rec) end
     end
+    tabOpts.IsClosed = function() return closed end
+    -- a page built while a search is in force is filtered like the pages that were there already
+    tabOpts.OnBuilt = function() if activeQuery ~= "" then api:SearchTabs(activeQuery) end end
     tabOpts.OnActivate = function(selectedTab)
+      -- Built BEFORE anything changes: a Build that yields (a fetch) then only delays the switch,
+      -- with the current page still showing, instead of leaving the window empty and half-switched.
+      -- A second click during that wait wins -- this activation gives up when it resumes.
+      activateGen = activateGen + 1
+      local gen = activateGen
+      selectedTab:EnsureBuilt()
+      if gen ~= activateGen then return end
       Overlay.closeAll()
       local newIndex = selectedIndex
       for i, t in ipairs(tabs) do if t == selectedTab then newIndex = i break end end
@@ -894,8 +910,10 @@ function Window.new(config)
     entry.button = tab.Button
     tabs[#tabs + 1] = tab
     tabEntries[#tabEntries + 1] = entry
+    -- The first tab is selected at once, which runs its Build: user code that may itself AddTab,
+    -- so the entry is returned rather than read back from the end of the list.
     if #tabs == 1 then tab:Select(1); selectedIndex = 1; moveIndicatorTo(tab.Button) end
-    return tab
+    return tab, entry
   end
 
   function api:AddTab(o)
@@ -920,8 +938,8 @@ function Window.new(config)
     function group:AddTab(o)
       o = o or {}
       o.LayoutOrder = nextSidebarOrder()
-      local tab = addTab(o)
-      self._entries[#self._entries + 1] = tabEntries[#tabEntries]
+      local tab, entry = addTab(o)
+      self._entries[#self._entries + 1] = entry
       return tab
     end
     return group
@@ -929,6 +947,7 @@ function Window.new(config)
 
   function api:SearchTabs(query)
     query = (query or ""):lower()
+    activeQuery = query
     prune(searchIndex, searchFrame)
     -- 1) component-level (full text): show only matching control rows
     for _, s in ipairs(searchIndex) do
@@ -1187,10 +1206,12 @@ function Window.new(config)
 
   function api:GetThemer() return themer end
   function api:LockAll()
+    lockedAll = true
     prune(lockables, controlFrame)
     for _, c in ipairs(lockables) do if c.SetLocked then c.SetLocked(true) end end
   end
   function api:UnlockAll()
+    lockedAll = false
     prune(lockables, controlFrame)
     for _, c in ipairs(lockables) do if c.SetLocked then c.SetLocked(false) end end
   end

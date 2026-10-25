@@ -108,6 +108,8 @@ See [`example/main.lua`](example/main.lua) for a full playground (`make run` to 
 
 **Tab groups & search:** `local g = Window:AddTabGroup("Main"); g:AddTab({...})` adds a sidebar category. The built-in sidebar search filters tabs **and** their controls by text (full-text); `Window:SearchTabs(query)` does it programmatically.
 
+**Lazy tabs:** `Window:AddTab({ Name = "Pets", Build = function(tab) tab:AddToggle({...}) end })` builds the page on its first visit and keeps it — a ten-page hub then builds one page at boot instead of ten. `tab:EnsureBuilt()` / `tab:IsBuilt()` for code that needs a page early; the sidebar search sees a lazy page once it is built.
+
 ---
 
 ## Controls

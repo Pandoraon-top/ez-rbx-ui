@@ -100,8 +100,23 @@ tab:AddButton({ Text = "Run", Icon = "play", Callback = function() end })
 |---|---|---|
 | `Name` | `string` | Tab label shown in the sidebar |
 | `Icon` | `string` | Lucide icon name (see `reference/icons.md`) |
+| `Build` | `function(tab)` | Lazy page: runs once on the tab's first visit to add its controls. Use it for pages the player may not open every session — boot then builds the first page only |
 
-The returned tab exposes the full `Add*` control API — see `reference/controls.md`.
+The returned tab exposes the full `Add*` control API — see `reference/controls.md` — plus
+`IsSelected()`, `IsBuilt()` and `EnsureBuilt()` (runs a pending `Build` without selecting; returns
+the tab). With `Build`: keep the handles you need inside the builder (or capture them into
+upvalues); do not yield inside it (no `task.wait`/`HttpGet` — fetch before, or use a control's
+`LoadOptions`); the first tab is auto-selected so its `Build` runs at once; the sidebar search
+sees a lazy page's controls once it is built (a live query is applied to it then);
+`ResetConfiguration` and `LockAll` cover unbuilt pages; a builder that throws leaves a
+"Tab failed to build: <error>" paragraph in the page and is not retried.
+
+```lua
+local pets = Window:AddTab({ Name = "Pets", Icon = "paw-print", Build = function(tab)
+  tab:AddToggle({ Text = "Auto Feed", Flag = "autofeed", Callback = feed })
+  tab:AddSelectBox({ Text = "Pet", Options = petList, Flag = "pet" })
+end })
+```
 
 ---
 

@@ -64,6 +64,12 @@ local tab = Window:AddTab({ Name = "Home", Icon = "home" })
 |---|---|---|
 | `Name` | `string` | Tab label shown in the sidebar |
 | `Icon` | `string` | Lucide icon name (see [Icons](/guide/icons)) |
+| `Build` | `function(tab)` | Lazy page: called once, on the tab's first visit, to add its controls (see [Lazy tabs](/guide/window-and-tabs#lazy-tabs)) |
+
+A tab also exposes `IsSelected()`, `IsBuilt()` and `EnsureBuilt()` — the last runs a pending
+`Build` without selecting the tab and returns the tab, for code that needs a page's handles early.
+`Build` must not yield; a builder that throws leaves a "Tab failed to build" paragraph in the page
+and is not run again.
 
 ### `AddTabGroup(name)`
 
