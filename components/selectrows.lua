@@ -281,6 +281,16 @@ function List:syncSelection()
   end
 end
 
+-- Rest every slot's pointer state: hover tints back to rest, press latches voided. Called when
+-- the list leaves the screen with the pointer possibly still on a row (the popover parks on
+-- Close, and the engine fires no MouseLeave for an instance pulled from the tree).
+function List:settle()
+  for _, s in ipairs(self.slots) do
+    s.pressed = nil
+    if s.hover and s.hover.settle then s.hover.settle() end
+  end
+end
+
 -- Every colour from the live palette, plus the selection (the themer replay).
 function List:repaint()
   local theme, isPicked = self.theme, self.ctx.picked()

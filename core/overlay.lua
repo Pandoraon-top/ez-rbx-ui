@@ -117,6 +117,13 @@ function Overlay.mount(element)
   return element
 end
 
+-- Parked registry: a component that keeps a closed popover DETACHED for reuse (selectbox) hands
+-- its drop fn here. A detached frame is not a descendant of the layer, so reset() — the window's
+-- teardown — would otherwise never reach it and the parked tree would outlive the window.
+local parked = {}
+function Overlay.trackParked(dropFn) parked[dropFn] = true; return dropFn end
+function Overlay.untrackParked(dropFn) parked[dropFn] = nil end
+
 -- Popover registry: components register their Close fn so the window can close
 -- every open popover at once (e.g. on drag/resize/minimize/shutdown).
 function Overlay.trackPopover(closeFn) popovers[closeFn] = true; ensureCatcher(); return closeFn end
@@ -185,6 +192,8 @@ end
 
 function Overlay.reset()
   if layer then pcall(function() layer:Destroy() end) end
+  local drops = parked; parked = {}
+  for fn in pairs(drops) do pcall(fn) end   -- parked (detached) popovers die with the overlay
   layer = nil; owner = nil; root = nil; catcher = nil; popovers = {}
   uiScale = DEFAULT_SCALE; dialogDepth = 0
 end

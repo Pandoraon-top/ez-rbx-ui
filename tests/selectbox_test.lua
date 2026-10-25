@@ -919,7 +919,8 @@ h.describe("selectbox", function()
     sb.Filter("")
     h.expect(empty.Visible).toBe(false)
     sb.Close()
-    h.expect(empty.Parent).toBeNil()                   -- dies with the popover, like every other child
+    h.expect(dd.Parent).toBeNil()                      -- leaves the tree with the (parked) popover
+    h.expect(empty.Parent).toBe(dd)                    -- ...riding along for the next Open
   end)
   h.it("the search box drives the empty block through the live filter (3.4)", function()
     local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
@@ -1511,6 +1512,286 @@ h.describe("selectbox: a long list builds only the rows in view", function()
     h.expect(rowFor(pop, "pet101") ~= nil).toBeTruthy()
     sb.Close()
     list:GetPropertyChangedSignal("CanvasPosition"):Fire()   -- disconnected: nothing happens
+  end)
+end)
+
+h.describe("selectbox: a reopened dropdown revives the parked popover instead of rebuilding", function()
+  local function setup(extra)
+    local gui = h.roblox.Instance.new("ScreenGui"); R.Overlay.reset()
+    local root = R.Overlay.get(gui); root.AbsoluteSize = h.roblox.Vector2.new(600, 800)
+    local o = { Parent = Create("Frame", {}) }
+    for k, v in pairs(extra or {}) do o[k] = v end
+    local sb = SelectBox.new(o)
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(50, 100)
+    sb.Frame.AbsoluteSize = h.roblox.Vector2.new(200, 38)
+    local function dd() for _, c in ipairs(root:GetChildren()) do if c.Name == "SelectDropdown" then return c end end end
+    return sb, dd, root
+  end
+  local function pets(n)
+    local t = {}
+    for i = 1, n do t[i] = { Value = "pet" .. i, Text = "Cat " .. i } end
+    return t
+  end
+  local function rowFor(dd, v)
+    for _, o in ipairs(dd:FindFirstChild("List"):GetChildren()) do
+      if o.Name == "Opt" and o.Visible ~= false and o:GetAttribute("OptValue") == v then return o end
+    end
+  end
+
+  h.it("close detaches the popover (contract: gone from the overlay) but keeps it alive", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    sb.Close()
+    h.expect(dd()).toBeNil()             -- a closed box leaves nothing in the overlay root
+    h.expect(first.Parent).toBeNil()     -- detached, not destroyed: Destroy would drop the children
+    h.expect(first:FindFirstChild("List") ~= nil).toBeTruthy()
+  end)
+
+  h.it("reopening mounts the SAME popover back, for a fraction of the build writes", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    sb.Close()
+    h.mock.writes = 0
+    sb.Open()
+    local reopenWrites = h.mock.writes
+    h.expect(dd()).toBe(first)           -- the parked frame, not a rebuild
+    h.expect(reopenWrites < 100).toBeTruthy()
+    h.expect(rowFor(first, "pet1") ~= nil).toBeTruthy()
+    sb.Close()
+  end)
+
+  h.it("a reopened popover is placed for where the control is NOW", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    sb.Close()
+    sb.Frame.AbsolutePosition = h.roblox.Vector2.new(120, 200)
+    sb.Open()
+    h.expect(dd()).toBe(first)
+    h.expect(first.Position.X.Offset).toBe(120)
+    h.expect(first.Position.Y.Offset).toBe(242)   -- 200 + 38 + 4 gap
+    sb.Close()
+  end)
+
+  h.it("a SetValue while closed ticks the revived rows", function()
+    local sb, dd = setup({ Options = pets(300), Default = "pet1" })
+    sb.Open(); sb.Close()
+    sb.SetValue("pet3")
+    sb.Open()
+    h.expect(rowFor(dd(), "pet3"):FindFirstChild("Check").Visible).toBe(true)
+    h.expect(rowFor(dd(), "pet1"):FindFirstChild("Check").Visible).toBe(false)
+    sb.Close()
+  end)
+
+  h.it("a same-shape SetOptions while closed re-binds the revived rows in place", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    sb.Close()
+    local renamed = pets(300); renamed[1].Text = "Dog 1"
+    sb.SetOptions(renamed)
+    sb.Open()
+    h.expect(dd()).toBe(first)
+    h.expect(rowFor(first, "pet1"):FindFirstChild("OptLabel").Text).toBe("Dog 1")
+    sb.Close()
+  end)
+
+  h.it("a SetOptions that changes the popover shape while closed rebuilds it", function()
+    local sb, dd = setup({ Options = { "A", "B" } })   -- short: no search box
+    sb.Open()
+    local first = dd()
+    h.expect(first:FindFirstChild("Search")).toBeNil()
+    sb.Close()
+    sb.SetOptions(pets(300))                           -- crosses the search threshold
+    sb.Open()
+    local second = dd()
+    h.expect(second == first).toBe(false)
+    h.expect(second:FindFirstChild("Search") ~= nil).toBeTruthy()
+    h.expect(first.Parent).toBeNil()                   -- the stale cache was dropped
+    sb.Close()
+  end)
+
+  h.it("the search query does not survive a close", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    local input = first:FindFirstChild("Search"):FindFirstChild("Input")
+    input.Text = "cat 2"
+    input:GetPropertyChangedSignal("Text"):Fire()   -- the engine fires this on the write
+    h.expect(rowFor(first, "pet1")).toBeNil()
+    sb.Close()
+    sb.Open()
+    h.expect(dd()).toBe(first)
+    h.expect(input.Text).toBe("")
+    h.expect(rowFor(first, "pet1") ~= nil).toBeTruthy()
+    sb.Close()
+  end)
+
+  h.it("Filter while closed is a no-op: the next Open still starts clean", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open(); local first = dd(); sb.Close()
+    sb.Filter("cat 2")
+    sb.Open()
+    h.expect(dd()).toBe(first)
+    h.expect(rowFor(first, "pet1") ~= nil).toBeTruthy()
+    sb.Close()
+  end)
+
+  h.it("a click landing on a parked row (the exit fold) picks nothing", function()
+    local picked
+    local sb, dd = setup({ Options = pets(300), Default = "pet1", Callback = function(v) picked = v end })
+    sb.Open()
+    local row = rowFor(dd(), "pet2")
+    sb.Close()
+    row.MouseButton1Down:Fire(); row.MouseButton1Click:Fire()   -- still on screen while folding
+    h.expect(sb.GetValue()).toBe("pet1")
+    h.expect(picked).toBeNil()
+  end)
+
+  h.it("hover state does not survive the park: a revived row rests", function()
+    local sb, dd = setup({ Options = pets(300), Default = "pet1" })
+    sb.Open()
+    local first = dd()
+    local row = rowFor(first, "pet2")
+    row.MouseEnter:Fire(0, 0)
+    h.expect(row.BackgroundTransparency < 1).toBeTruthy()   -- hover wash on
+    sb.Close()                                              -- no MouseLeave for a detached frame
+    sb.Open()
+    h.expect(rowFor(first, "pet2").BackgroundTransparency).toBe(1)   -- back at its rest
+    sb.Close()
+  end)
+
+  h.it("Overlay.reset (the window teardown) destroys the parked popover", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open(); local first = dd(); sb.Close()
+    R.Overlay.reset()
+    h.expect(first:FindFirstChild("List")).toBeNil()   -- dropped, not orphaned off-tree
+  end)
+
+  h.it("a reopened popover starts at the top again", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    local list = first:FindFirstChild("List")
+    list.CanvasPosition = h.roblox.Vector2.new(0, 100 * 28)
+    list:GetPropertyChangedSignal("CanvasPosition"):Fire()
+    sb.Close()
+    sb.Open()
+    h.expect(list.CanvasPosition.Y).toBe(0)
+    h.expect(rowFor(first, "pet1") ~= nil).toBeTruthy()
+    h.expect(rowFor(first, "pet101")).toBeNil()
+    sb.Close()
+  end)
+
+  h.it("only one popover stays parked: a second box parking drops the first", function()
+    local sbA, ddA = setup({ Options = pets(300) })
+    sbA.Open()
+    local frameA = ddA()
+    sbA.Close()
+    local sbB = SelectBox.new({ Parent = Create("Frame", {}), Options = pets(300) })
+    sbB.Frame.AbsolutePosition = h.roblox.Vector2.new(50, 100)
+    sbB.Frame.AbsoluteSize = h.roblox.Vector2.new(200, 38)
+    sbB.Open(); sbB.Close()
+    sbA.Open()
+    h.expect(ddA() == frameA).toBe(false)   -- A's cache was dropped when B parked
+    sbA.Close()
+  end)
+
+  h.it("a palette change while parked repaints the revived popover", function()
+    local t = R.Theme.new({})
+    local sb, dd = setup({ Options = pets(300), Theme = t })
+    sb.Open()
+    local first = dd()
+    sb.Close()
+    R.Theme.applyMode(t, "light")   -- no registration while parked: nothing repaints it here
+    sb.Open()
+    local light = R.Theme.PALETTES.light
+    h.expect(dd()).toBe(first)
+    h.expect(first.BackgroundColor3).toBe(light.card)
+    h.expect(rowFor(first, "pet1"):FindFirstChild("OptLabel").TextColor3).toBe(light.foreground)
+    sb.Close()
+    R.Theme.applyMode(t, "dark")
+  end)
+
+  h.it("a scale change while parked rebuilds for the new scale", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    sb.Close()
+    R.Overlay.setScale(1.3)
+    sb.Open()
+    local second = dd()
+    h.expect(second == first).toBe(false)
+    h.expect(second:FindFirstChildOfClass("UIScale").Scale).toBe(1.3)
+    sb.Close()
+    R.Overlay.setScale(1)
+  end)
+
+  h.it("a field width change while parked rebuilds for the new width", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    sb.Close()
+    sb.Frame.AbsoluteSize = h.roblox.Vector2.new(320, 38)
+    sb.Open()
+    local second = dd()
+    h.expect(second == first).toBe(false)
+    h.expect(second.Size.X.Offset).toBe(320)
+    sb.Close()
+  end)
+
+  h.it("a loading popover is never parked", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.SetLoading(true)
+    sb.Open()
+    local first = dd()
+    h.expect(first:FindFirstChild("List"):FindFirstChild("Loading") ~= nil).toBeTruthy()
+    sb.Close()
+    sb.SetLoading(false)
+    sb.Open()
+    h.expect(dd() == first).toBe(false)
+    sb.Close()
+  end)
+
+  h.it("a SetLoading while parked rebuilds the skeleton popover on the next Open", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    sb.Close()
+    sb.SetLoading(true)
+    sb.Open()
+    local second = dd()
+    h.expect(second == first).toBe(false)
+    h.expect(second:FindFirstChild("List"):FindFirstChild("Loading") ~= nil).toBeTruthy()
+    sb.Close()
+    sb.SetLoading(false)
+  end)
+
+  h.it("Destroy drops the parked popover", function()
+    local sb, dd = setup({ Options = pets(300) })
+    sb.Open()
+    local first = dd()
+    sb.Close()
+    sb.Destroy()
+    h.expect(first:FindFirstChild("List")).toBeNil()   -- destroyed, not just detached
+  end)
+
+  h.it("while parked, a themer replay paints nothing (the registration is released)", function()
+    local reg = { fns = {} }
+    function reg.AccentReg(fn) reg.fns[#reg.fns + 1] = fn; return function()
+      for i, f in ipairs(reg.fns) do if f == fn then table.remove(reg.fns, i); break end end
+    end end
+    local sb, dd = setup({ Options = pets(300), AccentReg = reg.AccentReg })
+    h.expect(#reg.fns).toBe(1)
+    sb.Open()
+    h.expect(#reg.fns).toBe(2)
+    sb.Close()
+    h.expect(#reg.fns).toBe(1)   -- parked popover holds no registration
+    sb.Open()
+    h.expect(#reg.fns).toBe(2)   -- revived popover re-registers
+    sb.Close()
   end)
 end)
 
