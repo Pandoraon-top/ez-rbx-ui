@@ -131,6 +131,12 @@ function Config:Reset(opts)
     self.values[flag] = d
     if self.setters[flag] then pcall(self.setters[flag], d) end
   end
+  -- A flag whose control has not registered yet (a lazy tab's page not visited) has no default
+  -- here; dropping its saved value lets the control take its own default when it is built,
+  -- instead of the reset re-persisting the old value below.
+  for flag in pairs(self.values) do
+    if self.defaults[flag] == nil then self.values[flag] = nil end
+  end
   if opts.ClearFile and type(delfile) == "function" and hasFS() and isfile(self:_path()) then
     pcall(delfile, self:_path())
   else

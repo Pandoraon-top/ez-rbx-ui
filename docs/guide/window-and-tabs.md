@@ -212,6 +212,34 @@ tab:AddButton({ Text = "Run", Callback = function() print("clicked") end })
 
 `Icon` accepts any Lucide icon name (see [Icons](/guide/icons)).
 
+## Lazy tabs
+
+A hub with ten pages of controls builds all ten while the player waits — on a phone that is the
+freeze between running the script and seeing the window, and every one of those controls then
+lives in the GUI tree for the whole session. Give a tab a `Build` function instead and its page is
+built once, on the tab's first visit, then kept:
+
+```lua
+local pets = Window:AddTab({ Name = "Pets", Icon = "paw-print", Build = function(tab)
+  tab:AddToggle({ Text = "Auto Feed", Flag = "autofeed", Callback = feed })
+  tab:AddSelectBox({ Text = "Pet", Options = petList, Flag = "pet" })
+end })
+```
+
+The first tab is selected the moment it is added, so its `Build` runs at once; the others run when
+the player opens them, or when your code calls `tab:EnsureBuilt()` (builds without selecting and
+returns the tab). `tab:IsBuilt()` tells you which it is. Controls built this way read the saved
+config like any other, so a lazy page comes up with the player's values; `ResetConfiguration` and
+`LockAll` reach the pages that are not built yet as well (a reset drops their saved values, a lock
+applies when they are built). Three things to know: keep the handles you need inside the builder
+(or capture them into variables it assigns); the sidebar search finds a page's controls only once
+that page has been built (a search in force when the page is built is applied to it); and `Build`
+runs inside the tab switch, so it should not yield — fetch what it needs before, or let a control
+do the fetching (`LoadOptions` on a select box). If it does yield, the current page stays up until
+it returns, and a tab the player clicked meanwhile wins. A builder that throws leaves a "Tab failed
+to build" line in the page, with the error, and is not run again (the rows it added before the
+error are already there; a retry would duplicate them).
+
 ## Tab Groups
 
 Group related tabs under a named sidebar category with `Window:AddTabGroup(name)`. The group object exposes the same `AddTab` method.

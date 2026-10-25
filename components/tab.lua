@@ -1,6 +1,7 @@
 -- Deps injected via Init(R) (bundler cannot rewrite require() inside embedded modules).
 local Tab = {}
 local Create, DefaultTheme, Animate, Maid, Icons, Accordion, Host, REG, Safe, Recipes, Device
+local warn = warn or function() end   -- Roblox global; no-op fallback under the headless test mock
 
 function Tab.Init(R)
   Create = R.Create; DefaultTheme = R.Theme; Animate = R.Animate
@@ -14,6 +15,11 @@ function Tab.new(opts)
   local maid = Maid.new()
   local order = 0
   local selected = false
+  -- Build = function(tab): the page is built on the tab's first Select (or EnsureBuilt) and then
+  -- kept, so a hub with ten pages pays for one at boot and for the others as they are visited,
+  -- while a tab switch still costs no rebuild. Without Build the tab is built from birth: the
+  -- caller adds its controls directly, as before.
+  local built = type(opts.Build) ~= "function"
 
   -- Label + icon share one tint role: structural (muted) at rest, structuralActive (foreground)
   -- once selected. Resolved by token NAME at paint time so SetMode/SetAccent re-tint by name.
@@ -122,6 +128,29 @@ function Tab.new(opts)
   local api = { Button = button, Content = content, Maid = maid }
 
   function api:IsSelected() return selected end
+  function api:IsBuilt() return built end
+
+  -- Run the page's Build once. `built` flips FIRST, so a builder that selects its own tab can
+  -- never recurse -- and it stays flipped after a failure on purpose: the rows added before the
+  -- error are already in the page, so a retry would duplicate them. The failure is reported where
+  -- the page would have been (under pcall too: the cause that broke Build -- a thread without the
+  -- GUI capability, say -- breaks the paragraph as well, and that must not escape into the tab
+  -- switch), so the player sees why the tab is empty instead of a blank panel.
+  function api:EnsureBuilt()
+    if built then return api end
+    if opts.IsClosed and opts.IsClosed() then return api end   -- a closed window builds nothing
+    built = true
+    local ok, err = pcall(opts.Build, api)
+    if not ok then
+      warn("[EzUI] Tab '" .. tostring(opts.Name or "Tab") .. "' Build error: " .. tostring(err))
+      pcall(api.AddParagraph, api, "Tab failed to build: " .. tostring(err))
+    end
+    if opts.OnBuilt then pcall(opts.OnBuilt, api) end   -- the window re-applies a live search
+    return api
+  end
+  -- Select/Deselect bump this; a Select that waited on a yielding Build gives up when another
+  -- switch happened meanwhile, instead of showing a second page on top of the current one.
+  local selectGen = 0
 
   -- vertical carousel: the incoming page slides in from sign*panelH, the outgoing exits to
   -- -sign*panelH, both in sync and on the SAME curve (EASING.smooth) — so the two pages move as
@@ -132,6 +161,12 @@ function Tab.new(opts)
   local function slides() return opts.Transition ~= "none" and Animate.isEnabled() end
 
   function api:Select(dir)
+    selectGen = selectGen + 1
+    local gen = selectGen
+    api:EnsureBuilt()   -- a lazy page is built on its first visit, before it is shown
+    if gen ~= selectGen then return end   -- Build yielded and the window moved on: stale switch
+    -- Just-built rows have no AbsoluteContentSize yet (the engine lays out on the next frame), so
+    -- the explicit syncCanvas below writes padding only; the layout signal above corrects it.
     selected = true
     if not slides() then
       content.Position = UDim2.new(0, 0, 0, 0)
@@ -151,6 +186,7 @@ function Tab.new(opts)
   end
 
   function api:Deselect(dir)
+    selectGen = selectGen + 1
     if not selected then content.Visible = false; return end  -- already inactive: nothing to animate out
     selected = false
     if not slides() then
