@@ -57,7 +57,11 @@ upward when it flipped above it — so the direction of the movement tells you w
 The caret at the right of the field turns over at the same time, pointing up for as long as there
 is a list attached to it, and turns back on close. Closing reverses the
 growth: the dropdown is gone as far as your code is concerned the moment `Close()` returns, while
-the detached frame shrinks away and is destroyed once that finishes. The slide distance is
+the detached frame shrinks away. The library keeps the most recently closed popover (one across
+all select boxes) parked off-tree instead of destroying it, so reopening the same picker costs a
+handful of property writes instead of a rebuild; your code cannot tell the difference — a closed
+popover is never in the GUI tree, reopens with the filter cleared and the list scrolled to the
+top, and reflects any options, selection or theme changes made while it was closed. The slide distance is
 `Motion.popSlide`. With animations disabled each of these lands in place instead, the turned caret
 included.
 

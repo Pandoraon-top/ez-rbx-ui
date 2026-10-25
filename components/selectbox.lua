@@ -56,6 +56,13 @@ local function popShut(frame, theme, scale, onDone)
     Animate.EASING.exit, Animate.DIR.In)
 end
 
+-- One closed popover stays PARKED library-wide: Close detaches it from the overlay (a closed box
+-- still leaves nothing in the tree) instead of destroying it, and the next Open of the same
+-- control mounts it back for a handful of writes instead of ~600 and ~90 fresh instances — the
+-- reopen hitch on a phone was the build, not the slide. Bounded to ONE so a hub full of pickers
+-- never accumulates a hidden list per control: whoever parks next evicts the previous one.
+local parkedDrop -- the drop function of the control currently holding the parked popover
+
 local function contains(arr, v) for _, x in ipairs(arr) do if x == v then return true end end return false end
 
 local function normOpt(o)
@@ -80,8 +87,10 @@ function SelectBox.new(opts)
   -- The options, normalised once per SetOptions: every pass below (labels, icon, search shape,
   -- rows) reads this instead of normalising the raw list again.
   local normed = {}
+  local optsGen = 0 -- bumped per setOptionList; the parked popover remembers the gen it holds
   local function setOptionList(o)
     normed = {}
+    optsGen = optsGen + 1
     for i, raw in ipairs(o or {}) do normed[i] = normOpt(raw) end
   end
   setOptionList(opts.Options)
@@ -109,6 +118,12 @@ function SelectBox.new(opts)
   -- Where the open popover was placed (overlay px) and where the control was then (screen px).
   local ddAt, ddAnchor
   local lastQuery = ""  -- the filter in force on the open popover, lower-cased
+  -- The popover this control parked on Close (detached, alive) and what it was built for; nil
+  -- unless the LAST close parked it (see parkedDrop at module scope).
+  local myPark
+  -- Remembered per build for park/revive: the popover's reskin closure, search input and list.
+  local ddApplySkin, ddSearchInput, ddList
+  local dropParked, parkIt -- forward: dropParked evicts the cache, parkIt is Close's cheap path
   local buildDropdown, rebuild, computePos, refresh, syncSelection, syncRows, followControl
   local onChanged = opts.Callback
 
@@ -398,6 +413,9 @@ function SelectBox.new(opts)
   local function retintRows() if ddRows then ddRows:repaint() end end
 
   local function pick(opt)
+    -- A folding/parked popover picks nothing: its rows stay on screen (and clickable) for the
+    -- length of the exit fold after Close, and teardown's `dead` flag no longer covers them.
+    if not dropdown then return end
     if multi then
       local nv = {}
       for _, x in ipairs(value) do nv[#nv + 1] = x end
@@ -428,6 +446,9 @@ function SelectBox.new(opts)
 
   -- The list re-lays the matching rows and binds only the ones in view.
   function api.Filter(query)
+    -- A closed box holds no filter (a fresh Open always starts clean), so a Filter landing while
+    -- closed — or typed into the folding search box — must not leave a stale lastQuery behind.
+    if not dropdown then return end
     query = (query or ""):lower()
     lastQuery = query
     if ddRows then ddRows:filter(query) end
@@ -486,9 +507,102 @@ function SelectBox.new(opts)
     syncEmpty()
   end
 
+  -- The palette values the parked popover was wearing. parkIt releases its themer registration
+  -- (nothing may paint a detached frame), so revive compares values instead: a SetMode /
+  -- SetAccent / SetTheme that landed in between becomes one applySkin replay on the way back in,
+  -- and an unchanged palette costs nothing.
+  local function paletteStamp()
+    local c = theme.Colors
+    return { card = c.card, surface = c.surface, fg = c.foreground, muted = c.mutedForeground,
+      border = c.border, primary = c.primary, mode = theme.Mode }
+  end
+  local function samePalette(s)
+    local n = paletteStamp()
+    return n.card == s.card and n.surface == s.surface and n.fg == s.fg and n.muted == s.muted
+      and n.border == s.border and n.primary == s.primary and n.mode == s.mode
+  end
+
+  -- Destroy this control's parked popover: eviction by another park, a shape that no longer
+  -- fits, or the control's own Destroy.
+  function dropParked()
+    if not myPark then return end
+    local p = myPark
+    myPark = nil
+    if parkedDrop == dropParked then parkedDrop = nil end
+    Overlay.untrackParked(dropParked)
+    if p.searchFocus then p.searchFocus.disconnect() end
+    if p.rows then p.rows:destroy() end
+    p.dd:Destroy()
+    if p.sh then p.sh:Destroy() end
+  end
+
+  -- Mount the parked popover back: place it for where the control is NOW, then write only what
+  -- moved while it was parked (filter, scroll, options, selection, palette). The caller already
+  -- checked that the shape it was built for (search box, height, width, scale) still fits.
+  local function revive(p)
+    myPark = nil
+    if parkedDrop == dropParked then parkedDrop = nil end
+    Overlay.untrackParked(dropParked)
+    dropdown, shadow, ddRows, emptyState = p.dd, p.sh, p.rows, p.emptyState
+    searchFocus, ddApplySkin, ddSearchInput, ddList = p.searchFocus, p.applySkin, p.searchInput, p.list
+    ddScale, ddSearchable, ddHeight, ddLoading = p.scale, p.searchable, p.height, false
+    rowCtx.viewH = p.height - (p.searchable and 34 or 4) - 4
+    if p.shut and p.shut.Cancel then p.shut:Cancel() end   -- a reopen mid-fold takes over the frame
+    local x, y, openUp = computePos(p.width, p.height, p.scale)
+    dropdown.Position = UDim2.new(0, x, 0, y)
+    ddAt, ddAnchor = { x, y }, btn.AbsolutePosition
+    -- A fresh Open carries no filter. Cleared on the LIVE state (the box's text and the list's
+    -- own query), not a park-time snapshot: typing into the still-focused box during the fold
+    -- lands after any snapshot would have been taken.
+    lastQuery = ""
+    if ddSearchInput and ddSearchInput.Text ~= "" then ddSearchInput.Text = "" end
+    if ddRows.query ~= "" then ddRows:filter("") end
+    if p.optsGen ~= optsGen then ddRows:setOptions(normed) end
+    ddRows:syncSelection()
+    if ddList.CanvasPosition and ddList.CanvasPosition.Y ~= 0 then
+      ddList.CanvasPosition = Vector2.new(0, 0)
+      ddRows:render()   -- the engine fires the CanvasPosition signal itself; the mock never does
+    end
+    if not samePalette(p.palette) and ddApplySkin then ddApplySkin() end
+    syncEmpty()
+    local overlayRoot = Overlay.peek()
+    if shadow and overlayRoot then
+      shadow.Parent = overlayRoot
+      Effects.place(shadow, x, y, p.width * p.scale, p.height * p.scale, "popover", theme)
+    end
+    posConn = btn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function() Safe.mutate(followControl) end)
+    Overlay.mount(dropdown)
+    Overlay.trackPopover(api.Close)
+    ddUnreg = (opts.AccentReg and ddApplySkin) and opts.AccentReg(ddApplySkin) or nil
+    setOpen(true)
+    ddSlide = popOpen(dropdown, theme, openUp and "up" or "down", p.scale)
+  end
+
+  -- Open's cheap path: mount the parked popover back when its shape still fits where the control
+  -- is now. Returns false (after dropping the stale park) when a fresh build is needed. Only
+  -- api.Open calls this — a rebuild() replaces an OPEN popover in place and must never revive,
+  -- or a closed control could be popped open as a side effect.
+  local function tryRevive()
+    if not myPark then return false end
+    local p = myPark
+    local pShape, pH = popoverShape()
+    local pSz = btn.AbsoluteSize or { X = 140, Y = 38 }
+    local pW = math.max(140, pSz.X or 140)
+    if not loading and pShape == p.searchable and pH == p.height and pW == p.width
+      and Overlay.scale() == p.scale and Overlay.peek() == p.root
+      and p.dd:FindFirstChild("List") ~= nil then
+      revive(p)
+      return true
+    end
+    dropParked()   -- the world moved while it was parked: build fresh
+    return false
+  end
+
   -- `query`: the search text to carry over when the popover is rebuilt (a fresh Open passes none).
   function buildDropdown(query)
+    if myPark then dropParked() end   -- a build always replaces the cache (Open tried revive first)
     ddRows = nil
+    ddApplySkin, ddSearchInput, ddList = nil, nil, nil
     skeletons = {}
     lastQuery = ""
     local searchable, ddH = popoverShape()
@@ -610,7 +724,7 @@ function SelectBox.new(opts)
     -- box, rows) would otherwise keep the palette it was born with until the next open. Paints
     -- instantly -- a re-skin replays the current state, it is not a transition.
     local ddFrame, ddShadow = dropdown, shadow
-    ddUnreg = opts.AccentReg and opts.AccentReg(function()
+    local applySkin = (function()
       Acrylic.reskin(ddFrame, theme, { transparency = frostAlpha(theme), edge = true,
         radius = theme.Radius.md, strokeAlpha = theme.Stroke.floating })   -- fill + hairline + rim + frost
       Effects.reskin(ddShadow, theme, "shadow")        -- nil-tolerant: Effect.shadowId is '' by default
@@ -628,7 +742,9 @@ function SelectBox.new(opts)
       for _, sk in ipairs(skeletons) do sk.Frame.BackgroundColor3 = theme.Colors.surface end
       if emptyState then emptyState.reskin() end       -- 3.4 muted icon + label
       retintRows()                                     -- rows and dividers: fill, check, lead, label, description
-    end) or nil
+    end)
+    ddApplySkin, ddSearchInput, ddList = applySkin, searchInput, list
+    ddUnreg = opts.AccentReg and opts.AccentReg(applySkin) or nil
     -- a rebuilt popover keeps the query the player typed (and the filter it drives)
     if searchInput and query and query ~= "" then
       searchInput.Text = query
@@ -642,7 +758,8 @@ function SelectBox.new(opts)
 
   function api.Open()
     if disabled or dropdown then return end
-    if opts.OnOpen then opts.OnOpen(api) end
+    if opts.OnOpen then opts.OnOpen(api) end   -- may SetOptions; revive syncs via optsGen
+    if tryRevive() then return end
     buildDropdown()
   end
 
@@ -667,6 +784,7 @@ function SelectBox.new(opts)
     if searchFocus then searchFocus.disconnect(); searchFocus = nil end
     if ddRows then ddRows:destroy() end
     ddRows, lastQuery, ddSlide, ddAt, ddAnchor = nil, "", nil, nil, nil
+    ddApplySkin, ddSearchInput, ddList = nil, nil, nil   -- never parked pointing at a dead build
     Overlay.untrackPopover(api.Close)
     local function stopSkeletons() for _, sk in ipairs(sks) do sk.Stop() end end
     if not dd then stopSkeletons(); return end
@@ -681,7 +799,38 @@ function SelectBox.new(opts)
     if dropdown then teardown(true) end
     buildDropdown(query)
   end
-  function api.Close() teardown(); setOpen(false) end
+  -- Close's cheap path: detach the popover and keep it (see parkedDrop at module scope). Mirrors
+  -- teardown for everything per-open — the reposition connection, the themer registration, the
+  -- overlay tracking — but keeps the frame, the rows and the search recipe alive for the next Open.
+  function parkIt()
+    local dd, sh = dropdown, shadow
+    ddRows:settle()   -- rows leave the screen under the pointer: rest hover tints, void presses
+    local p = { dd = dd, sh = sh, rows = ddRows, searchFocus = searchFocus, applySkin = ddApplySkin,
+      searchInput = ddSearchInput, list = ddList, emptyState = emptyState, root = Overlay.peek(),
+      scale = ddScale, searchable = ddSearchable, height = ddHeight, width = dd.Size.X.Offset,
+      optsGen = optsGen, palette = paletteStamp() }
+    dropdown, shadow, ddRows, emptyState, searchFocus = nil, nil, nil, nil, nil
+    if posConn then posConn:Disconnect(); posConn = nil end
+    if ddUnreg then ddUnreg(); ddUnreg = nil end
+    lastQuery, ddSlide, ddAt, ddAnchor = "", nil, nil, nil
+    Overlay.untrackPopover(api.Close)
+    if parkedDrop then parkedDrop() end   -- one parked popover library-wide: evict the previous
+    myPark = p
+    parkedDrop = dropParked
+    Overlay.trackParked(dropParked)       -- so the window's Overlay.reset reaches the detached tree
+    -- Fold where it stands, then detach. A revive mid-fold consumes myPark first, so the late
+    -- onDone (Completed fires on Cancel too) finds p orphaned and leaves the frame alone; a
+    -- frame the overlay teardown destroyed mid-fold reads Parent == nil and is left alone too.
+    p.shut = popShut(dd, theme, p.scale, function()
+      if myPark == p and dd.Parent ~= nil then dd.Parent = nil; if sh then sh.Parent = nil end end
+    end)
+  end
+  function api.Close()
+    -- Only a popover with live rows parks: a loading skeleton is torn down as before (its shimmer
+    -- loops and deadline belong to teardown), and a second Close finds nothing and writes nothing.
+    if dropdown and ddRows and not ddLoading and not loading then parkIt() else teardown() end
+    setOpen(false)
+  end
 
   -- The control moved while its list is open. A small move (a line of text grew above it) carries
   -- the list along; a bigger one (a scroll) closes it, as a native select does -- otherwise the
@@ -701,7 +850,9 @@ function SelectBox.new(opts)
     Effects.place(shadow, x, y, sz.X.Offset * ddScale, sz.Y.Offset * ddScale, "popover", theme)
   end
 
-  function api.Destroy() api.Close(); maid:DoCleanup() end
+  -- teardown, not Close: a destroyed control must not leave its popover parked (or evict another
+  -- control's parked one on the way out).
+  function api.Destroy() teardown(true); dropParked(); setOpen(false); maid:DoCleanup() end
 
   maid:Give(btn.MouseButton1Click:Connect(function()
     if disabled then return end
